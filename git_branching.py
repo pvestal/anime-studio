@@ -1,0 +1,549 @@
+#!/usr/bin/env python3
+"""
+Git-like Branching System for Anime Storylines
+Location: /opt/tower-anime-production/git_branching.py
+
+Implements version control for anime scenes with:
+- Branch creation and management
+- Commit history tracking
+- Scene snapshots with SHA-256 hashing
+- Branch comparison and merging
+- Rollback capabilities
+- Milestone tagging
+"""
+
+import sqlite3
+import json
+import hashlib
+from datetime import datetime
+from typing import Optional, List, Dict, Any, Tuple
+from contextlib import contextmanager
+import logging
+
+logger = logging.getLogger(__name__)
+
+DB_PATH = "/opt/tower-anime-production/anime.db"
+
+@contextmanager
+def get_db():
+    """Database connection manager"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+def init_git_schema():
+    """Initialize git-like tables in database"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Branches table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS branches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                branch_name TEXT NOT NULL,
+                created_from TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                description TEXT,
+                UNIQUE(project_id, branch_name),
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
+        
+        # Commits table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS commits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                commit_hash TEXT UNIQUE NOT NULL,
+                branch_id INTEGER NOT NULL,
+                parent_hash TEXT,
+                author TEXT NOT NULL,
+                message TEXT NOT NULL,
+                scene_snapshot TEXT NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (branch_id) REFERENCES branches(id)
+            )
+        ''')
+        
+        # Tags table for milestones
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tag_name TEXT UNIQUE NOT NULL,
+                commit_hash TEXT NOT NULL,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (commit_hash) REFERENCES commits(commit_hash)
+            )
+        ''')
+        
+        # Create indexes
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_commits_branch ON commits(branch_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_commits_hash ON commits(commit_hash)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_branches_project ON branches(project_id)')
+        
+        logger.info("Git schema initialized successfully")
+
+def generate_commit_hash(branch_name: str, author: str, message: str, scene_data: Dict, timestamp: str) -> str:
+    """Generate SHA-256 hash for commit"""
+    content = f"{branch_name}{author}{message}{json.dumps(scene_data, sort_keys=True)}{timestamp}"
+    return hashlib.sha256(content.encode()).hexdigest()[:16]  # Use first 16 chars like git short hash
+
+def create_branch(
+    project_id: int,
+    new_branch: str,
+    from_branch: str = 'main',
+    from_commit: Optional[str] = None,
+    description: str = ''
+) -> Dict[str, Any]:
+    """
+    Create a new branch from an existing branch or commit
+    
+    Args:
+        project_id: Project ID
+        new_branch: Name of new branch
+        from_branch: Source branch (default: 'main')
+        from_commit: Specific commit to branch from (optional)
+        description: Branch description
+    
+    Returns:
+        Dict with branch details
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Check if project exists
+        cursor.execute('SELECT id FROM projects WHERE id = ?', (project_id,))
+        if not cursor.fetchone():
+            raise ValueError(f"Project {project_id} not found")
+        
+        # Check if branch already exists
+        cursor.execute('SELECT id FROM branches WHERE project_id = ? AND branch_name = ?', 
+                      (project_id, new_branch))
+        if cursor.fetchone():
+            raise ValueError(f"Branch '{new_branch}' already exists")
+        
+        # Create main branch if it doesn't exist
+        cursor.execute('SELECT id FROM branches WHERE project_id = ? AND branch_name = ?',
+                      (project_id, 'main'))
+        main_branch = cursor.fetchone()
+        if not main_branch and from_branch == 'main':
+            cursor.execute(
+                'INSERT INTO branches (project_id, branch_name, description) VALUES (?, ?, ?)',
+                (project_id, 'main', 'Main storyline branch')
+            )
+            logger.info(f"Created main branch for project {project_id}")
+        
+        # Create the new branch
+        created_from = from_commit if from_commit else from_branch
+        cursor.execute(
+            'INSERT INTO branches (project_id, branch_name, created_from, description) VALUES (?, ?, ?, ?)',
+            (project_id, new_branch, created_from, description)
+        )
+        
+        branch_id = cursor.lastrowid
+        
+        logger.info(f"Created branch '{new_branch}' from '{created_from}' for project {project_id}")
+        
+        return {
+            'branch_id': branch_id,
+            'branch_name': new_branch,
+            'project_id': project_id,
+            'created_from': created_from,
+            'description': description,
+            'created_at': datetime.now().isoformat()
+        }
+
+def create_commit(
+    project_id: int,
+    branch_name: str,
+    message: str,
+    author: str,
+    scene_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Create a commit with scene snapshot
+    
+    Args:
+        project_id: Project ID
+        branch_name: Branch to commit to
+        message: Commit message
+        author: Author name
+        scene_data: Scene data to snapshot
+    
+    Returns:
+        Dict with commit details including hash
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Get branch
+        cursor.execute('SELECT id FROM branches WHERE project_id = ? AND branch_name = ?',
+                      (project_id, branch_name))
+        branch = cursor.fetchone()
+        if not branch:
+            raise ValueError(f"Branch '{branch_name}' not found for project {project_id}")
+        
+        branch_id = branch[0]
+        
+        # Get parent commit (latest on branch)
+        cursor.execute(
+            'SELECT commit_hash FROM commits WHERE branch_id = ? ORDER BY timestamp DESC LIMIT 1',
+            (branch_id,)
+        )
+        parent = cursor.fetchone()
+        parent_hash = parent[0] if parent else None
+        
+        # Generate commit hash
+        timestamp = datetime.now().isoformat()
+        commit_hash = generate_commit_hash(branch_name, author, message, scene_data, timestamp)
+        
+        # Store commit
+        scene_snapshot = json.dumps(scene_data, indent=2)
+        cursor.execute(
+            '''INSERT INTO commits (commit_hash, branch_id, parent_hash, author, message, scene_snapshot, timestamp)
+               VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (commit_hash, branch_id, parent_hash, author, message, scene_snapshot, timestamp)
+        )
+        
+        logger.info(f"Created commit {commit_hash} on branch '{branch_name}'")
+        
+        return {
+            'commit_hash': commit_hash,
+            'branch_name': branch_name,
+            'parent_hash': parent_hash,
+            'author': author,
+            'message': message,
+            'timestamp': timestamp,
+            'scene_data': scene_data
+        }
+
+def get_commit_history(
+    project_id: int,
+    branch_name: str,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    """
+    Get commit history for a branch
+    
+    Args:
+        project_id: Project ID
+        branch_name: Branch name
+        limit: Maximum number of commits to return
+    
+    Returns:
+        List of commits in reverse chronological order
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Get branch
+        cursor.execute('SELECT id FROM branches WHERE project_id = ? AND branch_name = ?',
+                      (project_id, branch_name))
+        branch = cursor.fetchone()
+        if not branch:
+            raise ValueError(f"Branch '{branch_name}' not found")
+        
+        branch_id = branch[0]
+        
+        # Get commits
+        cursor.execute(
+            '''SELECT commit_hash, parent_hash, author, message, timestamp
+               FROM commits WHERE branch_id = ?
+               ORDER BY timestamp DESC LIMIT ?''',
+            (branch_id, limit)
+        )
+        
+        commits = []
+        for row in cursor.fetchall():
+            commits.append({
+                'commit_hash': row[0],
+                'parent_hash': row[1],
+                'author': row[2],
+                'message': row[3],
+                'timestamp': row[4]
+            })
+        
+        return commits
+
+def compare_branches(
+    project_id: int,
+    branch_a: str,
+    branch_b: str
+) -> Dict[str, Any]:
+    """
+    Compare two branches
+    
+    Args:
+        project_id: Project ID
+        branch_a: First branch name
+        branch_b: Second branch name
+    
+    Returns:
+        Dict with comparison results
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Get latest commits from both branches
+        def get_latest_commit(branch_name):
+            cursor.execute(
+                '''SELECT c.commit_hash, c.scene_snapshot, c.timestamp
+                   FROM commits c
+                   JOIN branches b ON c.branch_id = b.id
+                   WHERE b.project_id = ? AND b.branch_name = ?
+                   ORDER BY c.timestamp DESC LIMIT 1''',
+                (project_id, branch_name)
+            )
+            return cursor.fetchone()
+        
+        commit_a = get_latest_commit(branch_a)
+        commit_b = get_latest_commit(branch_b)
+        
+        if not commit_a:
+            raise ValueError(f"No commits found on branch '{branch_a}'")
+        if not commit_b:
+            raise ValueError(f"No commits found on branch '{branch_b}'")
+        
+        # Parse scene data
+        scene_a = json.loads(commit_a[1])
+        scene_b = json.loads(commit_b[1])
+        
+        # Simple diff
+        differences = {}
+        all_keys = set(scene_a.keys()) | set(scene_b.keys())
+        
+        for key in all_keys:
+            val_a = scene_a.get(key)
+            val_b = scene_b.get(key)
+            if val_a != val_b:
+                differences[key] = {
+                    'branch_a': val_a,
+                    'branch_b': val_b
+                }
+        
+        return {
+            'branch_a': {
+                'name': branch_a,
+                'commit': commit_a[0],
+                'timestamp': commit_a[2]
+            },
+            'branch_b': {
+                'name': branch_b,
+                'commit': commit_b[0],
+                'timestamp': commit_b[2]
+            },
+            'differences': differences,
+            'has_conflicts': len(differences) > 0
+        }
+
+def merge_branches(
+    project_id: int,
+    from_branch: str,
+    to_branch: str,
+    strategy: str = 'ours',
+    author: str = 'system'
+) -> Dict[str, Any]:
+    """
+    Merge one branch into another
+    
+    Args:
+        project_id: Project ID
+        from_branch: Source branch
+        to_branch: Target branch
+        strategy: Merge strategy ('ours', 'theirs', 'manual')
+        author: Author of merge commit
+    
+    Returns:
+        Dict with merge commit details
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Get latest commits
+        def get_latest_scene(branch_name):
+            cursor.execute(
+                '''SELECT c.scene_snapshot
+                   FROM commits c
+                   JOIN branches b ON c.branch_id = b.id
+                   WHERE b.project_id = ? AND b.branch_name = ?
+                   ORDER BY c.timestamp DESC LIMIT 1''',
+                (project_id, branch_name)
+            )
+            result = cursor.fetchone()
+            return json.loads(result[0]) if result else None
+        
+        scene_from = get_latest_scene(from_branch)
+        scene_to = get_latest_scene(to_branch)
+        
+        if not scene_from:
+            raise ValueError(f"No commits found on branch '{from_branch}'")
+        if not scene_to:
+            raise ValueError(f"No commits found on branch '{to_branch}'")
+        
+        # Apply merge strategy
+        if strategy == 'ours':
+            merged_scene = scene_to
+        elif strategy == 'theirs':
+            merged_scene = scene_from
+        else:
+            # Manual merge - combine both
+            merged_scene = {**scene_to, **scene_from}
+        
+        # Create merge commit
+        message = f"Merge '{from_branch}' into '{to_branch}' using strategy '{strategy}'"
+        merge_commit = create_commit(project_id, to_branch, message, author, merged_scene)
+        
+        logger.info(f"Merged '{from_branch}' into '{to_branch}' with strategy '{strategy}'")
+        
+        return merge_commit
+
+def revert_to_commit(
+    project_id: int,
+    branch_name: str,
+    commit_hash: str,
+    author: str = 'system'
+) -> Dict[str, Any]:
+    """
+    Revert branch to a previous commit
+    
+    Args:
+        project_id: Project ID
+        branch_name: Branch name
+        commit_hash: Commit to revert to
+        author: Author of revert commit
+    
+    Returns:
+        Dict with revert commit details
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Get the commit
+        cursor.execute(
+            '''SELECT c.scene_snapshot
+               FROM commits c
+               JOIN branches b ON c.branch_id = b.id
+               WHERE b.project_id = ? AND b.branch_name = ? AND c.commit_hash = ?''',
+            (project_id, branch_name, commit_hash)
+        )
+        
+        commit = cursor.fetchone()
+        if not commit:
+            raise ValueError(f"Commit {commit_hash} not found on branch '{branch_name}'")
+        
+        # Create revert commit
+        scene_data = json.loads(commit[0])
+        message = f"Revert to commit {commit_hash}"
+        revert_commit = create_commit(project_id, branch_name, message, author, scene_data)
+        
+        logger.info(f"Reverted branch '{branch_name}' to commit {commit_hash}")
+        
+        return revert_commit
+
+def tag_commit(
+    commit_hash: str,
+    tag_name: str,
+    description: str = ''
+) -> Dict[str, Any]:
+    """
+    Create a milestone tag for a commit
+    
+    Args:
+        commit_hash: Commit hash to tag
+        tag_name: Tag name
+        description: Tag description
+    
+    Returns:
+        Dict with tag details
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Verify commit exists
+        cursor.execute('SELECT id FROM commits WHERE commit_hash = ?', (commit_hash,))
+        if not cursor.fetchone():
+            raise ValueError(f"Commit {commit_hash} not found")
+        
+        # Create tag
+        try:
+            cursor.execute(
+                'INSERT INTO tags (tag_name, commit_hash, description) VALUES (?, ?, ?)',
+                (tag_name, commit_hash, description)
+            )
+        except sqlite3.IntegrityError:
+            raise ValueError(f"Tag '{tag_name}' already exists")
+        
+        logger.info(f"Created tag '{tag_name}' for commit {commit_hash}")
+        
+        return {
+            'tag_name': tag_name,
+            'commit_hash': commit_hash,
+            'description': description,
+            'created_at': datetime.now().isoformat()
+        }
+
+def get_commit_details(commit_hash: str) -> Dict[str, Any]:
+    """Get full details of a commit including scene snapshot"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            '''SELECT commit_hash, parent_hash, author, message, scene_snapshot, timestamp
+               FROM commits WHERE commit_hash = ?''',
+            (commit_hash,)
+        )
+        
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError(f"Commit {commit_hash} not found")
+        
+        return {
+            'commit_hash': row[0],
+            'parent_hash': row[1],
+            'author': row[2],
+            'message': row[3],
+            'scene_snapshot': json.loads(row[4]),
+            'timestamp': row[5]
+        }
+
+def list_branches(project_id: int) -> List[Dict[str, Any]]:
+    """List all branches for a project"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            '''SELECT branch_name, created_from, description, created_at
+               FROM branches WHERE project_id = ?
+               ORDER BY created_at DESC''',
+            (project_id,)
+        )
+        
+        branches = []
+        for row in cursor.fetchall():
+            # Get commit count
+            cursor.execute(
+                '''SELECT COUNT(*) FROM commits c
+                   JOIN branches b ON c.branch_id = b.id
+                   WHERE b.project_id = ? AND b.branch_name = ?''',
+                (project_id, row[0])
+            )
+            commit_count = cursor.fetchone()[0]
+            
+            branches.append({
+                'branch_name': row[0],
+                'created_from': row[1],
+                'description': row[2],
+                'created_at': row[3],
+                'commit_count': commit_count
+            })
+        
+        return branches
+
+# Initialize schema on import
+init_git_schema()

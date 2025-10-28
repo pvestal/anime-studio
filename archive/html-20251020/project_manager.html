@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Anime Project Manager</title>
+    <style>
+        body { font-family: monospace; background: #1a1a1a; color: #0f0; padding: 20px; }
+        .project { border: 1px solid #0f0; margin: 10px; padding: 10px; }
+        button { background: #0f0; color: #000; border: none; padding: 5px 10px; cursor: pointer; }
+        input, textarea { background: #000; color: #0f0; border: 1px solid #0f0; padding: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Anime Project Manager</h1>
+    <div id="projects"></div>
+    
+    <h2>Continue Goblin Slayer Project</h2>
+    <button onclick="generateMoreFrames()">Generate More Frames</button>
+    <button onclick="compileVideo()">Compile Video</button>
+    
+    <script>
+        // Dynamic hostname detection for FQDN support
+        const BASE_URL = `${window.location.protocol}//${window.location.hostname}:8328`;
+
+        async function loadProjects() {
+            const response = await fetch(`${BASE_URL}/api/projects`);
+            const projects = await response.json();
+            const div = document.getElementById('projects');
+            div.innerHTML = projects.map(p => 
+                `<div class="project">
+                    <h3>${p.name}</h3>
+                    <p>Status: ${p.status}</p>
+                    <p>ID: ${p.id}</p>
+                    <button onclick="continueProject(${p.id})">Continue</button>
+                </div>`
+            ).join('');
+        }
+        
+        async function continueProject(id) {
+            await fetch(`${BASE_URL}/api/projects/${id}/generate`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({frames_per_scene: 10})
+            });
+            alert('Generating more frames...');
+        }
+        
+        async function generateMoreFrames() {
+            continueProject(4); // Goblin Slayer project
+        }
+        
+        loadProjects();
+    </script>
+</body>
+</html>

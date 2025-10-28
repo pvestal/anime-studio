@@ -1,0 +1,15 @@
+[Unit]
+Description=KB-Compliant Anime Video Service
+After=network.target
+
+[Service]
+Type=simple
+User=patrick
+WorkingDirectory=/opt/tower-anime-production
+Environment="PATH=/opt/tower-anime-production/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/opt/tower-anime-production/venv/bin/python kb_compliant_service.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

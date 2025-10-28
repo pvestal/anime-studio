@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+.venv
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+
+# Environment and secrets (CRITICAL!)
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.p8
+*_token.txt
+credentials/
+secrets/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Testing
+.coverage
+.pytest_cache/
+
+# Media files (large)
+*.mp4
+*.mp3
+*.wav
+data/music/
+data/videos/
+output/
+outputs/
+frames/
+
+# Temporary
+tmp/
+temp/
+cache/
