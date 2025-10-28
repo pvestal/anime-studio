@@ -27,7 +27,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import asyncio
 import aiohttp
-from #quality_integration import assess_video_quality, QUALITY_ENABLED
+# from quality_integration import assess_video_quality, QUALITY_ENABLED
 from error_handler import (
     ErrorHandler,
 )
@@ -1235,17 +1235,81 @@ def create_4k_video_workflow(
 async def generate_simple_video(
     request: Dict[str, Any], background_tasks: BackgroundTasks
 ):
-    """Simple generation endpoint for testing"""
-    anime_request = AnimeGenerationRequest(
-        prompt=request.get("prompt", "magical anime scene"),
-        character=request.get("character", "anime character"),
-        duration=request.get("duration", 5),
-        frames=request.get("frames", 120),  # 3 seconds at 24fps
-        use_apple_music=request.get("use_apple_music", False),
-        track_id=request.get("track_id"),
-    )
+    """Hybrid local/Firebase generation endpoint with automatic scaling"""
 
-    return await generate_professional_video(anime_request, background_tasks)
+    # Import Firebase orchestrator
+    from firebase_video_orchestrator import FirebaseVideoOrchestrator
+
+    prompt = request.get("prompt", "magical anime scene")
+    character = request.get("character", "anime character")
+    duration = request.get("duration", 5)
+    style = request.get("style", "anime")
+    quality = request.get("quality", "standard")
+    use_apple_music = request.get("use_apple_music", False)
+
+    # Use Firebase orchestrator for intelligent routing
+    orchestrator = FirebaseVideoOrchestrator()
+
+    try:
+        logger.info(f"🎬 Video generation request: {duration}s - {prompt}")
+
+        # Firebase orchestrator handles local vs Firebase routing automatically
+        result = await orchestrator.generate_video(
+            prompt=f"{character}: {prompt}",
+            duration_seconds=duration,
+            style=style,
+            quality=quality,
+            use_apple_music=use_apple_music
+        )
+
+        if result.get("success"):
+            # Generate a consistent generation_id format
+            generation_id = result.get("generation_id") or f"hybrid_{int(time.time())}"
+
+            # Store in status tracker for polling compatibility
+            status_tracker.add_generation(generation_id, {
+                "status": "completed" if result.get("success") else "failed",
+                "compute_location": result.get("compute_location", "unknown"),
+                "processing_time_seconds": result.get("processing_time_seconds", 0),
+                "estimated_cost_usd": result.get("estimated_cost_usd", 0),
+                "video_specs": result.get("video_specs", {}),
+                "output_file": result.get("video_url") or result.get("check_status_url"),
+                "segments": result.get("segments", []),
+                "message": result.get("message", "Generation completed"),
+                "created_at": time.time()
+            })
+
+            return {
+                "success": True,
+                "generation_id": generation_id,
+                "compute_location": result.get("compute_location"),
+                "message": f"Video generation {'completed' if result.get('compute_location') == 'local' else 'started'} using {result.get('compute_location')} resources",
+                "estimated_cost": result.get("estimated_cost_usd", 0),
+                "processing_time": result.get("processing_time_seconds"),
+                "video_specs": result.get("video_specs", {})
+            }
+        else:
+            # Handle errors from orchestrator
+            return {
+                "success": False,
+                "error": result.get("error", "Generation failed"),
+                "suggestion": result.get("suggestion"),
+                "compute_location": result.get("compute_location")
+            }
+
+    except Exception as e:
+        logger.error(f"Hybrid generation error: {e}")
+        # Fallback to original implementation
+        anime_request = AnimeGenerationRequest(
+            prompt=request.get("prompt", "magical anime scene"),
+            character=request.get("character", "anime character"),
+            duration=request.get("duration", 5),
+            frames=request.get("frames", 120),
+            use_apple_music=request.get("use_apple_music", False),
+            track_id=request.get("track_id"),
+        )
+
+        return await generate_professional_video(anime_request, background_tasks)
 
 
 @app.get("/api/generations")
