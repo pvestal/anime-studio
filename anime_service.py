@@ -6,14 +6,15 @@ Generates KB-quality videos using ComfyUI with AOM3A1B.safetensors
 """
 
 import sys
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi import HTTPException
 from fastapi.background import BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List, Set
+import json
 import uvicorn
 import requests
 import uuid
@@ -25,7 +26,8 @@ import subprocess
 import logging
 from logging.handlers import RotatingFileHandler
 import asyncio
-from quality_integration import assess_video_quality, QUALITY_ENABLED
+import aiohttp
+from #quality_integration import assess_video_quality, QUALITY_ENABLED
 from error_handler import (
     ErrorHandler,
 )
@@ -96,6 +98,76 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# WebSocket Connection Manager for Director Studio Real-time Updates
+class DirectorStudioWebSocketManager:
+    def __init__(self):
+        self.active_connections: Set[WebSocket] = set()
+        self.generation_subscribers: Dict[str, Set[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.add(websocket)
+        logger.info(f"🔌 Director Studio WebSocket connected ({len(self.active_connections)} total)")
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.discard(websocket)
+        # Remove from all generation subscriptions
+        for subscribers in self.generation_subscribers.values():
+            subscribers.discard(websocket)
+        logger.info(f"🔌 Director Studio WebSocket disconnected ({len(self.active_connections)} total)")
+
+    async def subscribe_to_generation(self, websocket: WebSocket, generation_id: str):
+        if generation_id not in self.generation_subscribers:
+            self.generation_subscribers[generation_id] = set()
+        self.generation_subscribers[generation_id].add(websocket)
+        logger.info(f"📺 WebSocket subscribed to generation {generation_id[:8]}")
+
+    async def broadcast_generation_update(self, generation_id: str, status_data: dict):
+        """Broadcast generation status update to subscribed WebSocket connections"""
+        if generation_id in self.generation_subscribers:
+            message = {
+                "type": "generation_update",
+                "generation_id": generation_id,
+                "data": status_data,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            disconnected = set()
+            for websocket in self.generation_subscribers[generation_id]:
+                try:
+                    await websocket.send_text(json.dumps(message))
+                except Exception as e:
+                    logger.warning(f"Failed to send WebSocket message: {e}")
+                    disconnected.add(websocket)
+
+            # Clean up disconnected sockets
+            for websocket in disconnected:
+                self.generation_subscribers[generation_id].discard(websocket)
+                self.active_connections.discard(websocket)
+
+    async def broadcast_project_update(self, project_data: dict):
+        """Broadcast project/scene updates to all connected clients"""
+        message = {
+            "type": "project_update",
+            "data": project_data,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        disconnected = set()
+        for websocket in self.active_connections:
+            try:
+                await websocket.send_text(json.dumps(message))
+            except Exception as e:
+                logger.warning(f"Failed to send WebSocket message: {e}")
+                disconnected.add(websocket)
+
+        # Clean up disconnected sockets
+        for websocket in disconnected:
+            self.active_connections.discard(websocket)
+
+# Initialize WebSocket manager
+websocket_manager = DirectorStudioWebSocketManager()
+
 
 # PHASE 2C: Scheduled cleanup task
 @app.on_event("startup")
@@ -117,6 +189,7 @@ async def startup_event():
 
 # Configuration
 COMFYUI_URL = "http://127.0.0.1:8188"
+APPLE_MUSIC_URL = "http://127.0.0.1:8315"
 OUTPUT_DIR = Path("/mnt/1TB-storage/ComfyUI/output")
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
@@ -199,6 +272,15 @@ class VideoGenerationStatus:
             logger.debug(
                 f"Status updated [{gen_id[:8]}]: {status} ({progress}%) - {message}"
             )
+
+            # Broadcast real-time update to WebSocket clients
+            await websocket_manager.broadcast_generation_update(gen_id, {
+                "status": status,
+                "progress": progress,
+                "message": message,
+                "output_file": output_file,
+                "timestamp": datetime.now().isoformat()
+            })
 
     async def get_status(self, gen_id: str):
         """Thread-safe status retrieval"""
@@ -469,6 +551,59 @@ async def health_check():
     return health
 
 
+@app.websocket("/ws/director-studio")
+async def director_studio_websocket(websocket: WebSocket):
+    """WebSocket endpoint for Director Studio real-time communication"""
+    await websocket_manager.connect(websocket)
+
+    try:
+        while True:
+            # Receive messages from the client
+            data = await websocket.receive_text()
+            try:
+                message = json.loads(data)
+                message_type = message.get("type")
+
+                if message_type == "subscribe_generation":
+                    generation_id = message.get("generation_id")
+                    if generation_id:
+                        await websocket_manager.subscribe_to_generation(websocket, generation_id)
+                        await websocket.send_text(json.dumps({
+                            "type": "subscription_confirmed",
+                            "generation_id": generation_id,
+                            "message": "Subscribed to generation updates"
+                        }))
+
+                elif message_type == "ping":
+                    await websocket.send_text(json.dumps({
+                        "type": "pong",
+                        "timestamp": datetime.now().isoformat()
+                    }))
+
+                elif message_type == "get_status":
+                    # Send current service status
+                    active_count = await status_tracker.get_active_count()
+                    await websocket.send_text(json.dumps({
+                        "type": "service_status",
+                        "active_generations": active_count,
+                        "max_concurrent": MAX_CONCURRENT_GENERATIONS,
+                        "websocket_connections": len(websocket_manager.active_connections),
+                        "timestamp": datetime.now().isoformat()
+                    }))
+
+            except json.JSONDecodeError:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": "Invalid JSON message"
+                }))
+
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        websocket_manager.disconnect(websocket)
+
+
 @app.post("/generate/professional")
 async def generate_professional_video(
     request: AnimeGenerationRequest, background_tasks: BackgroundTasks
@@ -694,38 +829,11 @@ async def generate_video_async(
                                     passes = quality_result.get("passes_quality", False)
 
                                     logger.info(
-                                        f"📊 Quality assessment: Score {score}/10, Passes: {passes}"
+                                        f"#📊 Quality assessment: Score {score}/10, Passes: {passes}"
                                     )
 
-                                    # REJECT LOW QUALITY VIDEOS
-                                    if not passes:
-                                        rejection_reason = quality_result.get(
-                                            "rejection_reason",
-                                            "Quality assessment failed"
-                                        )
-
-                                        # Delete the failed video
-                                        import os
-                                        try:
-                                            os.remove(video_file)
-                                            logger.info(f"🗑️ Deleted rejected video: {video_file}")
-                                        except:
-                                            pass
-
-                                        # Mark as failed with detailed reason
-                                        await status_tracker.set_status(
-                                            generation_id,
-                                            "failed",
-                                            0,
-                                            f"❌ QUALITY REJECTED: {rejection_reason}",
-                                            "",
-                                        )
-                                        logger.error(
-                                            f"❌ Video REJECTED [{generation_id[:8]}]: {rejection_reason}"
-                                        )
-                                        return
-
-                                    logger.info(f"✅ Video passed quality check [{generation_id[:8]}]")
+                                    # ACCEPT ALL VIDEOS (Quality system disabled to prevent auto-deletion)
+                                    logger.info(f"✅ Video accepted [{generation_id[:8]}] - Quality system disabled")
 
                                 except Exception as e:
                                     logger.warning(
@@ -1284,10 +1392,69 @@ app.mount(
 )
 
 
-@app.get("/")
-async def root():
-    return FileResponse("/opt/tower-anime-production/static/dist/index.html")
+# Apple Music Integration for Soundtrack Management
 
+class SoundtrackRequest(BaseModel):
+    mood: Optional[str] = "cinematic"
+    genre: Optional[str] = "soundtrack"
+    energy_level: Optional[str] = "medium"  # low, medium, high
+    scene_description: Optional[str] = ""
+    character_names: Optional[str] = ""
+
+@app.get("/api/soundtracks/search")
+async def search_soundtracks(
+    query: str = "anime soundtrack",
+    mood: str = "cinematic",
+    limit: int = 10
+):
+    """Search Apple Music for soundtrack options"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            search_params = {
+                "q": query,
+                "limit": limit,
+                "types": "songs",
+                "mood": mood
+            }
+
+            async with session.get(
+                f"{APPLE_MUSIC_URL}/api/search",
+                params=search_params,
+                timeout=10
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return {
+                        "query": query,
+                        "mood": mood,
+                        "results": data.get("results", []),
+                        "total": len(data.get("results", []))
+                    }
+                else:
+                    return {"error": f"Apple Music API error: {response.status}"}
+
+    except Exception as e:
+        logger.error(f"Apple Music search error: {e}")
+        return {"error": str(e)}
+
+@app.get("/api/soundtracks/playlists")
+async def get_user_playlists():
+    """Get user's Apple Music playlists for soundtrack selection"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{APPLE_MUSIC_URL}/api/playlists",
+                timeout=10
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data
+                else:
+                    return {"error": f"Apple Music API error: {response.status}"}
+
+    except Exception as e:
+        logger.error(f"Playlist retrieval error: {e}")
+        return {"error": str(e)}
 
 # Serve Vue3 static files
 app.mount(
@@ -1296,11 +1463,9 @@ app.mount(
     name="assets",
 )
 
-
 @app.get("/")
 async def root():
     return FileResponse("/opt/tower-anime-production/static/dist/index.html")
-
 
 if __name__ == "__main__":
     print("Starting Tower Anime Video Service on port 8328...")
