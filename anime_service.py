@@ -287,6 +287,28 @@ class VideoGenerationStatus:
         async with self.lock:
             return self.generations.get(gen_id, {"status": "not_found"})
 
+    async def add_generation(self, gen_id: str, generation_data: dict):
+        """Add a generation with complete data"""
+        async with self.lock:
+            # Check if we need to cleanup old entries
+            if len(self.generations) >= self.max_history:
+                await self._cleanup_old_entries()
+
+            self.generations[gen_id] = {
+                "status": generation_data.get("status", "completed"),
+                "progress": 100,
+                "message": generation_data.get("message", "Generation completed"),
+                "output_file": generation_data.get("output_file", ""),
+                "timestamp": datetime.now().isoformat(),
+                "updated_at": time.time(),
+                "compute_location": generation_data.get("compute_location", "unknown"),
+                "processing_time_seconds": generation_data.get("processing_time_seconds", 0),
+                "estimated_cost_usd": generation_data.get("estimated_cost_usd", 0),
+                "video_specs": generation_data.get("video_specs", {}),
+                "segments": generation_data.get("segments", [])
+            }
+            logger.info(f"✅ Generation data stored [{gen_id[:8]}]: {generation_data.get('message', 'Completed')}")
+
     async def _cleanup_old_entries(self):
         """Remove oldest completed/failed entries to prevent memory leak"""
         completed_failed = {
