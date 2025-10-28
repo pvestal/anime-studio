@@ -100,11 +100,37 @@
                     <TowerInput v-model="newScene.characters" placeholder="hero, villain" />
                   </div>
                 </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-sm mb-1">Duration</label>
+                    <select v-model.number="newScene.duration"
+                            class="w-full p-2 bg-gray-900 rounded text-sm">
+                      <option value="3">3s (Local - Free)</option>
+                      <option value="5">5s (Local - Free)</option>
+                      <option value="8">8s (Local - Free)</option>
+                      <option value="10">10s (Local - Free)</option>
+                      <option value="15">15s (Firebase - ~$0.02)</option>
+                      <option value="30">30s (Firebase - ~$0.05)</option>
+                      <option value="60">60s (Firebase - ~$0.09)</option>
+                      <option value="120">2min (Firebase - ~$0.18)</option>
+                      <option value="300">5min (Firebase - ~$0.45)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-sm mb-1">Quality</label>
+                    <select v-model="newScene.quality"
+                            class="w-full p-2 bg-gray-900 rounded text-sm">
+                      <option value="standard">Standard</option>
+                      <option value="high">High (+25%)</option>
+                      <option value="premium">Premium (+50%)</option>
+                    </select>
+                  </div>
+                </div>
                 <div>
                   <label class="block text-sm mb-1">Description</label>
-                  <textarea v-model="newScene.description" 
-                            class="w-full p-2 bg-gray-900 rounded text-sm" 
-                            rows="2" 
+                  <textarea v-model="newScene.description"
+                            class="w-full p-2 bg-gray-900 rounded text-sm"
+                            rows="2"
                             placeholder="Scene description"></textarea>
                 </div>
                 <div class="flex gap-2">
@@ -133,15 +159,28 @@
                       <span class="text-xs px-2 py-0.5 rounded" :class="getStatusClass(scene.status)">
                         {{ scene.status }}
                       </span>
+                      <span v-if="scene.duration" class="text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-300">
+                        {{ scene.duration }}s
+                      </span>
+                      <span v-if="scene.duration" class="text-xs px-2 py-0.5 rounded"
+                            :class="scene.duration <= 10 ? 'bg-green-900 text-green-300' : 'bg-blue-900 text-blue-300'">
+                        {{ scene.duration <= 10 ? '🏠 Local' : '☁️ Firebase' }}
+                      </span>
                     </div>
                     <p class="text-sm">{{ scene.description || 'No description' }}</p>
-                    <p class="text-xs text-gray-400 mt-1">{{ scene.characters || 'No characters' }}</p>
+                    <p class="text-xs text-gray-400 mt-1">
+                      {{ scene.characters || 'No characters' }}
+                      <span v-if="scene.quality && scene.quality !== 'standard'" class="ml-2 text-yellow-400">
+                        • {{ scene.quality }} quality
+                      </span>
+                    </p>
                   </div>
                   <div class="flex gap-2">
-                    <TowerButton v-if="scene.status === 'pending'" 
-                                 @click.stop="generateScene(scene)" 
-                                 class="text-xs">
-                      Generate
+                    <TowerButton v-if="scene.status === 'pending'"
+                                 @click.stop="generateScene(scene)"
+                                 class="text-xs"
+                                 :class="scene.duration <= 10 ? 'bg-green-700 hover:bg-green-600' : 'bg-blue-700 hover:bg-blue-600'">
+                      {{ scene.duration <= 10 ? '🏠 Generate (Free)' : `☁️ Generate (~$${getEstimatedCost(scene)})` }}
                     </TowerButton>
                     <a v-if="scene.video_path" 
                        :href="scene.video_path" 
@@ -326,7 +365,13 @@ const showNewProject = ref(false)
 const showNewScene = ref(false)
 
 const newProject = ref({ name: '', description: '' })
-const newScene = ref({ scene_number: 1, description: '', characters: '' })
+const newScene = ref({
+  scene_number: 1,
+  description: '',
+  characters: '',
+  duration: 5,
+  quality: 'standard'
+})
 
 // WebSocket and Real-time State
 const websocket = ref(null)
@@ -407,7 +452,13 @@ const createScene = async () => {
     })
     success('Scene added!')
     showNewScene.value = false
-    newScene.value = { scene_number: (scenes.value?.length || 0) + 1, description: '', characters: '' }
+    newScene.value = {
+      scene_number: (scenes.value?.length || 0) + 1,
+      description: '',
+      characters: '',
+      duration: 5,
+      quality: 'standard'
+    }
     // Reload scenes
     selectProject(selectedProject.value)
   } catch (e) {
@@ -451,8 +502,9 @@ const generateScene = async (scene) => {
       body: JSON.stringify({
         prompt: scene.description || 'anime scene',
         character: scene.characters || 'anime character',
-        duration: 5,
-        frames: 120,
+        duration: scene.duration || 5,
+        quality: scene.quality || 'standard',
+        frames: (scene.duration || 5) * 24,  // 24fps
         use_apple_music: false
       })
     })
@@ -537,6 +589,24 @@ const getStatusClass = (status) => {
     'completed': 'bg-green-900 text-green-300',
     'failed': 'bg-red-900 text-red-300'
   }[status] || 'bg-gray-700'
+}
+
+// Cost Estimation
+const getEstimatedCost = (scene) => {
+  if (!scene.duration || scene.duration <= 10) return '0.00'
+
+  // Base cost calculation: ~$0.0015 per second
+  const baseCost = scene.duration * 0.0015
+
+  // Quality multiplier
+  const qualityMultiplier = {
+    'standard': 1.0,
+    'high': 1.25,
+    'premium': 1.5
+  }[scene.quality || 'standard'] || 1.0
+
+  const totalCost = baseCost * qualityMultiplier
+  return totalCost.toFixed(2)
 }
 
 // WebSocket Management
