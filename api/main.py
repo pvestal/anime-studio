@@ -37,7 +37,7 @@ except ImportError:
     PIPELINE_AVAILABLE = False
 
 # Database Setup
-DATABASE_URL = "postgresql://patrick:***REMOVED***@localhost/tower_consolidated"
+DATABASE_URL = "postgresql://patrick@localhost/anime_production"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -725,7 +725,7 @@ async def get_personal_analysis():
     }
 
 # Tables already exist in tower_consolidated database
-# Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
 if __name__ == "__main__":
     import uvicorn

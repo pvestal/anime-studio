@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Any
 import os
 from pathlib import Path
 import time
+from comfyui_integration import ComfyUIIntegration
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -28,13 +29,14 @@ class FirebaseVideoOrchestrator:
             self.firebase_base_url = "http://127.0.0.1:5001/tower-echo-brain/us-central1"
         else:
             self.firebase_base_url = f"https://us-central1-{self.firebase_project_id}.cloudfunctions.net"
-        self.local_comfyui_url = "http://127.0.0.1:8188"
+        self.local_comfyui_url = "http://***REMOVED***:8188"
         self.echo_brain_url = "http://127.0.0.1:8309"
         self.apple_music_url = "http://127.0.0.1:8315"
+        self.comfyui_integration = ComfyUIIntegration(self.local_comfyui_url)
 
-        # Budget controls
-        self.daily_budget = 5.00  # $5 per day
-        self.monthly_budget = 50.00  # $50 per month
+        # Budget controls (TESTING MODE)
+        self.daily_budget = 100.00  # $100 per day - testing mode
+        self.monthly_budget = 500.00  # $500 per month - testing mode
 
         # Duration thresholds
         self.local_max_duration = 10  # seconds
@@ -79,6 +81,7 @@ class FirebaseVideoOrchestrator:
     async def get_bpm_analysis(self, prompt: str, duration: int) -> Optional[Dict]:
         """Get BPM analysis from Echo Brain"""
         try:
+            # First try Echo Brain endpoint
             async with aiohttp.ClientSession() as session:
                 payload = {
                     "video_prompt": prompt,
@@ -88,18 +91,45 @@ class FirebaseVideoOrchestrator:
                 async with session.post(
                     f"{self.echo_brain_url}/api/echo/soundtrack/analyze-video-bpm",
                     json=payload,
-                    timeout=30
+                    timeout=10
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
                         logger.info(f"🧠 Echo BPM analysis: {data.get('recommended_bpm', 'unknown')} BPM")
                         return data
-                    else:
-                        logger.warning(f"Echo BPM analysis failed: {response.status}")
-                        return None
+
         except Exception as e:
-            logger.error(f"BPM analysis error: {e}")
-            return None
+            logger.info(f"Echo BPM endpoint not available, using fallback: {e}")
+
+        # Fallback to rule-based analysis
+        logger.info("🎵 Using fallback BPM analysis")
+
+        # Analyze prompt for emotional content
+        prompt_lower = prompt.lower()
+
+        if any(word in prompt_lower for word in ["fast", "action", "battle", "fight", "chase"]):
+            bpm = 140 + (duration * 5)  # Faster for longer scenes
+            emotional_tone = "energetic"
+        elif any(word in prompt_lower for word in ["magical", "transformation", "sparkles", "power"]):
+            bpm = 120 + (duration * 3)  # Moderate energy
+            emotional_tone = "magical"
+        elif any(word in prompt_lower for word in ["sad", "melancholy", "rain", "goodbye"]):
+            bpm = 70 + (duration * 2)  # Slower tempo
+            emotional_tone = "melancholic"
+        elif any(word in prompt_lower for word in ["peaceful", "calm", "nature", "garden"]):
+            bpm = 80 + (duration * 2)  # Gentle pace
+            emotional_tone = "serene"
+        else:
+            bpm = 100 + (duration * 3)  # Default moderate
+            emotional_tone = "cinematic"
+
+        return {
+            "recommended_bpm": min(bpm, 160),  # Cap at 160 BPM
+            "emotional_tone": emotional_tone,
+            "confidence": 0.7,
+            "analysis_method": "fallback_rules",
+            "duration_factor": duration
+        }
 
     async def get_apple_music_recommendation(self, bpm_analysis: Dict) -> Optional[Dict]:
         """Get Apple Music track recommendation based on BPM analysis"""
@@ -145,6 +175,33 @@ class FirebaseVideoOrchestrator:
                     "use_apple_music": apple_music_track is not None
                 }
 
+                # Use the ComfyUI integration instead of direct API
+                comfyui_result = await self.comfyui_integration.generate_video(prompt, duration, style)
+
+                if comfyui_result.get("success"):
+                    processing_time = time.time() - start_time
+
+                    return {
+                        "success": True,
+                        "generation_id": comfyui_result.get("generation_id"),
+                        "output_path": comfyui_result.get("output_path"),
+                        "compute_location": "local",
+                        "processing_time_seconds": round(processing_time, 2),
+                        "estimated_cost_usd": 0.0,  # Local is free
+                        "video_specs": comfyui_result.get("video_specs", {}),
+                        "bpm_analysis": bpm_analysis,
+                        "apple_music_track": apple_music_track,
+                        "check_status_url": f"/api/status/{comfyui_result.get('generation_id')}"
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": comfyui_result.get("error", "ComfyUI generation failed"),
+                        "compute_location": "local"
+                    }
+
+            # Legacy fallback (remove this comment when above works)
+            if False:  # Disable old method
                 async with session.post(
                     f"{self.local_comfyui_url}/api/generate",
                     json=payload,
