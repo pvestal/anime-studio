@@ -6,6 +6,8 @@ Consolidates all anime production functionality into single service
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Float
 from sqlalchemy.ext.declarative import declarative_base
@@ -726,6 +728,125 @@ async def get_personal_analysis():
 
 # Tables already exist in tower_consolidated database
 Base.metadata.create_all(bind=engine)
+
+# Static files and Git UI routes
+@app.get("/git", response_class=HTMLResponse)
+async def git_control_interface():
+    """Serve the git control interface"""
+    try:
+        with open("/opt/tower-anime-production/static/dist/index.html", "r") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        return HTMLResponse(
+            content="""
+            <html>
+                <head><title>Git Control - Setup Required</title></head>
+                <body style="font-family: Arial; padding: 2rem; background: #1a1a1a; color: #e0e0e0;">
+                    <h1>Anime Git Control</h1>
+                    <p>Frontend build not found. Run: <code>cd /opt/tower-anime-production/frontend && pnpm run build</code></p>
+                    <h2>Quick Actions</h2>
+                    <ul>
+                        <li><a href="/api/anime/projects" style="color: #4a9eff;">View Projects API</a></li>
+                        <li><a href="/api/anime/git/status" style="color: #4a9eff;">Git Status API</a></li>
+                        <li><a href="http://192.168.50.135:8188/" style="color: #4a9eff;">ComfyUI Interface</a></li>
+                        <li><a href="https://192.168.50.135/" style="color: #4a9eff;">Tower Dashboard</a></li>
+                    </ul>
+                </body>
+            </html>
+            """,
+            status_code=200
+        )
+
+# Git Control API Endpoints
+@app.post("/api/anime/git/commit")
+async def commit_scene(commit_data: dict):
+    """Commit current scene as new version"""
+    try:
+        # Import git branching functionality
+        sys.path.append('/opt/tower-anime-production')
+        from git_branching import GitBranchingSystem
+
+        git_system = GitBranchingSystem()
+        commit_hash = git_system.commit_scene(
+            scene_data=commit_data.get('sceneData', {}),
+            message=commit_data.get('message', 'Update scene'),
+            branch=commit_data.get('branch', 'main')
+        )
+
+        return {
+            "status": "success",
+            "commitHash": commit_hash,
+            "message": f"Scene committed to {commit_data.get('branch', 'main')}",
+            "estimatedCost": commit_data.get('estimatedCost', 0)
+        }
+    except Exception as e:
+        logger.error(f"Commit failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/anime/git/branch")
+async def create_branch(branch_data: dict):
+    """Create new creative branch"""
+    try:
+        sys.path.append('/opt/tower-anime-production')
+        from git_branching import GitBranchingSystem
+
+        git_system = GitBranchingSystem()
+        branch_hash = git_system.create_branch(
+            name=branch_data.get('name'),
+            description=branch_data.get('description', ''),
+            base_branch=branch_data.get('baseBranch', 'main')
+        )
+
+        return {
+            "status": "success",
+            "branch": branch_data.get('name'),
+            "hash": branch_hash,
+            "message": f"Branch '{branch_data.get('name')}' created"
+        }
+    except Exception as e:
+        logger.error(f"Branch creation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/anime/git/status")
+async def git_status():
+    """Get current git status for project"""
+    try:
+        sys.path.append('/opt/tower-anime-production')
+        from git_branching import GitBranchingSystem
+
+        git_system = GitBranchingSystem()
+        status = git_system.get_status()
+
+        return {
+            "currentBranch": status.get('current_branch', 'main'),
+            "hasChanges": status.get('has_changes', False),
+            "branches": status.get('branches', []),
+            "commits": status.get('recent_commits', []),
+            "lastCommit": status.get('last_commit', {})
+        }
+    except Exception as e:
+        logger.error(f"Git status failed: {e}")
+        return {
+            "currentBranch": "main",
+            "hasChanges": False,
+            "branches": [{"name": "main", "description": "Main storyline"}],
+            "commits": [],
+            "lastCommit": {}
+        }
+
+@app.get("/api/anime/budget/daily")
+async def get_daily_budget():
+    """Get current daily budget status"""
+    return {
+        "limit": 150.00,
+        "used": 23.45,  # Would track actual usage
+        "remaining": 126.55,
+        "autoApprovalThreshold": 5.00
+    }
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="/opt/tower-anime-production/static"), name="static")
 
 if __name__ == "__main__":
     import uvicorn

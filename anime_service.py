@@ -1156,7 +1156,7 @@ def create_svd_video_workflow(
     # SVD optimal settings
     width = 1024  # SVD native resolution
     height = 576  # SVD native aspect ratio (16:9)
-    video_frames = min(request.frames, 25)  # SVD works best with 14-25 frames
+    video_frames = request.frames  # Allow full frame count for proper anime length
     fps = request.fps if request.fps <= 30 else 30  # SVD optimal fps range
 
     workflow = {

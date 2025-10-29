@@ -59,3 +59,26 @@ frames/
 tmp/
 temp/
 cache/
+
+# Development and experimental files
+*_test.py
+*_testing.py
+test_*.py
+FINAL_*.py
+FUCKING_*.py
+WORKING_*.py
+*_now.py
+*_debug.py
+*_scratch.py
+experimental/
+playground/
+scratch/
+debug/
+testing/
+
+# Generated content directories
+generated_videos/
+generated_images/
+exports/
+renders/
+output_*/
