@@ -39,12 +39,22 @@ class ComfyUIIntegration:
                     logger.info(f"Updated EmptyLatentImage node {node_id} to {frames} frames")
                     break
 
-            # Update ADE_LoopedUniformContextOptions if present
+            # Update ADE_LoopedUniformContextOptions for proper context handling
             for node_id, node in workflow.items():
                 if node.get("class_type") == "ADE_LoopedUniformContextOptions":
-                    node["inputs"]["context_length"] = min(frames, 24)  # Max 24 frame context
+                    # Context window configuration for different durations
+                    if frames <= 24:
+                        context_length = frames
+                        overlap = max(4, frames // 4)
+                    else:
+                        context_length = 24  # Standard window size
+                        overlap = 12  # 50% overlap for smooth transitions
+
+                    node["inputs"]["context_length"] = context_length
+                    node["inputs"]["context_overlap"] = overlap
                     node["inputs"]["closed_loop"] = True
-                    logger.info(f"Updated ADE context for {frames} frames")
+                    node["_meta"]["title"] = f"Looped Context Window ({context_length} frames)"
+                    logger.info(f"Updated ADE context: {context_length} length, {overlap} overlap for {frames} total frames")
                     break
 
             return workflow
