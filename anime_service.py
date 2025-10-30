@@ -1667,6 +1667,62 @@ async def get_user_playlists():
         logger.error(f"Playlist retrieval error: {e}")
         return {"error": str(e)}
 
+
+# === GIT STORYLINE CONTROL ENDPOINTS ===
+
+class GitBranchRequest(BaseModel):
+    project_id: int
+    new_branch_name: str
+    from_branch: str = 'main'
+    storyline_goal: str = ''
+    author: str = 'director'
+
+class StorylineMarkersRequest(BaseModel):
+    project_id: int
+    scenes: List[dict]
+
+@app.get("/api/anime/git/status/{project_id}")
+async def get_git_status(project_id: int):
+    """Get comprehensive git status for a project including Echo analysis"""
+    try:
+        sys.path.append('/opt/tower-anime-production')
+        from git_branching import list_branches, get_commit_history, echo_analyze_storyline
+
+        # Get all branches
+        branches = list_branches(project_id)
+
+        # Get commit history for main branch (handle gracefully if no commits)
+        try:
+            main_commits = get_commit_history(project_id, 'main')
+        except:
+            main_commits = []
+
+        # Get latest Echo analysis (skip if no commits)
+        if main_commits:
+            try:
+                latest_analysis = await echo_analyze_storyline(project_id, 'main')
+            except:
+                latest_analysis = {"analysis": "No analysis available", "recommendations": []}
+        else:
+            latest_analysis = {"analysis": "No commits found", "recommendations": []}
+
+        return {
+            "project_id": project_id,
+            "branches": branches,
+            "main_branch_commits": len(main_commits),
+            "latest_commits": main_commits[:5] if main_commits else [],
+            "echo_analysis": latest_analysis,
+            "status_checked_at": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Git status check failed: {e}")
+        return {
+            "project_id": project_id,
+            "error": f"Git status failed: {str(e)}",
+            "status_checked_at": datetime.now().isoformat()
+        }
+
 # Serve Vue3 static files
 app.mount(
     "/assets",

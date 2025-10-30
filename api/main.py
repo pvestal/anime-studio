@@ -845,6 +845,134 @@ async def get_daily_budget():
         "autoApprovalThreshold": 5.00
     }
 
+# === GIT STORYLINE CONTROL ENDPOINTS ===
+
+class GitBranchRequest(BaseModel):
+    project_id: int
+    new_branch_name: str
+    from_branch: str = 'main'
+    storyline_goal: str = ''
+    author: str = 'director'
+
+class StorylineMarkersRequest(BaseModel):
+    project_id: int
+    scenes: List[dict]
+
+@app.post("/api/anime/git/branches")
+async def create_git_branch(request: GitBranchRequest):
+    """Create a new git branch with Echo Brain's storyline guidance"""
+    try:
+        # Add to sys.path for git_branching import
+        sys.path.append('/opt/tower-anime-production')
+        from git_branching import echo_guided_branch_creation
+
+        result = await echo_guided_branch_creation(
+            project_id=request.project_id,
+            base_branch=request.from_branch,
+            new_branch_name=request.new_branch_name,
+            storyline_goal=request.storyline_goal,
+            author=request.author
+        )
+
+        return {
+            "success": True,
+            "branch_name": request.new_branch_name,
+            "echo_guidance": result.get("echo_guidance", {}),
+            "created_at": result.get("created_at"),
+            "base_analysis": result.get("base_analysis", {})
+        }
+
+    except Exception as e:
+        logger.error(f"Git branch creation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Git branch creation failed: {str(e)}")
+
+@app.get("/api/anime/git/branches/{project_id}")
+async def get_project_branches(project_id: int):
+    """Get all git branches for a project"""
+    try:
+        sys.path.append('/opt/tower-anime-production')
+        from git_branching import list_branches
+
+        branches = list_branches(project_id)
+        return {"branches": branches, "total": len(branches)}
+
+    except Exception as e:
+        logger.error(f"Get branches failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Get branches failed: {str(e)}")
+
+@app.post("/api/anime/storyline/analyze/{project_id}")
+async def analyze_storyline(project_id: int, branch_name: str = 'main'):
+    """Get Echo Brain's analysis of storyline progression"""
+    try:
+        sys.path.append('/opt/tower-anime-production')
+        from git_branching import echo_analyze_storyline
+
+        analysis = await echo_analyze_storyline(project_id, branch_name)
+        return analysis
+
+    except Exception as e:
+        logger.error(f"Storyline analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Storyline analysis failed: {str(e)}")
+
+@app.post("/api/anime/storyline/markers")
+async def create_storyline_markers(request: StorylineMarkersRequest):
+    """Create comprehensive editing markers for video production"""
+    try:
+        sys.path.append('/opt/tower-anime-production')
+        from echo_integration import EchoIntegration
+
+        echo = EchoIntegration()
+        markers = await echo.create_storyline_markers(request.project_id, request.scenes)
+
+        return {
+            "success": True,
+            "markers": markers,
+            "total_scenes": len(request.scenes),
+            "created_at": markers.get("created_at")
+        }
+
+    except Exception as e:
+        logger.error(f"Storyline markers creation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Storyline markers failed: {str(e)}")
+
+@app.get("/api/anime/git/status/{project_id}")
+async def get_git_status(project_id: int):
+    """Get comprehensive git status for a project including Echo analysis"""
+    try:
+        sys.path.append('/opt/tower-anime-production')
+        from git_branching import list_branches, get_commit_history, echo_analyze_storyline
+
+        # Get all branches
+        branches = list_branches(project_id)
+
+        # Get commit history for main branch
+        try:
+            main_commits = get_commit_history(project_id, 'main')
+        except:
+            main_commits = []
+
+        # Get latest Echo analysis (skip if no commits)
+        if main_commits:
+            try:
+                latest_analysis = await echo_analyze_storyline(project_id, 'main')
+            except:
+                latest_analysis = {"analysis": "No analysis available", "recommendations": []}
+        else:
+            latest_analysis = {"analysis": "No commits found", "recommendations": []}
+
+        return {
+            "project_id": project_id,
+            "branches": branches,
+            "main_branch_commits": len(main_commits),
+            "latest_commits": main_commits[:5] if main_commits else [],
+            "echo_analysis": latest_analysis,
+            "status_checked_at": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Git status check failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Git status failed: {str(e)}")
+
 # Mount static files
 app.mount("/static", StaticFiles(directory="/opt/tower-anime-production/static"), name="static")
 

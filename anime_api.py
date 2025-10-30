@@ -1324,3 +1324,125 @@ async def process_director_command(command: dict):
         logger.error(f"Error processing director command: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+# === GIT STORYLINE CONTROL ENDPOINTS ===
+
+class GitBranchRequest(BaseModel):
+    project_id: int
+    new_branch_name: str
+    from_branch: str = 'main'
+    storyline_goal: str = ''
+    author: str = 'director'
+
+class GitCommitRequest(BaseModel):
+    project_id: int
+    branch_name: str
+    message: str
+    author: str = 'director'
+    scene_data: Dict[str, Any]
+    analyze_impact: bool = True
+
+class StorylineMarkersRequest(BaseModel):
+    project_id: int
+    scenes: List[Dict[str, Any]]
+
+@app.post("/api/anime/git/branches", response_model=Dict[str, Any])
+async def create_git_branch(request: GitBranchRequest):
+    """Create a new git branch with Echo Brain's storyline guidance"""
+    try:
+        from git_branching import echo_guided_branch_creation
+
+        result = await echo_guided_branch_creation(
+            project_id=request.project_id,
+            base_branch=request.from_branch,
+            new_branch_name=request.new_branch_name,
+            storyline_goal=request.storyline_goal,
+            author=request.author
+        )
+
+        return {
+            "success": True,
+            "branch_name": request.new_branch_name,
+            "echo_guidance": result.get("echo_guidance", {}),
+            "created_at": result.get("created_at"),
+            "base_analysis": result.get("base_analysis", {})
+        }
+
+    except Exception as e:
+        logger.error(f"Git branch creation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Git branch creation failed: {str(e)}")
+
+@app.get("/api/anime/git/branches/{project_id}", response_model=List[Dict[str, Any]])
+async def get_project_branches(project_id: int):
+    """Get all git branches for a project"""
+    try:
+        from git_branching import list_branches
+
+        branches = list_branches(project_id)
+        return branches
+
+    except Exception as e:
+        logger.error(f"Get branches failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Get branches failed: {str(e)}")
+
+@app.post("/api/anime/storyline/analyze/{project_id}", response_model=Dict[str, Any])
+async def analyze_storyline(project_id: int, branch_name: str = 'main'):
+    """Get Echo Brain's analysis of storyline progression"""
+    try:
+        from git_branching import echo_analyze_storyline
+
+        analysis = await echo_analyze_storyline(project_id, branch_name)
+        return analysis
+
+    except Exception as e:
+        logger.error(f"Storyline analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Storyline analysis failed: {str(e)}")
+
+@app.post("/api/anime/storyline/markers", response_model=Dict[str, Any])
+async def create_storyline_markers(request: StorylineMarkersRequest):
+    """Create comprehensive editing markers for video production"""
+    try:
+        from echo_integration import EchoIntegration
+
+        echo = EchoIntegration()
+        markers = await echo.create_storyline_markers(request.project_id, request.scenes)
+
+        return {
+            "success": True,
+            "markers": markers,
+            "total_scenes": len(request.scenes),
+            "created_at": markers.get("created_at")
+        }
+
+    except Exception as e:
+        logger.error(f"Storyline markers creation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Storyline markers failed: {str(e)}")
+
+@app.get("/api/anime/git/status/{project_id}", response_model=Dict[str, Any])
+async def get_git_status(project_id: int):
+    """Get comprehensive git status for a project including Echo analysis"""
+    try:
+        from git_branching import list_branches, get_commit_history, echo_analyze_storyline
+
+        # Get all branches
+        branches = list_branches(project_id)
+
+        # Get commit history for main branch
+        main_commits = get_commit_history(project_id, 'main')
+
+        # Get latest Echo analysis
+        latest_analysis = await echo_analyze_storyline(project_id, 'main')
+
+        return {
+            "project_id": project_id,
+            "branches": branches,
+            "main_branch_commits": len(main_commits),
+            "latest_commits": main_commits[:5] if main_commits else [],
+            "echo_analysis": latest_analysis,
+            "status_checked_at": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Git status check failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Git status failed: {str(e)}")
