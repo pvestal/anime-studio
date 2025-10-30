@@ -5,7 +5,8 @@ Handles syncing music tracks to scenes with precise timing markers
 """
 
 import json
-import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import requests
 import logging
 from datetime import datetime
@@ -13,20 +14,39 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import librosa
 import numpy as np
+from contextlib import contextmanager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class MusicSyncEngine:
     """Engine for synchronizing music tracks to anime scenes"""
-    
-    def __init__(self, db_path: str = "/opt/tower-anime-production/anime.db"):
-        self.db_path = db_path
+
+    def __init__(self):
         self.apple_music_url = "http://localhost:8328"  # Assuming Apple Music service
-        
+        self.db_config = {
+            'host': 'localhost',
+            'database': 'anime_production',
+            'user': 'patrick',
+            'port': 5432,
+            'options': '-c search_path=anime_api,public'
+        }
+
+    @contextmanager
     def _get_db_connection(self):
-        """Get database connection"""
-        return sqlite3.connect(self.db_path)
+        """Get database connection with automatic cleanup"""
+        conn = None
+        try:
+            conn = psycopg2.connect(**self.db_config)
+            yield conn
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            logger.error(f"Database connection error: {e}")
+            raise
+        finally:
+            if conn:
+                conn.close()
     
     def sync_music_to_scene(
         self,
@@ -54,42 +74,43 @@ class MusicSyncEngine:
             Dict with sync results
         """
         try:
-            conn = self._get_db_connection()
-            cursor = conn.cursor()
-            
-            # Verify scene exists
-            cursor.execute("SELECT id FROM scenes WHERE id = ?", (scene_id,))
-            if not cursor.fetchone():
-                return {"success": False, "error": f"Scene {scene_id} not found"}
-            
-            synced_tracks = []
-            for mapping in track_mappings:
-                cursor.execute("""
-                    INSERT INTO music_scene_sync 
-                    (scene_id, playlist_id, track_id, track_name, artist, 
-                     start_time, duration, volume, fade_in, fade_out, sync_markers)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    scene_id,
-                    playlist_id,
-                    mapping.get('track_id'),
-                    mapping.get('track_name'),
-                    mapping.get('artist'),
-                    mapping.get('start_time', 0.0),
-                    mapping.get('duration'),
-                    mapping.get('volume', 1.0),
-                    mapping.get('fade_in', 0.0),
-                    mapping.get('fade_out', 0.0),
-                    json.dumps(mapping.get('sync_markers', []))
-                ))
-                synced_tracks.append({
-                    "id": cursor.lastrowid,
-                    "track_id": mapping.get('track_id'),
-                    "track_name": mapping.get('track_name')
-                })
-            
-            conn.commit()
-            conn.close()
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor()
+
+                # Verify scene exists
+                cursor.execute("SELECT id FROM scenes WHERE id = %s", (scene_id,))
+                if not cursor.fetchone():
+                    return {"success": False, "error": f"Scene {scene_id} not found"}
+
+                synced_tracks = []
+                for mapping in track_mappings:
+                    cursor.execute("""
+                        INSERT INTO music_scene_sync
+                        (scene_id, playlist_id, track_id, track_name, artist,
+                         start_time, duration, volume, fade_in, fade_out, sync_markers)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                    """, (
+                        scene_id,
+                        playlist_id,
+                        mapping.get('track_id'),
+                        mapping.get('track_name'),
+                        mapping.get('artist'),
+                        mapping.get('start_time', 0.0),
+                        mapping.get('duration'),
+                        mapping.get('volume', 1.0),
+                        mapping.get('fade_in', 0.0),
+                        mapping.get('fade_out', 0.0),
+                        json.dumps(mapping.get('sync_markers', []))
+                    ))
+                    sync_id = cursor.fetchone()[0]
+                    synced_tracks.append({
+                        "id": sync_id,
+                        "track_id": mapping.get('track_id'),
+                        "track_name": mapping.get('track_name')
+                    })
+
+                conn.commit()
             
             logger.info(f"Synced {len(synced_tracks)} tracks to scene {scene_id}")
             return {
@@ -126,41 +147,40 @@ class MusicSyncEngine:
             Dict with marker addition result
         """
         try:
-            conn = self._get_db_connection()
-            cursor = conn.cursor()
-            
-            # Get existing sync entry
-            cursor.execute("""
-                SELECT id, sync_markers FROM music_scene_sync
-                WHERE scene_id = ? AND track_id = ?
-                ORDER BY id DESC LIMIT 1
-            """, (scene_id, track_id))
-            
-            row = cursor.fetchone()
-            if not row:
-                return {"success": False, "error": "Track sync not found"}
-            
-            sync_id, markers_json = row
-            markers = json.loads(markers_json) if markers_json else []
-            
-            # Add new marker
-            new_marker = {
-                "timestamp": timestamp,
-                "event": event_name,
-                "audio_cue": audio_cue,
-                "metadata": metadata or {}
-            }
-            markers.append(new_marker)
-            
-            # Update sync entry
-            cursor.execute("""
-                UPDATE music_scene_sync 
-                SET sync_markers = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (json.dumps(markers), sync_id))
-            
-            conn.commit()
-            conn.close()
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor()
+
+                # Get existing sync entry
+                cursor.execute("""
+                    SELECT id, sync_markers FROM music_scene_sync
+                    WHERE scene_id = %s AND track_id = %s
+                    ORDER BY id DESC LIMIT 1
+                """, (scene_id, track_id))
+
+                row = cursor.fetchone()
+                if not row:
+                    return {"success": False, "error": "Track sync not found"}
+
+                sync_id, markers_json = row
+                markers = json.loads(markers_json) if markers_json else []
+
+                # Add new marker
+                new_marker = {
+                    "timestamp": timestamp,
+                    "event": event_name,
+                    "audio_cue": audio_cue,
+                    "metadata": metadata or {}
+                }
+                markers.append(new_marker)
+
+                # Update sync entry
+                cursor.execute("""
+                    UPDATE music_scene_sync
+                    SET sync_markers = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (json.dumps(markers), sync_id))
+
+                conn.commit()
             
             logger.info(f"Added marker '{event_name}' at {timestamp}s to scene {scene_id}")
             return {
@@ -185,34 +205,32 @@ class MusicSyncEngine:
             Dict with timeline data including all tracks and markers
         """
         try:
-            conn = self._get_db_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT id, track_id, track_name, artist, start_time, duration,
-                       volume, fade_in, fade_out, sync_markers
-                FROM music_scene_sync
-                WHERE scene_id = ?
-                ORDER BY start_time
-            """, (scene_id,))
-            
-            tracks = []
-            for row in cursor.fetchall():
-                track = {
-                    "id": row[0],
-                    "track_id": row[1],
-                    "track_name": row[2],
-                    "artist": row[3],
-                    "start_time": row[4],
-                    "duration": row[5],
-                    "volume": row[6],
-                    "fade_in": row[7],
-                    "fade_out": row[8],
-                    "sync_markers": json.loads(row[9]) if row[9] else []
-                }
-                tracks.append(track)
-            
-            conn.close()
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+                cursor.execute("""
+                    SELECT id, track_id, track_name, artist, start_time, duration,
+                           volume, fade_in, fade_out, sync_markers
+                    FROM music_scene_sync
+                    WHERE scene_id = %s
+                    ORDER BY start_time
+                """, (scene_id,))
+
+                tracks = []
+                for row in cursor.fetchall():
+                    track = {
+                        "id": row["id"],
+                        "track_id": row["track_id"],
+                        "track_name": row["track_name"],
+                        "artist": row["artist"],
+                        "start_time": row["start_time"],
+                        "duration": row["duration"],
+                        "volume": row["volume"],
+                        "fade_in": row["fade_in"],
+                        "fade_out": row["fade_out"],
+                        "sync_markers": json.loads(row["sync_markers"]) if row["sync_markers"] else []
+                    }
+                    tracks.append(track)
             
             # Calculate total timeline duration
             max_end_time = max(
@@ -311,34 +329,33 @@ class MusicSyncEngine:
     def get_scene_music(self, scene_id: int) -> List[Dict]:
         """Get all music synced to a scene"""
         try:
-            conn = self._get_db_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT id, track_id, track_name, artist, start_time, duration,
-                       volume, fade_in, fade_out, sync_markers
-                FROM music_scene_sync
-                WHERE scene_id = ?
-                ORDER BY start_time
-            """, (scene_id,))
-            
-            music = []
-            for row in cursor.fetchall():
-                music.append({
-                    "id": row[0],
-                    "track_id": row[1],
-                    "track_name": row[2],
-                    "artist": row[3],
-                    "start_time": row[4],
-                    "duration": row[5],
-                    "volume": row[6],
-                    "fade_in": row[7],
-                    "fade_out": row[8],
-                    "sync_markers": json.loads(row[9]) if row[9] else []
-                })
-            
-            conn.close()
-            return music
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+                cursor.execute("""
+                    SELECT id, track_id, track_name, artist, start_time, duration,
+                           volume, fade_in, fade_out, sync_markers
+                    FROM music_scene_sync
+                    WHERE scene_id = %s
+                    ORDER BY start_time
+                """, (scene_id,))
+
+                music = []
+                for row in cursor.fetchall():
+                    music.append({
+                        "id": row["id"],
+                        "track_id": row["track_id"],
+                        "track_name": row["track_name"],
+                        "artist": row["artist"],
+                        "start_time": row["start_time"],
+                        "duration": row["duration"],
+                        "volume": row["volume"],
+                        "fade_in": row["fade_in"],
+                        "fade_out": row["fade_out"],
+                        "sync_markers": json.loads(row["sync_markers"]) if row["sync_markers"] else []
+                    })
+
+                return music
             
         except Exception as e:
             logger.error(f"Error getting scene music: {e}")
@@ -351,7 +368,7 @@ def sync_music_to_scene(scene_id: int, playlist_id: Optional[str], track_mapping
     """Sync music tracks to a scene"""
     return music_engine.sync_music_to_scene(scene_id, playlist_id, track_mappings)
 
-def add_sync_marker(scene_id: int, track_id: str, timestamp: float, event_name: str, 
+def add_sync_marker(scene_id: int, track_id: str, timestamp: float, event_name: str,
                    audio_cue: Optional[str] = None, metadata: Optional[Dict] = None) -> Dict:
     """Add a timing marker to a track"""
     return music_engine.add_sync_marker(scene_id, track_id, timestamp, event_name, audio_cue, metadata)
@@ -371,4 +388,4 @@ def calculate_beat_markers(audio_file: str, scene_duration: Optional[float] = No
 if __name__ == "__main__":
     # Test the music sync system
     print("Music Sync Engine initialized")
-    print(f"Database: {music_engine.db_path}")
+    print(f"Database: PostgreSQL anime_production at {music_engine.db_config['host']}:{music_engine.db_config['port']}")

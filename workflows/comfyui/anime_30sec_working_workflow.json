@@ -50,11 +50,11 @@
     "inputs": {
       "width": 1024,
       "height": 1024,
-      "batch_size": 72
+      "batch_size": 24
     },
     "class_type": "EmptyLatentImage",
     "_meta": {
-      "title": "Empty Latent Image (72 frames - 3 seconds)"
+      "title": "Empty Latent Image (24 frames max - AnimateDiff limit)"
     }
   },
   "6": {
@@ -129,8 +129,7 @@
   },
   "11": {
     "inputs": {
-      "motion_model": ["10", 0],
-      "context_options": ["13", 0]
+      "motion_model": ["10", 0]
     },
     "class_type": "ADE_ApplyAnimateDiffModelSimple",
     "_meta": {
@@ -146,18 +145,6 @@
     "class_type": "ADE_UseEvolvedSampling",
     "_meta": {
       "title": "Use Evolved Sampling"
-    }
-  },
-  "13": {
-    "inputs": {
-      "context_length": 24,
-      "context_stride": 1,
-      "context_overlap": 12,
-      "closed_loop": true
-    },
-    "class_type": "ADE_LoopedUniformContextOptions",
-    "_meta": {
-      "title": "Looped Context Window (24 frames)"
     }
   }
 }

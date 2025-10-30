@@ -27,34 +27,37 @@ class ComfyUIIntegration:
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
 
-            # Adjust frames based on duration
-            frames = duration * 24  # 24fps
-            logger.info(f"Setting video to {frames} frames for {duration} seconds")
+            # Echo Brain optimization: AnimateDiff 24 frame limit with VRAM-conscious approach
+            # Use 12fps base (lower VRAM) and let RIFE interpolate to 24fps
+            base_frames = min(24, duration * 12)  # 12fps base for VRAM efficiency
+            target_frames = duration * 24  # Final target: 24fps
 
-            # Update EmptyLatentImage batch_size for proper duration
+            logger.info(f"🧠 Echo optimization: {base_frames} base frames, RIFE interpolation for {duration}s video")
+
+            # Update EmptyLatentImage batch_size for VRAM-optimized generation
             for node_id, node in workflow.items():
                 if node.get("class_type") == "EmptyLatentImage":
-                    node["inputs"]["batch_size"] = frames
-                    node["_meta"]["title"] = f"Empty Latent Image ({frames} frames - {duration} seconds)"
-                    logger.info(f"Updated EmptyLatentImage node {node_id} to {frames} frames")
+                    node["inputs"]["batch_size"] = base_frames
+                    node["_meta"]["title"] = f"VRAM Optimized: {base_frames} base → {target_frames} final"
+                    logger.info(f"🎛️ Updated batch_size to {base_frames} frames for VRAM efficiency")
                     break
 
-            # Update ADE_LoopedUniformContextOptions for proper context handling
+            # Echo's adaptive interpolation: conservative multiplier for quality
+            rife_multiplier = min(4, max(2, target_frames // base_frames))  # Cap at 4x for stability
             for node_id, node in workflow.items():
-                if node.get("class_type") == "ADE_LoopedUniformContextOptions":
-                    # Context window configuration for different durations
-                    if frames <= 24:
-                        context_length = frames
-                        overlap = max(4, frames // 4)
-                    else:
-                        context_length = 24  # Standard window size
-                        overlap = 12  # 50% overlap for smooth transitions
+                if node.get("class_type") == "RIFE VFI":
+                    node["inputs"]["multiplier"] = rife_multiplier
+                    node["inputs"]["fast_mode"] = True  # Enable fast mode for VRAM efficiency
+                    node["_meta"]["title"] = f"Echo RIFE: {rife_multiplier}x (fast mode)"
+                    logger.info(f"🚀 RIFE optimized: {rife_multiplier}x multiplier with fast mode")
+                    break
 
-                    node["inputs"]["context_length"] = context_length
-                    node["inputs"]["context_overlap"] = overlap
-                    node["inputs"]["closed_loop"] = True
-                    node["_meta"]["title"] = f"Looped Context Window ({context_length} frames)"
-                    logger.info(f"Updated ADE context: {context_length} length, {overlap} overlap for {frames} total frames")
+            # Reduce sampling steps for VRAM efficiency (Echo's recommendation)
+            for node_id, node in workflow.items():
+                if node.get("class_type") == "KSampler":
+                    node["inputs"]["steps"] = 20  # Reduced from 30 for faster generation
+                    node["inputs"]["cfg"] = 7.5   # Slightly reduced CFG for efficiency
+                    logger.info(f"🎯 Sampling optimized: 20 steps, CFG 7.5 for VRAM efficiency")
                     break
 
             return workflow
