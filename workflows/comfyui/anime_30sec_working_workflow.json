@@ -22,10 +22,10 @@
   "3": {
     "inputs": {
       "seed": 42,
-      "steps": 20,
-      "cfg": 7.0,
-      "sampler_name": "euler",
-      "scheduler": "normal",
+      "steps": 30,
+      "cfg": 8.0,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
       "denoise": 1.0,
       "model": ["12", 0],
       "positive": ["1", 0],
@@ -39,7 +39,7 @@
   },
   "4": {
     "inputs": {
-      "ckpt_name": "AOM3A1B.safetensors"
+      "ckpt_name": "counterfeit_v3.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {
@@ -48,13 +48,13 @@
   },
   "5": {
     "inputs": {
-      "width": 512,
-      "height": 512,
-      "batch_size": 24
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 72
     },
     "class_type": "EmptyLatentImage",
     "_meta": {
-      "title": "Empty Latent Image (24 frames - 1 second)"
+      "title": "Empty Latent Image (72 frames - 3 seconds)"
     }
   },
   "6": {
@@ -72,10 +72,10 @@
       "images": ["6", 0],
       "frame_rate": 24,
       "loop_count": 0,
-      "filename_prefix": "animatediff_1sec",
+      "filename_prefix": "animatediff_3sec_hq",
       "format": "video/h264-mp4",
       "pix_fmt": "yuv420p",
-      "crf": 20,
+      "crf": 12,
       "save_metadata": true,
       "pingpong": false,
       "save_output": true

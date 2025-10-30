@@ -29,12 +29,22 @@ class ComfyUIIntegration:
 
             # Adjust frames based on duration
             frames = duration * 24  # 24fps
+            logger.info(f"Setting video to {frames} frames for {duration} seconds")
+
+            # Update EmptyLatentImage batch_size for proper duration
+            for node_id, node in workflow.items():
+                if node.get("class_type") == "EmptyLatentImage":
+                    node["inputs"]["batch_size"] = frames
+                    node["_meta"]["title"] = f"Empty Latent Image ({frames} frames - {duration} seconds)"
+                    logger.info(f"Updated EmptyLatentImage node {node_id} to {frames} frames")
+                    break
 
             # Update ADE_LoopedUniformContextOptions if present
             for node_id, node in workflow.items():
                 if node.get("class_type") == "ADE_LoopedUniformContextOptions":
                     node["inputs"]["context_length"] = min(frames, 24)  # Max 24 frame context
                     node["inputs"]["closed_loop"] = True
+                    logger.info(f"Updated ADE context for {frames} frames")
                     break
 
             return workflow
