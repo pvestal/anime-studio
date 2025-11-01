@@ -134,7 +134,7 @@ def generate_video(frames, prompt, project_name, duration_seconds):
                     status = history[prompt_id]["status"]
                     if status.get("completed", False):
                         gen_time = time.time() - start_time
-                        logger.info(f"✅ COMPLETED in {gen_time:.1f}s")
+                        logger.info(f"✅ Generated in {gen_time:.1f}s")
                         return True
                     elif "error" in status:
                         logger.error(f"❌ FAILED: {status['error']}")

@@ -46,7 +46,7 @@ Base = declarative_base()
 
 app = FastAPI(
     title="Tower Anime Production API",
-    description="Unified anime production service integrating professional workflows with personal creative tools",
+    description="Unified anime production service integrating professional workflows with personal creative tools. Character modifications (name/sex changes) supported via all generation endpoints.",
     version="1.0.0"
 )
 
@@ -124,8 +124,8 @@ def get_db():
         db.close()
 
 # Integration Services
-COMFYUI_URL = "http://127.0.0.1:8188"
-ECHO_SERVICE_URL = "http://127.0.0.1:8351"
+COMFYUI_URL = "http://192.168.50.135:8188"
+ECHO_SERVICE_URL = "http://192.168.50.135:8309"
 
 # Initialize integrated pipeline
 pipeline = None
@@ -158,14 +158,17 @@ async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura
         async with aiohttp.ClientSession() as session:
             request_data = {
                 "prompt": prompt,
-                "character": character,
+                "character_name": character,
                 "scene_type": "cyberpunk_action",
-                "duration": 3,
-                "style": style,
-                "echo_intelligence": "professional"
+                "generation_type": "video",
+                "quality_level": "professional",
+                "style_preference": style,
+                "width": 1024,
+                "height": 1024,
+                "steps": 30
             }
 
-            async with session.post(f"{ECHO_SERVICE_URL}/api/generate-with-echo", json=request_data) as response:
+            async with session.post(f"{ECHO_SERVICE_URL}/api/echo/anime/generate", json=request_data) as response:
                 if response.status == 200:
                     result = await response.json()
                     return result
@@ -215,6 +218,44 @@ async def get_real_comfyui_progress(request_id: str) -> float:
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "tower-anime-production"}
+
+@app.post("/api/anime/generate")
+async def generate_anime_video(request: AnimeGenerationRequest, db: Session = Depends(get_db)):
+    """Direct anime video generation endpoint"""
+    try:
+        # Generate using Echo Brain + ComfyUI
+        echo_result = await generate_with_echo_service(
+            prompt=request.prompt,
+            character=request.character,
+            style=request.style
+        )
+
+        job = ProductionJob(
+            job_type="video_generation",
+            prompt=request.prompt,
+            parameters=request.json(),
+            status="completed",
+            output_path=echo_result.get("output_path") if echo_result else None
+        )
+        db.add(job)
+        db.commit()
+
+        return {
+            "job_id": job.id,
+            "status": "completed",
+            "echo_result": echo_result,
+            "message": "Video generation completed"
+        }
+    except Exception as e:
+        job = ProductionJob(
+            job_type="video_generation",
+            prompt=request.prompt,
+            parameters=request.json(),
+            status="failed"
+        )
+        db.add(job)
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
 
 @app.get("/api/anime/projects", response_model=List[AnimeProjectResponse])
 async def get_projects(db: Session = Depends(get_db)):
@@ -533,21 +574,49 @@ async def generate_professional_anime(request: AnimeGenerationRequest, db: Sessi
     db.add(job)
     db.commit()
 
-    # Submit to ComfyUI (fixed workflow)
+    # Build character-enhanced prompt
+    enhanced_prompt = request.prompt
+    negative_prompt = "low quality, blurry, distorted, ugly, deformed"
+
+    if hasattr(request, 'character') and request.character:
+        # Load character system and get character prompt
+        import sys
+        import os
+        sys.path.append('/opt/tower-anime-production')
+        from character_system import get_character_prompt
+
+        try:
+            char_data = get_character_prompt(request.character)
+            if char_data and 'prompt' in char_data:
+                # Use character's full prompt instead of appending to request prompt
+                enhanced_prompt = char_data['prompt']
+                if request.prompt and request.prompt.strip():
+                    enhanced_prompt = f"{char_data['prompt']}, {request.prompt}"
+            if char_data and 'negative_prompt' in char_data:
+                negative_prompt += ", " + char_data['negative_prompt']
+            print(f"Character enhancement successful for {request.character}")
+            print(f"Enhanced prompt: {enhanced_prompt[:100]}...")
+            print(f"Negative prompt: {negative_prompt}")
+        except Exception as e:
+            print(f"Character enhancement failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    # Submit to ComfyUI (fixed workflow with character enhancement)
     import time
     timestamp = int(time.time())
     workflow = {
         "prompt": {
             "1": {
                 "inputs": {
-                    "text": f"masterpiece, best quality, photorealistic, {request.prompt}, cinematic lighting, detailed background, professional photography, 8k uhd, film grain, Canon EOS R3",
+                    "text": f"masterpiece, best quality, photorealistic, {enhanced_prompt}, cinematic lighting, detailed background, professional photography, 8k uhd, film grain, Canon EOS R3",
                     "clip": ["4", 1]
                 },
                 "class_type": "CLIPTextEncode"
             },
             "2": {
                 "inputs": {
-                    "text": "low quality, blurry, distorted, ugly, deformed",
+                    "text": negative_prompt,
                     "clip": ["4", 1]
                 },
                 "class_type": "CLIPTextEncode"
@@ -569,7 +638,7 @@ async def generate_professional_anime(request: AnimeGenerationRequest, db: Sessi
             },
             "4": {
                 "inputs": {
-                    "ckpt_name": "epicrealism_v5.safetensors"
+                    "ckpt_name": "juggernautXL_v9.safetensors"  # Better for photorealistic anime
                 },
                 "class_type": "CheckpointLoaderSimple"
             },
@@ -973,9 +1042,243 @@ async def get_git_status(project_id: int):
         logger.error(f"Git status check failed: {e}")
         raise HTTPException(status_code=500, detail=f"Git status failed: {str(e)}")
 
+# Model and Quality Selection Endpoints
+@app.get("/api/anime/models")
+async def get_available_models():
+    """Get available AI models for anime generation - scanning actual filesystem"""
+    import os
+    import glob
+
+    models = []
+    checkpoints_dir = "/mnt/1TB-storage/ComfyUI/models/checkpoints/"
+
+    # Define model quality ratings based on actual files found
+    model_info = {
+        "AOM3A1B.safetensors": {
+            "display_name": "AbyssOrangeMix 3 A1B",
+            "description": "High quality anime model - 2GB, excellent detail",
+            "quality": "ultra",
+            "recommended": True,
+            "file_size": "2.1GB"
+        },
+        "counterfeit_v3.safetensors": {
+            "display_name": "Counterfeit V3",
+            "description": "Versatile anime model - 4.2GB, balanced style",
+            "quality": "high",
+            "recommended": True,
+            "file_size": "4.2GB"
+        },
+        "Counterfeit-V2.5.safetensors": {
+            "display_name": "Counterfeit V2.5",
+            "description": "Previous version - 4.2GB, stable generation",
+            "quality": "high",
+            "recommended": False,
+            "file_size": "4.2GB"
+        },
+        "ProtoGen_X5.8.safetensors": {
+            "display_name": "ProtoGen X5.8",
+            "description": "Photorealistic model - 6.7GB, highly detailed",
+            "quality": "ultra",
+            "recommended": False,
+            "file_size": "6.7GB"
+        },
+        "juggernautXL_v9.safetensors": {
+            "display_name": "Juggernaut XL v9",
+            "description": "SDXL model - 6.9GB, high resolution capable",
+            "quality": "ultra",
+            "recommended": False,
+            "file_size": "6.9GB"
+        }
+    }
+
+    # Scan actual files
+    try:
+        for file_path in glob.glob(os.path.join(checkpoints_dir, "*.safetensors")):
+            filename = os.path.basename(file_path)
+            if filename in model_info and os.path.getsize(file_path) > 1000000:  # Skip empty files
+                info = model_info[filename]
+                models.append({
+                    "name": filename,
+                    "display_name": info["display_name"],
+                    "description": info["description"],
+                    "type": "checkpoint",
+                    "quality": info["quality"],
+                    "recommended": info["recommended"],
+                    "file_size": info["file_size"],
+                    "path": file_path
+                })
+    except Exception as e:
+        logger.error(f"Error scanning models: {e}")
+        # Fallback to hardcoded list if filesystem scan fails
+        models = [
+            {
+                "name": "AOM3A1B.safetensors",
+                "display_name": "AbyssOrangeMix 3 A1B",
+                "description": "Fallback: High quality anime model",
+                "quality": "ultra",
+                "recommended": True
+            }
+        ]
+
+    return models
+
+@app.get("/api/anime/quality-presets")
+async def get_quality_presets():
+    """Get available quality presets for anime generation based on current workflow analysis"""
+    # Current workflow analysis: Using 30 steps, CFG 8.0, 1024x1024
+    # Problem: Low batch size (16-24 frames) may be causing quality issues
+    presets = [
+        {
+            "name": "ultra_production",
+            "display_name": "Ultra Production",
+            "description": "Maximum quality - 1024x1024, 40 steps, CFG 8.5, optimized sampling",
+            "settings": {
+                "width": 1024,
+                "height": 1024,
+                "steps": 40,
+                "cfg": 8.5,
+                "batch_size": 12,  # Reduced for higher quality per frame
+                "sampler": "dpmpp_2m",
+                "scheduler": "karras",
+                "denoise": 1.0
+            },
+            "recommended": False,
+            "quality_focus": "maximum_detail"
+        },
+        {
+            "name": "current_workflow",
+            "display_name": "Current Workflow",
+            "description": "Current settings - 1024x1024, 30 steps, CFG 8.0 (what's being used now)",
+            "settings": {
+                "width": 1024,
+                "height": 1024,
+                "steps": 30,
+                "cfg": 8.0,
+                "batch_size": 24,
+                "sampler": "dpmpp_2m",
+                "scheduler": "karras",
+                "denoise": 1.0
+            },
+            "recommended": True,
+            "quality_focus": "balanced"
+        },
+        {
+            "name": "fast_preview",
+            "display_name": "Fast Preview",
+            "description": "Quick generation - 768x768, 20 steps, CFG 7.0",
+            "settings": {
+                "width": 768,
+                "height": 768,
+                "steps": 20,
+                "cfg": 7.0,
+                "batch_size": 32,
+                "sampler": "dpmpp_2m",
+                "scheduler": "normal",
+                "denoise": 1.0
+            },
+            "recommended": False,
+            "quality_focus": "speed"
+        }
+    ]
+    return presets
+
+@app.post("/api/anime/config")
+async def update_configuration(config: dict):
+    """Update model and quality configuration - actually modifying workflow files"""
+    import json
+    import shutil
+
+    result = {"status": "updated", "changes": config, "files_modified": []}
+
+    try:
+        # Update the actual workflow file
+        workflow_path = "/opt/tower-anime-production/workflows/comfyui/anime_30sec_working_workflow.json"
+
+        if os.path.exists(workflow_path):
+            # Backup original
+            backup_path = f"{workflow_path}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            shutil.copy2(workflow_path, backup_path)
+            result["backup_created"] = backup_path
+
+            # Load current workflow
+            with open(workflow_path, 'r') as f:
+                workflow = json.load(f)
+
+            # Update model if specified
+            if "model" in config:
+                model_name = config["model"]
+                if "4" in workflow and "inputs" in workflow["4"]:
+                    workflow["4"]["inputs"]["ckpt_name"] = model_name
+                    result["model_changed"] = model_name
+                    result["files_modified"].append("workflow checkpoint")
+
+            # Update quality settings if specified
+            if "quality_preset" in config:
+                preset_name = config["quality_preset"]
+                # Get preset settings
+                presets_response = await get_quality_presets()
+                preset_settings = None
+                for preset in presets_response:
+                    if preset["name"] == preset_name:
+                        preset_settings = preset["settings"]
+                        break
+
+                if preset_settings:
+                    # Update KSampler settings (node 3)
+                    if "3" in workflow and "inputs" in workflow["3"]:
+                        workflow["3"]["inputs"]["steps"] = preset_settings["steps"]
+                        workflow["3"]["inputs"]["cfg"] = preset_settings["cfg"]
+                        if "sampler" in preset_settings:
+                            workflow["3"]["inputs"]["sampler_name"] = preset_settings["sampler"]
+                        if "scheduler" in preset_settings:
+                            workflow["3"]["inputs"]["scheduler"] = preset_settings["scheduler"]
+                        result["sampling_updated"] = preset_settings
+
+                    # Update latent image size (node 5)
+                    if "5" in workflow and "inputs" in workflow["5"]:
+                        workflow["5"]["inputs"]["width"] = preset_settings["width"]
+                        workflow["5"]["inputs"]["height"] = preset_settings["height"]
+                        workflow["5"]["inputs"]["batch_size"] = preset_settings["batch_size"]
+                        result["resolution_updated"] = f"{preset_settings['width']}x{preset_settings['height']}"
+
+                    result["quality_changed"] = preset_name
+                    result["files_modified"].append("workflow quality settings")
+
+            # Fix VAE issue if requested
+            if "fix_vae" in config:
+                # Add dedicated VAE loader node
+                workflow["13"] = {
+                    "inputs": {
+                        "vae_name": "vae-ft-mse-840000-ema-pruned.safetensors"
+                    },
+                    "class_type": "VAELoader",
+                    "_meta": {
+                        "title": "Load VAE"
+                    }
+                }
+
+                # Update VAE Decode to use dedicated VAE instead of checkpoint VAE
+                if "6" in workflow and "inputs" in workflow["6"]:
+                    workflow["6"]["inputs"]["vae"] = ["13", 0]  # Use dedicated VAE
+                    result["vae_fixed"] = "Using dedicated VAE instead of checkpoint VAE"
+                    result["files_modified"].append("VAE configuration")
+
+            # Save updated workflow
+            with open(workflow_path, 'w') as f:
+                json.dump(workflow, f, indent=2)
+
+            result["workflow_updated"] = workflow_path
+
+    except Exception as e:
+        logger.error(f"Error updating configuration: {e}")
+        result["error"] = str(e)
+        result["status"] = "error"
+
+    return result
+
 # Mount static files
 app.mount("/static", StaticFiles(directory="/opt/tower-anime-production/static"), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8305)  # Tower Anime Production port
+    uvicorn.run(app, host="0.0.0.0", port=8328)  # Tower Anime Production port

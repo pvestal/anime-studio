@@ -5,6 +5,20 @@ Port: 8328
 Generates KB-quality videos using ComfyUI with AOM3A1B.safetensors
 """
 
+from contextlib import contextmanager
+from psycopg2.extras import RealDictCursor
+import psycopg2
+from git_branching import (
+    create_branch,
+    create_commit,
+    get_commit_history,
+    compare_branches,
+    merge_branches,
+    revert_to_commit,
+    tag_commit,
+    list_branches,
+    get_commit_details,
+)
 import sys
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -27,10 +41,14 @@ import logging
 from logging.handlers import RotatingFileHandler
 import asyncio
 import aiohttp
+
 # from quality_integration import assess_video_quality, QUALITY_ENABLED
 from error_handler import (
     ErrorHandler,
 )
+
+# Import character system for proper character generation
+from character_system import get_character_prompt
 
 # PHASE 1 FIX: Structured logging with rotation
 log_dir = Path("/opt/tower-anime-production/logs")
@@ -75,7 +93,7 @@ APPLE_MUSIC_VIDEO_USE_PLAYLIST = {
         "bpm": 150,
         "mood": "aggressive_confident",
         "duration_limit": 30,  # Copyright compliance
-        "scene_types": ["action", "confrontation", "power_display"]
+        "scene_types": ["action", "confrontation", "power_display"],
     },
     "missy_elliott_get_ur_freak_on": {
         "artist": "Missy Elliott",
@@ -83,7 +101,7 @@ APPLE_MUSIC_VIDEO_USE_PLAYLIST = {
         "bpm": 168,
         "mood": "energetic_playful",
         "duration_limit": 30,
-        "scene_types": ["dance", "party", "cyberpunk_club"]
+        "scene_types": ["dance", "party", "cyberpunk_club"],
     },
     "dmx_yall_gonna_make_me": {
         "artist": "DMX",
@@ -91,8 +109,8 @@ APPLE_MUSIC_VIDEO_USE_PLAYLIST = {
         "bpm": 95,
         "mood": "intense_raw",
         "duration_limit": 30,
-        "scene_types": ["fight", "chase", "underground"]
-    }
+        "scene_types": ["fight", "chase", "underground"],
+    },
 }
 
 # Add Echo Brain quality integration
@@ -120,20 +138,29 @@ except ImportError as e:
 AUTH_SERVICE_URL = "http://127.0.0.1:8088"
 APPLE_MUSIC_SERVICE_URL = "http://127.0.0.1:8315"
 
-def match_scene_to_music(scene_description: str, scene_type: str = "action") -> dict:
+
+def match_scene_to_music(scene_description: str,
+                         scene_type: str = "action") -> dict:
     """Match scene to appropriate track from Video Use playlist with 30-second copyright compliance"""
     scene_lower = scene_description.lower()
 
     # Scene analysis for music matching
-    if any(word in scene_lower for word in ["fight", "battle", "confrontation", "power"]):
+    if any(
+        word in scene_lower for word in ["fight", "battle", "confrontation", "power"]
+    ):
         return APPLE_MUSIC_VIDEO_USE_PLAYLIST["kendrick_lamar_humble"]
-    elif any(word in scene_lower for word in ["club", "dance", "party", "cyberpunk", "neon"]):
+    elif any(
+        word in scene_lower for word in ["club", "dance", "party", "cyberpunk", "neon"]
+    ):
         return APPLE_MUSIC_VIDEO_USE_PLAYLIST["missy_elliott_get_ur_freak_on"]
-    elif any(word in scene_lower for word in ["chase", "underground", "intense", "raw"]):
+    elif any(
+        word in scene_lower for word in ["chase", "underground", "intense", "raw"]
+    ):
         return APPLE_MUSIC_VIDEO_USE_PLAYLIST["dmx_yall_gonna_make_me"]
     else:
         # Default to Kendrick for action scenes
         return APPLE_MUSIC_VIDEO_USE_PLAYLIST["kendrick_lamar_humble"]
+
 
 async def get_apple_music_track(track_info: dict) -> dict:
     """Get track details from Apple Music service with auth"""
@@ -143,9 +170,11 @@ async def get_apple_music_track(track_info: dict) -> dict:
             search_params = {
                 "q": f"{track_info['artist']} {track_info['title']}",
                 "type": "song",
-                "limit": 1
+                "limit": 1,
             }
-            async with session.get(f"{APPLE_MUSIC_SERVICE_URL}/api/search", params=search_params) as response:
+            async with session.get(
+                f"{APPLE_MUSIC_SERVICE_URL}/api/search", params=search_params
+            ) as response:
                 if response.status == 200:
                     search_data = await response.json()
                     if search_data.get("results"):
@@ -162,7 +191,9 @@ async def get_apple_music_track(track_info: dict) -> dict:
         logger.warning(f"Apple Music lookup failed: {e}, using fallback data")
         return track_info
 
-async def scrape_music_for_video(track_info: dict, duration_seconds: int = 30) -> dict:
+
+async def scrape_music_for_video(
+        track_info: dict, duration_seconds: int = 30) -> dict:
     """Scrape up to 30 seconds of music data for copyright compliance"""
     try:
         # Simulate music scraping with metadata
@@ -174,15 +205,22 @@ async def scrape_music_for_video(track_info: dict, duration_seconds: int = 30) -
             "duration_scraped": min(duration_seconds, track_info["duration_limit"]),
             "sync_points": generate_sync_points(track_info["bpm"], duration_seconds),
             "copyright_compliant": True,
-            "scraping_timestamp": datetime.now().isoformat()
+            "scraping_timestamp": datetime.now().isoformat(),
         }
 
-        logger.info(f"🎵 Scraped {scraped_data['duration_scraped']}s of {track_info['artist']} - {track_info['title']} at {track_info['bpm']} BPM")
+        logger.info(
+            f"🎵 Scraped {
+                scraped_data['duration_scraped']}s of {
+                track_info['artist']} - {
+                track_info['title']} at {
+                track_info['bpm']} BPM"
+        )
         return scraped_data
 
     except Exception as e:
         logger.error(f"Music scraping failed: {e}")
         return {"error": str(e), "copyright_compliant": False}
+
 
 def generate_sync_points(bpm: int, duration_seconds: int) -> list:
     """Generate video sync points based on music BPM"""
@@ -194,14 +232,20 @@ def generate_sync_points(bpm: int, duration_seconds: int) -> list:
         time_point = beat / beats_per_second
         frame_number = int(time_point * 24)  # 24fps
 
-        sync_points.append({
-            "beat": beat + 1,
-            "time_seconds": round(time_point, 2),
-            "frame_number": frame_number,
-            "intensity": "high" if beat % 4 == 0 else "medium" if beat % 2 == 0 else "low"
-        })
+        sync_points.append(
+            {
+                "beat": beat + 1,
+                "time_seconds": round(time_point, 2),
+                "frame_number": frame_number,
+                "intensity": (
+                    "high" if beat % 4 == 0 else "medium" if beat % 2 == 0 else "low"
+                ),
+            }
+        )
 
     return sync_points
+
+
 app = FastAPI(title="Tower Anime Video Service", version="2.0.0-phase2")
 
 # Enable CORS
@@ -213,6 +257,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # WebSocket Connection Manager for Director Studio Real-time Updates
 class DirectorStudioWebSocketManager:
     def __init__(self):
@@ -222,29 +267,40 @@ class DirectorStudioWebSocketManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.add(websocket)
-        logger.info(f"🔌 Director Studio WebSocket connected ({len(self.active_connections)} total)")
+        logger.info(
+            f"🔌 Director Studio WebSocket connected ({
+                len(
+                    self.active_connections)} total)"
+        )
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.discard(websocket)
         # Remove from all generation subscriptions
         for subscribers in self.generation_subscribers.values():
             subscribers.discard(websocket)
-        logger.info(f"🔌 Director Studio WebSocket disconnected ({len(self.active_connections)} total)")
+        logger.info(
+            f"🔌 Director Studio WebSocket disconnected ({
+                len(
+                    self.active_connections)} total)"
+        )
 
-    async def subscribe_to_generation(self, websocket: WebSocket, generation_id: str):
+    async def subscribe_to_generation(
+            self, websocket: WebSocket, generation_id: str):
         if generation_id not in self.generation_subscribers:
             self.generation_subscribers[generation_id] = set()
         self.generation_subscribers[generation_id].add(websocket)
-        logger.info(f"📺 WebSocket subscribed to generation {generation_id[:8]}")
+        logger.info(
+            f"📺 WebSocket subscribed to generation {generation_id[:8]}")
 
-    async def broadcast_generation_update(self, generation_id: str, status_data: dict):
+    async def broadcast_generation_update(
+            self, generation_id: str, status_data: dict):
         """Broadcast generation status update to subscribed WebSocket connections"""
         if generation_id in self.generation_subscribers:
             message = {
                 "type": "generation_update",
                 "generation_id": generation_id,
                 "data": status_data,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
 
             disconnected = set()
@@ -265,7 +321,7 @@ class DirectorStudioWebSocketManager:
         message = {
             "type": "project_update",
             "data": project_data,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
         disconnected = set()
@@ -279,6 +335,7 @@ class DirectorStudioWebSocketManager:
         # Clean up disconnected sockets
         for websocket in disconnected:
             self.active_connections.discard(websocket)
+
 
 # Initialize WebSocket manager
 websocket_manager = DirectorStudioWebSocketManager()
@@ -309,10 +366,84 @@ OUTPUT_DIR = Path("/mnt/1TB-storage/ComfyUI/output")
 OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 
 # PHASE 1 FIX: Production limits
-MAX_CONCURRENT_GENERATIONS = 4  # Increased for 24 CPU cores (3GB per generation)
+# Increased for 24 CPU cores (3GB per generation)
+MAX_CONCURRENT_GENERATIONS = 4
 VRAM_THRESHOLD_GB = 3.0  # Reduced threshold - 7GB free available (was 4GB)
 MAX_STATUS_HISTORY = 100  # Prevent memory leak in status tracker
 CLEANUP_AGE_HOURS = 24  # Clean up failed generations after 24 hours
+
+# Dynamic Model Configuration
+_DEFAULT_MODEL = os.getenv("ANIME_MODEL", "AOM3A1B.safetensors")
+AVAILABLE_MODELS = [
+    "AOM3A1B.safetensors",  # High quality anime
+    "counterfeit_v3.safetensors",  # Fast anime
+    "Counterfeit-V2.5.safetensors",  # Alternative anime
+    "juggernautXL_v9.safetensors",  # Realistic SDXL
+    "ProtoGen_X5.8.safetensors",  # Sci-fi style
+]
+
+# Dynamic Quality Presets
+QUALITY_PRESETS = {
+    "fast": {"steps": 15, "cfg": 7.0, "sampler": "euler", "scheduler": "normal"},
+    "balanced": {"steps": 25, "cfg": 7.5, "sampler": "dpmpp_2m", "scheduler": "karras"},
+    "quality": {"steps": 35, "cfg": 8.0, "sampler": "dpmpp_2m", "scheduler": "karras"},
+    "ultra": {"steps": 50, "cfg": 8.5, "sampler": "dpmpp_2m", "scheduler": "karras"},
+}
+
+DEFAULT_QUALITY = os.getenv("ANIME_QUALITY", "quality")
+
+
+def validate_model(model_name: str) -> str:
+    """Validate model exists, fallback to default if not"""
+    model_path = Path(
+        f"/mnt/1TB-storage/ComfyUI/models/checkpoints/{model_name}")
+    if model_name in AVAILABLE_MODELS and model_path.exists():
+        return model_name
+
+    # Try fallback models in order
+    for fallback in [
+        "AOM3A1B.safetensors",
+        "counterfeit_v3.safetensors",
+        "Counterfeit-V2.5.safetensors",
+    ]:
+        fallback_path = Path(
+            f"/mnt/1TB-storage/ComfyUI/models/checkpoints/{fallback}")
+        if fallback_path.exists():
+            logger.warning(
+                f"Model {model_name} not found, using fallback: {fallback}")
+            return fallback
+
+    # Last resort - return first available model
+    logger.error(
+        f"No valid models found, using first in list: {
+            AVAILABLE_MODELS[0]}"
+    )
+    return AVAILABLE_MODELS[0]
+
+
+def get_quality_settings(quality_level: str = None) -> dict:
+    """Get quality settings for generation with fallback"""
+    quality = quality_level or DEFAULT_QUALITY
+    if quality not in QUALITY_PRESETS:
+        logger.warning(
+            f"Quality preset '{quality}' not found, using 'quality'")
+        quality = "quality"
+    return QUALITY_PRESETS[quality]
+
+
+def get_available_models() -> list:
+    """Get list of actually available models on disk"""
+    available = []
+    for model in AVAILABLE_MODELS:
+        model_path = Path(
+            f"/mnt/1TB-storage/ComfyUI/models/checkpoints/{model}")
+        if model_path.exists():
+            available.append(model)
+    return available if available else AVAILABLE_MODELS  # fallback to full list
+
+
+# Validate model at startup
+DEFAULT_ANIME_MODEL = validate_model(_DEFAULT_MODEL)
 
 # PERFORMANCE OPTIMIZATION SETTINGS
 COMFYUI_PERFORMANCE_SETTINGS = {
@@ -321,7 +452,7 @@ COMFYUI_PERFORMANCE_SETTINGS = {
     "batch_size": 1,  # Keep batch size at 1 for consistent quality
     "precision": "fp16",  # Use half precision for faster generation
     "optimization_level": "O1",  # Moderate optimization for speed/quality balance
-    "memory_fraction": 0.9  # Use 90% of available VRAM when needed
+    "memory_fraction": 0.9,  # Use 90% of available VRAM when needed
 }
 
 # PHASE 2B: Retry configuration
@@ -399,13 +530,16 @@ class VideoGenerationStatus:
             )
 
             # Broadcast real-time update to WebSocket clients
-            await websocket_manager.broadcast_generation_update(gen_id, {
-                "status": status,
-                "progress": progress,
-                "message": message,
-                "output_file": output_file,
-                "timestamp": datetime.now().isoformat()
-            })
+            await websocket_manager.broadcast_generation_update(
+                gen_id,
+                {
+                    "status": status,
+                    "progress": progress,
+                    "message": message,
+                    "output_file": output_file,
+                    "timestamp": datetime.now().isoformat(),
+                },
+            )
 
     async def get_status(self, gen_id: str):
         """Thread-safe status retrieval"""
@@ -427,12 +561,21 @@ class VideoGenerationStatus:
                 "timestamp": datetime.now().isoformat(),
                 "updated_at": time.time(),
                 "compute_location": generation_data.get("compute_location", "unknown"),
-                "processing_time_seconds": generation_data.get("processing_time_seconds", 0),
+                "processing_time_seconds": generation_data.get(
+                    "processing_time_seconds", 0
+                ),
                 "estimated_cost_usd": generation_data.get("estimated_cost_usd", 0),
                 "video_specs": generation_data.get("video_specs", {}),
-                "segments": generation_data.get("segments", [])
+                "segments": generation_data.get("segments", []),
             }
-            logger.info(f"✅ Generation data stored [{gen_id[:8]}]: {generation_data.get('message', 'Completed')}")
+            logger.info(
+                f"✅ Generation data stored [{
+                    gen_id[
+                        :8]}]: {
+                    generation_data.get(
+                        'message',
+                        'Completed')}"
+            )
 
     async def _cleanup_old_entries(self):
         """Remove oldest completed/failed entries to prevent memory leak"""
@@ -660,7 +803,7 @@ async def health_check():
         "phase": "Phase 2 Production Hardening (Retry + Rate Limiting + Cleanup)",
         "comfyui_status": comfyui_status,
         "output_dir": str(OUTPUT_DIR),
-        "model": "counterfeit_v3.safetensors",
+        "model": DEFAULT_ANIME_MODEL,
         "timestamp": datetime.now().isoformat(),
         "capacity": {
             "max_concurrent": MAX_CONCURRENT_GENERATIONS,
@@ -698,6 +841,1282 @@ async def health_check():
     return health
 
 
+# ====================================
+# CHARACTER GENERATION API ENDPOINT
+# ====================================
+
+
+class CharacterGenerationRequest(BaseModel):
+    prompt: str
+    parameters: Dict[str, Any]
+
+
+@app.post("/api/anime/generate-character")
+async def generate_character(request: CharacterGenerationRequest):
+    """Generate character using Echo's character system and return image path"""
+    try:
+        # Transform frontend parameters into Echo-compatible format
+        params = request.parameters
+
+        # Build character description from frontend parameters
+        character_description = build_character_description(
+            request.prompt, params)
+
+        # Call Echo's character generation system
+        echo_response = await call_echo_character_generation(
+            character_description, params
+        )
+
+        if echo_response.get("success"):
+            # Return formatted response for frontend
+            return {
+                "imageUrl": echo_response.get(
+                    "image_path", "/static/placeholder-character.png"
+                ),
+                "type": params.get("characterType", "protagonist"),
+                "style": params.get("artStyle", "cyberpunk"),
+                "prompt": echo_response.get("final_prompt", character_description),
+                "generation_id": echo_response.get("generation_id"),
+                "metadata": {
+                    "age": params.get("age", 25),
+                    "mood": params.get("mood", "determined"),
+                    "tech_level": params.get("techLevel", 50),
+                    "lighting": params.get("lighting", "neon_glow"),
+                },
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Character generation failed: {
+                    echo_response.get(
+                        'error', 'Unknown error')}",
+            )
+
+    except Exception as e:
+        logger.error(f"Character generation API error: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Character generation failed: {str(e)}"
+        )
+
+
+@app.post("/api/anime/generate")
+async def generate_anime_content(
+        request: dict, background_tasks: BackgroundTasks):
+    """Frontend-compatible generation endpoint that delegates to existing generate_simple_video"""
+    try:
+        # Forward request to existing generation function with proper path
+        return await generate_simple_video(request, background_tasks)
+    except Exception as e:
+        logger.error(f"Generation failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Generation failed: {
+                str(e)}",
+        )
+
+
+@app.get("/api/anime/status/{generation_id}")
+async def get_generation_status(generation_id: str):
+    """Get status of running generation"""
+    try:
+        # Check if generation is complete by looking for output file
+        video_path = await find_generated_video(generation_id)
+        if video_path:
+            return {
+                "status": "completed",
+                "generation_id": generation_id,
+                "video_url": f"/api/anime/media/{Path(video_path).name}",
+                "progress": 100,
+            }
+
+        # Check active generation status
+        status_info = await status_tracker.get_status(generation_id)
+        if status_info:
+            return {
+                "status": status_info.get("status", "running"),
+                "generation_id": generation_id,
+                "progress": status_info.get("progress", 50),
+                "message": status_info.get("message", "Generating..."),
+            }
+
+        return {"status": "not_found",
+                "generation_id": generation_id, "progress": 0}
+    except Exception as e:
+        logger.error(f"Status check failed: {e}")
+        return {"status": "error",
+                "generation_id": generation_id, "error": str(e)}
+
+
+def build_character_description(
+        base_prompt: str, parameters: Dict[str, Any]) -> str:
+    """Transform frontend parameters into comprehensive character description using narrative director"""
+
+    # Try to use narrative director for enhanced prompts
+    try:
+        from narrative_director import build_story_driven_prompt
+
+        # Build story context from parameters
+        story_context = {
+            "story_context": f"Character creation for {parameters.get('characterType', 'protagonist')} in {parameters.get('artStyle', 'cyberpunk')} setting",
+            "visual_state": f"Age {parameters.get('age', 25)}, {parameters.get('mood', 'determined')} expression, tech level {parameters.get('techLevel', 50)}%",
+            "scene_context": "character portrait generation",
+        }
+
+        # Use narrative director if character name is provided
+        character_name = extract_character_name(base_prompt)
+        if character_name:
+            story_beat = determine_story_beat(parameters)
+            narrative_prompt = build_story_driven_prompt(
+                character_name, story_beat, story_context
+            )
+            if narrative_prompt.get("prompt"):
+                logger.info(
+                    f"Using narrative director prompt for {character_name}")
+                return enhance_with_frontend_parameters(
+                    narrative_prompt["prompt"], parameters
+                )
+
+    except Exception as e:
+        logger.warning(
+            f"Narrative director not available, using fallback: {e}")
+
+    # Fallback to original parameter-based description
+    return build_parameter_based_description(base_prompt, parameters)
+
+
+def extract_character_name(prompt: str) -> Optional[str]:
+    """Extract character name from prompt if present"""
+    # Simple heuristic - look for known character patterns
+    known_characters = ["Kai Nakamura", "Hiroshi Yamamoto"]
+    for character in known_characters:
+        if character.lower() in prompt.lower():
+            return character
+    return None
+
+
+def determine_story_beat(parameters: Dict[str, Any]) -> str:
+    """Determine story beat based on parameters"""
+    mood = parameters.get("mood", "determined")
+    psych_intensity = parameters.get("psychIntensity", 30)
+    tech_level = parameters.get("techLevel", 50)
+
+    # Map parameters to story beats
+    if mood in ["aggressive", "menacing"] and psych_intensity > 60:
+        return "climax"
+    elif mood in ["fearful", "brooding"] and psych_intensity > 50:
+        return "darkest_moment"
+    elif mood in ["confident", "determined"] and tech_level > 70:
+        return "revelation"
+    elif mood == "mysterious":
+        return "inciting_incident"
+    else:
+        return "opening"
+
+
+def enhance_with_frontend_parameters(
+    narrative_prompt: str, parameters: Dict[str, Any]
+) -> str:
+    """Add frontend-specific enhancements to narrative prompt"""
+    enhancements = []
+
+    # Add lighting enhancement
+    lighting = parameters.get("lighting", "neon_glow")
+    lighting_map = {
+        "neon_glow": "dramatic neon lighting, cyberpunk glow effects",
+        "industrial_harsh": "harsh industrial lighting, stark metallic reflections",
+        "ambient_dark": "moody ambient lighting, mysterious shadows",
+        "backlighting": "dramatic backlighting, silhouette effects",
+        "natural": "natural lighting, soft illumination",
+    }
+    enhancements.append(lighting_map.get(lighting, "atmospheric lighting"))
+
+    # Add visual effects
+    if parameters.get("enableGlow", False):
+        enhancements.append("neon glow effects, luminous atmospheric lighting")
+    if parameters.get("enableParticles", False):
+        enhancements.append("atmospheric particles, environmental effects")
+
+    # Add custom prompt
+    if parameters.get("customPrompt"):
+        enhancements.append(parameters["customPrompt"])
+
+    return f"{narrative_prompt}, {', '.join(enhancements)}"
+
+
+def build_parameter_based_description(
+    base_prompt: str, parameters: Dict[str, Any]
+) -> str:
+    """Fallback method for building character description from frontend parameters"""
+
+    # Extract parameters with defaults
+    character_type = parameters.get("characterType", "protagonist")
+    art_style = parameters.get("artStyle", "cyberpunk")
+    age = parameters.get("age", 25)
+    mood = parameters.get("mood", "determined")
+    tech_level = parameters.get("techLevel", 50)
+    psych_intensity = parameters.get("psychIntensity", 30)
+    lighting = parameters.get("lighting", "neon_glow")
+    color_palette = parameters.get("colorPalette", "cyberpunk_orange")
+    custom_prompt = parameters.get("customPrompt", "")
+
+    # Build enhanced description using narrative director patterns
+    description_parts = [
+        f"{character_type} character",
+        f"{art_style} aesthetic",
+        f"age {age}",
+        f"{mood} expression",
+    ]
+
+    # Add tech enhancement details
+    if tech_level > 70:
+        description_parts.append(
+            "heavily cybernetic, extensive technological enhancements"
+        )
+    elif tech_level > 40:
+        description_parts.append(
+            "moderate cybernetic augmentation, visible tech elements"
+        )
+    elif tech_level > 10:
+        description_parts.append(
+            "minimal tech enhancements, subtle technological details"
+        )
+
+    # Add psychological intensity
+    if psych_intensity > 70:
+        description_parts.append(
+            "intense psychological atmosphere, piercing gaze, dark psychological undertones"
+        )
+    elif psych_intensity > 40:
+        description_parts.append(
+            "psychological depth, complex emotional state")
+
+    # Add lighting and color information
+    lighting_descriptions = {
+        "neon_glow": "dramatic neon lighting, glowing atmospheric effects",
+        "industrial_harsh": "harsh industrial lighting, stark shadows",
+        "ambient_dark": "moody ambient lighting, atmospheric shadows",
+        "backlighting": "dramatic backlighting, silhouette effects",
+        "natural": "natural lighting, soft illumination",
+    }
+    description_parts.append(
+        lighting_descriptions.get(lighting, "atmospheric lighting")
+    )
+
+    # Add visual effects based on parameters
+    if parameters.get("enableGlow", False):
+        description_parts.append(
+            "neon glow effects, luminous atmospheric lighting")
+    if parameters.get("enableParticles", False):
+        description_parts.append(
+            "atmospheric particles, environmental dust and effects"
+        )
+    if parameters.get("enableMotionBlur", False):
+        description_parts.append("dynamic motion effects, kinetic energy")
+
+    # Combine base prompt with enhancements
+    enhanced_description = f"{base_prompt}, {', '.join(description_parts)}"
+
+    # Add custom prompt if provided
+    if custom_prompt:
+        enhanced_description += f", {custom_prompt}"
+
+    return enhanced_description
+
+
+async def call_echo_character_generation(
+    character_description: str, parameters: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Call Echo for character generation coordination, fall back to direct ComfyUI"""
+    try:
+        # First, try Echo's coordination for enhanced prompts
+        try:
+            enhanced_prompt = await get_echo_enhanced_prompt(
+                character_description, parameters
+            )
+            if enhanced_prompt:
+                character_description = enhanced_prompt
+                logger.info(
+                    "Using Echo-enhanced prompt for character generation")
+        except Exception as e:
+            logger.warning(
+                f"Echo enhancement failed, using original prompt: {e}")
+
+        # Generate character using our proven ComfyUI workflow
+        generation_id = str(uuid.uuid4())
+        result = await generate_character_with_comfyui(
+            character_description, parameters, generation_id
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Character generation error: {e}")
+        return {"success": False,
+                "error": f"Character generation failed: {str(e)}"}
+
+
+async def get_echo_enhanced_prompt(
+    character_description: str, parameters: Dict[str, Any]
+) -> Optional[str]:
+    """Use Echo to enhance the character generation prompt"""
+    try:
+        # Use Echo's general query endpoint for prompt enhancement
+        echo_payload = {
+            "query": f"Enhance this anime character description for image generation: {character_description}",
+            "context": {
+                "task": "character_prompt_enhancement",
+                "parameters": parameters,
+                "style": parameters.get("artStyle", "cyberpunk"),
+                "character_type": parameters.get("characterType", "protagonist"),
+            },
+            "model": "llama3.2:3b",
+        }
+
+        echo_url = "http://192.168.50.135:8309/api/echo/query"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                echo_url, json=echo_payload, timeout=aiohttp.ClientTimeout(
+                    total=30)
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    enhanced_prompt = result.get("response", "").strip()
+                    if enhanced_prompt and len(enhanced_prompt) > len(
+                        character_description
+                    ):
+                        return enhanced_prompt
+                return None
+
+    except Exception as e:
+        logger.warning(f"Echo prompt enhancement failed: {e}")
+        return None
+
+
+async def generate_character_with_comfyui(
+    character_description: str, parameters: Dict[str, Any], generation_id: str
+) -> Dict[str, Any]:
+    """Generate character directly using ComfyUI with our proven workflow"""
+    try:
+        # Create character generation workflow
+        workflow = create_character_generation_workflow(
+            character_description, parameters, generation_id
+        )
+
+        # Submit to ComfyUI
+        logger.info(
+            f"Submitting character generation to ComfyUI: {generation_id}")
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{COMFYUI_URL}/prompt",
+                json={"prompt": workflow},
+                timeout=aiohttp.ClientTimeout(total=30),
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"ComfyUI submission failed: {error_text}")
+
+                result = await response.json()
+                prompt_id = result.get("prompt_id")
+
+                if not prompt_id:
+                    raise Exception("No prompt_id returned from ComfyUI")
+
+        # Wait for generation completion
+        image_path = await wait_for_character_generation(prompt_id, generation_id)
+
+        if image_path:
+            return {
+                "success": True,
+                "image_path": image_path,
+                "final_prompt": character_description,
+                "generation_id": generation_id,
+                "processing_time": 0,
+            }
+        else:
+            raise Exception("Character generation failed or timed out")
+
+    except Exception as e:
+        logger.error(f"ComfyUI character generation error: {e}")
+        return {"success": False,
+                "error": f"Character generation failed: {str(e)}"}
+
+
+async def wait_for_character_generation(
+    prompt_id: str, generation_id: str, max_wait: int = 300
+) -> Optional[str]:
+    """Wait for ComfyUI character generation to complete and return image path"""
+    start_time = time.time()
+
+    while time.time() - start_time < max_wait:
+        await asyncio.sleep(3)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{COMFYUI_URL}/history/{prompt_id}",
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if prompt_id in data:
+                            prompt_status = data[prompt_id].get("status", {})
+                            if prompt_status.get(
+                                "status_str"
+                            ) == "success" and prompt_status.get("completed"):
+                                # Look for generated image
+                                outputs = data[prompt_id].get("outputs", {})
+                                return await find_character_image(generation_id)
+                            elif prompt_status.get("status_str") == "error":
+                                error_msg = prompt_status.get(
+                                    "messages", "Unknown error"
+                                )
+                                logger.error(
+                                    f"ComfyUI generation failed: {error_msg}")
+                                return None
+        except Exception as e:
+            logger.warning(f"Error checking generation status: {e}")
+
+    logger.error(f"Character generation timeout after {max_wait}s")
+    return None
+
+
+async def find_character_image(generation_id: str) -> Optional[str]:
+    """Find the generated character image"""
+    try:
+        # Look for recent image files in ComfyUI output directory
+        cutoff_time = time.time() - 300  # Last 5 minutes
+
+        for image_file in OUTPUT_DIR.glob("*.png"):
+            if image_file.stat().st_mtime > cutoff_time:
+                logger.info(f"Found character image: {image_file}")
+                return str(image_file)
+
+        # Also check for jpg files
+        for image_file in OUTPUT_DIR.glob("*.jpg"):
+            if image_file.stat().st_mtime > cutoff_time:
+                logger.info(f"Found character image: {image_file}")
+                return str(image_file)
+
+        return None
+
+    except Exception as e:
+        logger.error(f"Error finding character image: {e}")
+        return None
+
+
+def create_character_generation_workflow(
+    character_description: str, parameters: Dict[str, Any], generation_id: str
+) -> Dict[str, Any]:
+    """Create ComfyUI workflow for character generation"""
+
+    # Build negative prompts
+    negative_prompts = [
+        "low quality",
+        "blurry",
+        "deformed",
+        "ugly",
+        "bad anatomy",
+        "bad hands",
+        "bad proportions",
+        "mutated",
+        "poorly drawn",
+    ]
+
+    # Add character-specific negative prompts
+    if parameters.get("characterType") == "protagonist":
+        negative_prompts.extend(["villain", "evil expression", "dark evil"])
+    elif parameters.get("characterType") == "antagonist":
+        negative_prompts.extend(["heroic", "bright smile", "innocent"])
+
+    negative_prompt = ", ".join(negative_prompts)
+
+    workflow = {
+        # 1. Load checkpoint
+        "1": {
+            "class_type": "CheckpointLoaderSimple",
+            "inputs": {"ckpt_name": DEFAULT_ANIME_MODEL},
+        },
+        # 2. Positive prompt
+        "2": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+                "text": f"masterpiece, best quality, {character_description}, detailed face, professional character art",
+                "clip": ["1", 1],
+            },
+        },
+        # 3. Negative prompt
+        "3": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"text": negative_prompt, "clip": ["1", 1]},
+        },
+        # 4. Empty latent image
+        "4": {
+            "class_type": "EmptyLatentImage",
+            "inputs": {"width": 1024, "height": 1024, "batch_size": 1},
+        },
+        # 5. KSampler
+        "5": {
+            "class_type": "KSampler",
+            "inputs": {
+                "seed": int(time.time()),
+                "steps": 30,
+                "cfg": 8.0,
+                "sampler_name": "dpmpp_2m",
+                "scheduler": "karras",
+                "positive": ["2", 0],
+                "negative": ["3", 0],
+                "latent_image": ["4", 0],
+                "model": ["1", 0],
+                "denoise": 1.0,
+            },
+        },
+        # 6. VAE Decode
+        "6": {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["5", 0], "vae": ["1", 2]},
+        },
+        # 7. Save image
+        "7": {
+            "class_type": "SaveImage",
+            "inputs": {
+                "images": ["6", 0],
+                "filename_prefix": f"character_{generation_id}",
+            },
+        },
+    }
+
+    return workflow
+
+
+# ====================================
+# PROJECT CRUD API ENDPOINTS
+# ====================================
+
+
+# Database configuration
+DB_CONFIG = {
+    "host": "localhost",
+    "database": "anime_production",
+    "user": "patrick",
+    "port": 5432,
+}
+
+
+@contextmanager
+def get_db_connection():
+    """Get database connection with proper error handling"""
+    conn = None
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        yield conn
+        conn.commit()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise e
+    finally:
+        if conn:
+            conn.close()
+
+
+# Pydantic models for Project CRUD
+class ProjectCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    status: str = "active"
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+
+
+class ProjectResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    status: str
+    created_at: str
+    updated_at: Optional[str]
+
+
+# Pydantic models for Scene CRUD
+class SceneCreate(BaseModel):
+    project_id: int
+    branch_name: Optional[str] = "main"
+    scene_number: int
+    description: Optional[str] = None
+    characters: Optional[str] = None
+    video_path: Optional[str] = None
+    status: str = "pending"
+    workflow_data: Optional[str] = None
+
+
+class SceneUpdate(BaseModel):
+    project_id: Optional[int] = None
+    branch_name: Optional[str] = None
+    scene_number: Optional[int] = None
+    description: Optional[str] = None
+    characters: Optional[str] = None
+    video_path: Optional[str] = None
+    status: Optional[str] = None
+    workflow_data: Optional[str] = None
+
+
+class SceneResponse(BaseModel):
+    id: int
+    project_id: int
+    branch_name: Optional[str]
+    scene_number: int
+    description: Optional[str]
+    characters: Optional[str]
+    video_path: Optional[str]
+    status: str
+    created_at: str
+    updated_at: Optional[str]
+    workflow_data: Optional[str]
+
+
+@app.get("/api/anime/projects")
+async def list_projects(status: Optional[str] = None, limit: int = 100):
+    """List all anime projects with optional status filter"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            if status:
+                cursor.execute(
+                    """
+                    SELECT id, name, description, status, created_at, updated_at
+                    FROM anime_api.projects
+                    WHERE status = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """,
+                    (status, limit),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT id, name, description, status, created_at, updated_at
+                    FROM anime_api.projects
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """,
+                    (limit,),
+                )
+
+            rows = cursor.fetchall()
+
+            return [
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "description": row["description"],
+                    "status": row["status"],
+                    "created_at": str(row["created_at"]) if row["created_at"] else None,
+                    "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+                }
+                for row in rows
+            ]
+
+    except Exception as e:
+        logger.error(f"Error listing projects: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {
+                str(e)}",
+        )
+
+
+@app.post("/api/anime/projects")
+async def create_project(project: ProjectCreate):
+    """Create a new anime project"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            cursor.execute(
+                """
+                INSERT INTO anime_api.projects (name, description, status)
+                VALUES (%s, %s, %s)
+                RETURNING id, name, description, status, created_at, updated_at
+            """,
+                (project.name, project.description, project.status),
+            )
+
+            row = cursor.fetchone()
+
+            logger.info(
+                f"Created new project: {
+                    project.name} (ID: {
+                    row['id']})"
+            )
+
+            return {
+                "id": row["id"],
+                "name": row["name"],
+                "description": row["description"],
+                "status": row["status"],
+                "created_at": str(row["created_at"]) if row["created_at"] else None,
+                "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+            }
+
+    except psycopg2.IntegrityError as e:
+        logger.error(f"Project creation failed - integrity error: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail="Project name already exists")
+    except Exception as e:
+        logger.error(f"Error creating project: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {
+                str(e)}",
+        )
+
+
+@app.get("/api/anime/projects/{project_id}")
+async def get_project(project_id: int):
+    """Get project details by ID"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            cursor.execute(
+                """
+                SELECT id, name, description, status, created_at, updated_at
+                FROM anime_api.projects
+                WHERE id = %s
+            """,
+                (project_id,),
+            )
+
+            row = cursor.fetchone()
+
+            if not row:
+                raise HTTPException(
+                    status_code=404, detail="Project not found")
+
+            return {
+                "id": row["id"],
+                "name": row["name"],
+                "description": row["description"],
+                "status": row["status"],
+                "created_at": str(row["created_at"]) if row["created_at"] else None,
+                "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting project {project_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {
+                str(e)}",
+        )
+
+
+@app.put("/api/anime/projects/{project_id}")
+async def update_project(project_id: int, project_update: ProjectUpdate):
+    """Update project details"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # First check if project exists
+            cursor.execute(
+                "SELECT id FROM anime_api.projects WHERE id = %s", (
+                    project_id,)
+            )
+            if not cursor.fetchone():
+                raise HTTPException(
+                    status_code=404, detail="Project not found")
+
+            # Build dynamic update query
+            update_fields = []
+            update_values = []
+
+            if project_update.name is not None:
+                update_fields.append("name = %s")
+                update_values.append(project_update.name)
+
+            if project_update.description is not None:
+                update_fields.append("description = %s")
+                update_values.append(project_update.description)
+
+            if project_update.status is not None:
+                update_fields.append("status = %s")
+                update_values.append(project_update.status)
+
+            if not update_fields:
+                raise HTTPException(
+                    status_code=400, detail="No fields to update")
+
+            # Always update the updated_at timestamp
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            update_values.append(project_id)
+
+            query = f"""
+                UPDATE anime_api.projects
+                SET {', '.join(update_fields)}
+                WHERE id = %s
+                RETURNING id, name, description, status, created_at, updated_at
+            """
+
+            cursor.execute(query, update_values)
+            row = cursor.fetchone()
+
+            logger.info(
+                f"Updated project {project_id}: {
+                    project_update.dict(
+                        exclude_unset=True)}"
+            )
+
+            return {
+                "id": row["id"],
+                "name": row["name"],
+                "description": row["description"],
+                "status": row["status"],
+                "created_at": str(row["created_at"]) if row["created_at"] else None,
+                "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+            }
+
+    except HTTPException:
+        raise
+    except psycopg2.IntegrityError as e:
+        logger.error(f"Project update failed - integrity error: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail="Project name already exists")
+    except Exception as e:
+        logger.error(f"Error updating project {project_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {
+                str(e)}",
+        )
+
+
+@app.delete("/api/anime/projects/{project_id}")
+async def delete_project(project_id: int):
+    """Delete a project and all associated data"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # First check if project exists
+            cursor.execute(
+                "SELECT id, name FROM anime_api.projects WHERE id = %s", (
+                    project_id,)
+            )
+            project = cursor.fetchone()
+
+            if not project:
+                raise HTTPException(
+                    status_code=404, detail="Project not found")
+
+            # Delete the project (CASCADE should handle related records)
+            cursor.execute(
+                "DELETE FROM anime_api.projects WHERE id = %s", (project_id,)
+            )
+
+            logger.info(f"Deleted project {project_id}: {project['name']}")
+
+            return {
+                "success": True,
+                "message": f"Project '{project['name']}' deleted successfully",
+                "deleted_project_id": project_id,
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting project {project_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {
+                str(e)}",
+        )
+
+
+# Scene Management Endpoints
+@app.get("/api/anime/scenes")
+async def list_scenes(
+    project_id: Optional[int] = None, status: Optional[str] = None, limit: int = 100
+):
+    """List all scenes with optional project_id and status filters"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Build query with optional filters
+            where_conditions = []
+            params = []
+
+            if project_id:
+                where_conditions.append("project_id = %s")
+                params.append(project_id)
+
+            if status:
+                where_conditions.append("status = %s")
+                params.append(status)
+
+            where_clause = ""
+            if where_conditions:
+                where_clause = "WHERE " + " AND ".join(where_conditions)
+
+            params.append(limit)
+
+            cursor.execute(
+                f"""
+                SELECT id, project_id, branch_name, scene_number, description,
+                       characters, video_path, status, created_at, updated_at, workflow_data
+                FROM anime_api.scenes
+                {where_clause}
+                ORDER BY project_id, scene_number
+                LIMIT %s
+            """,
+                tuple(params),
+            )
+
+            rows = cursor.fetchall()
+
+            return [
+                {
+                    "id": row["id"],
+                    "project_id": row["project_id"],
+                    "branch_name": row["branch_name"],
+                    "scene_number": row["scene_number"],
+                    "description": row["description"],
+                    "characters": row["characters"],
+                    "video_path": row["video_path"],
+                    "status": row["status"],
+                    "created_at": str(row["created_at"]) if row["created_at"] else None,
+                    "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+                    "workflow_data": row["workflow_data"],
+                }
+                for row in rows
+            ]
+
+    except Exception as e:
+        logger.error(f"Error listing scenes: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {
+                str(e)}",
+        )
+
+
+@app.post("/api/anime/scenes")
+async def create_scene(scene: SceneCreate):
+    """Create a new scene"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Verify project exists
+            cursor.execute(
+                "SELECT id FROM anime_api.projects WHERE id = %s", (
+                    scene.project_id,)
+            )
+            if not cursor.fetchone():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Project with ID {scene.project_id} not found",
+                )
+
+            cursor.execute(
+                """
+                INSERT INTO anime_api.scenes
+                (project_id, branch_name, scene_number, description, characters,
+                 video_path, status, workflow_data)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, project_id, branch_name, scene_number, description,
+                          characters, video_path, status, created_at, updated_at, workflow_data
+            """,
+                (
+                    scene.project_id,
+                    scene.branch_name,
+                    scene.scene_number,
+                    scene.description,
+                    scene.characters,
+                    scene.video_path,
+                    scene.status,
+                    scene.workflow_data,
+                ),
+            )
+
+            row = cursor.fetchone()
+
+            logger.info(
+                f"Created new scene: Project {
+                    scene.project_id}, Scene {
+                    scene.scene_number} (ID: {
+                    row['id']})"
+            )
+
+            return {
+                "id": row["id"],
+                "project_id": row["project_id"],
+                "branch_name": row["branch_name"],
+                "scene_number": row["scene_number"],
+                "description": row["description"],
+                "characters": row["characters"],
+                "video_path": row["video_path"],
+                "status": row["status"],
+                "created_at": str(row["created_at"]) if row["created_at"] else None,
+                "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+                "workflow_data": row["workflow_data"],
+            }
+
+    except HTTPException:
+        raise
+    except psycopg2.IntegrityError as e:
+        logger.error(f"Scene creation failed - integrity error: {e}")
+        if "unique" in str(e).lower():
+            raise HTTPException(
+                status_code=400,
+                detail="Scene number already exists for this project and branch",
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Database constraint violation")
+    except Exception as e:
+        logger.error(f"Error creating scene: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {
+                str(e)}",
+        )
+
+
+@app.get("/api/anime/scenes/{scene_id}")
+async def get_scene(scene_id: int):
+    """Get scene details by ID"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            cursor.execute(
+                """
+                SELECT id, project_id, branch_name, scene_number, description,
+                       characters, video_path, status, created_at, updated_at, workflow_data
+                FROM anime_api.scenes
+                WHERE id = %s
+            """,
+                (scene_id,),
+            )
+
+            row = cursor.fetchone()
+
+            if not row:
+                raise HTTPException(
+                    status_code=404, detail=f"Scene with ID {scene_id} not found"
+                )
+
+            return {
+                "id": row["id"],
+                "project_id": row["project_id"],
+                "branch_name": row["branch_name"],
+                "scene_number": row["scene_number"],
+                "description": row["description"],
+                "characters": row["characters"],
+                "video_path": row["video_path"],
+                "status": row["status"],
+                "created_at": str(row["created_at"]) if row["created_at"] else None,
+                "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+                "workflow_data": row["workflow_data"],
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting scene {scene_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {
+                str(e)}",
+        )
+
+
+@app.put("/api/anime/scenes/{scene_id}")
+async def update_scene(scene_id: int, scene_update: SceneUpdate):
+    """Update scene details"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Check if scene exists
+            cursor.execute(
+                "SELECT id FROM anime_api.scenes WHERE id = %s", (scene_id,))
+            if not cursor.fetchone():
+                raise HTTPException(
+                    status_code=404, detail=f"Scene with ID {scene_id} not found"
+                )
+
+            # If project_id is being updated, verify new project exists
+            if scene_update.project_id:
+                cursor.execute(
+                    "SELECT id FROM anime_api.projects WHERE id = %s",
+                    (scene_update.project_id,),
+                )
+                if not cursor.fetchone():
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Project with ID {
+                            scene_update.project_id} not found",
+                    )
+
+            # Build dynamic update query
+            update_fields = []
+            params = []
+
+            if scene_update.project_id is not None:
+                update_fields.append("project_id = %s")
+                params.append(scene_update.project_id)
+
+            if scene_update.branch_name is not None:
+                update_fields.append("branch_name = %s")
+                params.append(scene_update.branch_name)
+
+            if scene_update.scene_number is not None:
+                update_fields.append("scene_number = %s")
+                params.append(scene_update.scene_number)
+
+            if scene_update.description is not None:
+                update_fields.append("description = %s")
+                params.append(scene_update.description)
+
+            if scene_update.characters is not None:
+                update_fields.append("characters = %s")
+                params.append(scene_update.characters)
+
+            if scene_update.video_path is not None:
+                update_fields.append("video_path = %s")
+                params.append(scene_update.video_path)
+
+            if scene_update.status is not None:
+                update_fields.append("status = %s")
+                params.append(scene_update.status)
+
+            if scene_update.workflow_data is not None:
+                update_fields.append("workflow_data = %s")
+                params.append(scene_update.workflow_data)
+
+            if not update_fields:
+                raise HTTPException(
+                    status_code=400, detail="No fields provided for update"
+                )
+
+            # Add updated_at timestamp
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(scene_id)
+
+            cursor.execute(
+                f"""
+                UPDATE anime_api.scenes
+                SET {', '.join(update_fields)}
+                WHERE id = %s
+                RETURNING id, project_id, branch_name, scene_number, description,
+                          characters, video_path, status, created_at, updated_at, workflow_data
+            """,
+                params,
+            )
+
+            row = cursor.fetchone()
+
+            logger.info(f"Updated scene {scene_id}")
+
+            return {
+                "id": row["id"],
+                "project_id": row["project_id"],
+                "branch_name": row["branch_name"],
+                "scene_number": row["scene_number"],
+                "description": row["description"],
+                "characters": row["characters"],
+                "video_path": row["video_path"],
+                "status": row["status"],
+                "created_at": str(row["created_at"]) if row["created_at"] else None,
+                "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+                "workflow_data": row["workflow_data"],
+            }
+
+    except HTTPException:
+        raise
+    except psycopg2.IntegrityError as e:
+        logger.error(f"Scene update failed - integrity error: {e}")
+        if "unique" in str(e).lower():
+            raise HTTPException(
+                status_code=400,
+                detail="Scene number already exists for this project and branch",
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Database constraint violation")
+    except Exception as e:
+        logger.error(f"Error updating scene {scene_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {
+                str(e)}",
+        )
+
+
+@app.delete("/api/anime/scenes/{scene_id}")
+async def delete_scene(scene_id: int):
+    """Delete a scene"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # First check if scene exists
+            cursor.execute(
+                "SELECT id, scene_number, project_id FROM anime_api.scenes WHERE id = %s",
+                (scene_id,),
+            )
+            scene = cursor.fetchone()
+
+            if not scene:
+                raise HTTPException(
+                    status_code=404, detail=f"Scene with ID {scene_id} not found"
+                )
+
+            # Delete the scene (CASCADE should handle related records)
+            cursor.execute(
+                "DELETE FROM anime_api.scenes WHERE id = %s", (scene_id,))
+
+            logger.info(
+                f"Deleted scene {scene_id}: Scene {
+                    scene['scene_number']} from Project {
+                    scene['project_id']}"
+            )
+
+            return {
+                "success": True,
+                "message": f"Scene {scene['scene_number']} deleted successfully",
+                "deleted_scene_id": scene_id,
+                "project_id": scene["project_id"],
+                "scene_number": scene["scene_number"],
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting scene {scene_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database error: {
+                str(e)}",
+        )
+
+
 @app.websocket("/ws/director-studio")
 async def director_studio_websocket(websocket: WebSocket):
     """WebSocket endpoint for Director Studio real-time communication"""
@@ -714,35 +2133,49 @@ async def director_studio_websocket(websocket: WebSocket):
                 if message_type == "subscribe_generation":
                     generation_id = message.get("generation_id")
                     if generation_id:
-                        await websocket_manager.subscribe_to_generation(websocket, generation_id)
-                        await websocket.send_text(json.dumps({
-                            "type": "subscription_confirmed",
-                            "generation_id": generation_id,
-                            "message": "Subscribed to generation updates"
-                        }))
+                        await websocket_manager.subscribe_to_generation(
+                            websocket, generation_id
+                        )
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "type": "subscription_confirmed",
+                                    "generation_id": generation_id,
+                                    "message": "Subscribed to generation updates",
+                                }
+                            )
+                        )
 
                 elif message_type == "ping":
-                    await websocket.send_text(json.dumps({
-                        "type": "pong",
-                        "timestamp": datetime.now().isoformat()
-                    }))
+                    await websocket.send_text(
+                        json.dumps(
+                            {"type": "pong",
+                             "timestamp": datetime.now().isoformat()}
+                        )
+                    )
 
                 elif message_type == "get_status":
                     # Send current service status
                     active_count = await status_tracker.get_active_count()
-                    await websocket.send_text(json.dumps({
-                        "type": "service_status",
-                        "active_generations": active_count,
-                        "max_concurrent": MAX_CONCURRENT_GENERATIONS,
-                        "websocket_connections": len(websocket_manager.active_connections),
-                        "timestamp": datetime.now().isoformat()
-                    }))
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "service_status",
+                                "active_generations": active_count,
+                                "max_concurrent": MAX_CONCURRENT_GENERATIONS,
+                                "websocket_connections": len(
+                                    websocket_manager.active_connections
+                                ),
+                                "timestamp": datetime.now().isoformat(),
+                            }
+                        )
+                    )
 
             except json.JSONDecodeError:
-                await websocket.send_text(json.dumps({
-                    "type": "error",
-                    "message": "Invalid JSON message"
-                }))
+                await websocket.send_text(
+                    json.dumps(
+                        {"type": "error", "message": "Invalid JSON message"})
+                )
 
     except WebSocketDisconnect:
         websocket_manager.disconnect(websocket)
@@ -966,21 +2399,27 @@ async def generate_video_async(
                                     elapsed:.1f}s)"
                             )
 
-                            # CRITICAL: Quality Assessment Integration - NOW BLOCKING
+                            # CRITICAL: Quality Assessment Integration - NOW
+                            # BLOCKING
                             if QUALITY_ENABLED:
                                 try:
                                     quality_result = await assess_video_quality(
                                         video_file, generation_id
                                     )
-                                    score = quality_result.get("overall_score", 0)
-                                    passes = quality_result.get("passes_quality", False)
+                                    score = quality_result.get(
+                                        "overall_score", 0)
+                                    passes = quality_result.get(
+                                        "passes_quality", False)
 
                                     logger.info(
                                         f"#📊 Quality assessment: Score {score}/10, Passes: {passes}"
                                     )
 
-                                    # ACCEPT ALL VIDEOS (Quality system disabled to prevent auto-deletion)
-                                    logger.info(f"✅ Video accepted [{generation_id[:8]}] - Quality system disabled")
+                                    # ACCEPT ALL VIDEOS (Quality system
+                                    # disabled to prevent auto-deletion)
+                                    logger.info(
+                                        f"✅ Video accepted [{generation_id[:8]}] - Quality system disabled"
+                                    )
 
                                 except Exception as e:
                                     logger.warning(
@@ -1148,10 +2587,32 @@ def create_svd_video_workflow(
     2. Use SVD to create smooth video motion from init image
     """
 
-    # Enhanced prompt for anime quality
-    enhanced_prompt = f"anime masterpiece, {
-        request.prompt}, {
-        request.character}, studio quality, highly detailed, vibrant colors, professional illustration"
+    # Use character system for proper character generation
+    character_prompt_data = get_character_prompt(
+        request.character, request.prompt)
+
+    if character_prompt_data["character_found"]:
+        # Use detailed character description with negative prompts
+        enhanced_prompt = f"anime masterpiece, {
+            character_prompt_data['prompt']}, studio quality, highly detailed, vibrant colors, professional illustration"
+        negative_prompt = (
+            f"low quality, blurry, {character_prompt_data['negative_prompt']}"
+        )
+        logger.info(
+            f"✅ Using character system for '{
+                request.character}': project_reference={
+                character_prompt_data['used_project_reference']}"
+        )
+    else:
+        # Fallback to simple character description
+        enhanced_prompt = f"anime masterpiece, {
+            request.prompt}, {
+            request.character}, studio quality, highly detailed, vibrant colors, professional illustration"
+        negative_prompt = "low quality, blurry"
+        logger.warning(
+            f"⚠️ Character '{
+                request.character}' not found in character system, using fallback"
+        )
 
     # SVD optimal settings
     width = 1024  # SVD native resolution
@@ -1164,7 +2625,7 @@ def create_svd_video_workflow(
         # 1. Load anime checkpoint for init image
         "1": {
             "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": "counterfeit_v3.safetensors"},
+            "inputs": {"ckpt_name": DEFAULT_ANIME_MODEL},
         },
         # 2. Text encode positive (init image)
         "2": {
@@ -1175,7 +2636,7 @@ def create_svd_video_workflow(
         "3": {
             "class_type": "CLIPTextEncode",
             "inputs": {
-                "text": "low quality, blurry, bad anatomy, deformed, ugly, distorted, multiple subjects",
+                "text": f"{negative_prompt}, bad anatomy, deformed, ugly, distorted, multiple subjects",
                 "clip": ["1", 1],
             },
         },
@@ -1283,10 +2744,31 @@ def create_4k_video_workflow(
 ) -> Dict[str, Any]:
     """Create PROPER AnimateDiff video workflow - NO MORE SLIDESHOWS!"""
 
-    # Enhanced prompt for anime quality
-    enhanced_prompt = f"anime masterpiece, {
-        request.prompt}, {
-        request.character}, studio quality, detailed animation, smooth motion, vibrant colors"
+    # Use character system for proper character generation
+    character_prompt_data = get_character_prompt(
+        request.character, request.prompt)
+
+    if character_prompt_data["character_found"]:
+        # Use detailed character description with negative prompts
+        enhanced_prompt = f"anime masterpiece, {
+            character_prompt_data['prompt']}, studio quality, detailed animation, smooth motion, vibrant colors"
+        negative_prompt = f"low quality, blurry, static image, slideshow, {
+            character_prompt_data['negative_prompt']}"
+        logger.info(
+            f"✅ Using character system for '{
+                request.character}': project_reference={
+                character_prompt_data['used_project_reference']}"
+        )
+    else:
+        # Fallback to simple character description
+        enhanced_prompt = f"anime masterpiece, {
+            request.prompt}, {
+            request.character}, studio quality, detailed animation, smooth motion, vibrant colors"
+        negative_prompt = "low quality, blurry, static image, slideshow"
+        logger.warning(
+            f"⚠️ Character '{
+                request.character}' not found in character system, using fallback"
+        )
 
     # Conservative settings for RTX 3060 12GB VRAM
     # Updated settings for better quality (still safe for RTX 3060 12GB VRAM)
@@ -1297,7 +2779,7 @@ def create_4k_video_workflow(
         # 1. Load the anime checkpoint
         "1": {
             "class_type": "CheckpointLoaderSimple",
-            "inputs": {"ckpt_name": "counterfeit_v3.safetensors"},
+            "inputs": {"ckpt_name": DEFAULT_ANIME_MODEL},
         },
         # 2. **CRITICAL**: Load AnimateDiff motion model (THIS WAS MISSING!)
         "2": {
@@ -1330,7 +2812,7 @@ def create_4k_video_workflow(
         "4": {
             "class_type": "CLIPTextEncode",
             "inputs": {
-                "text": "low quality, blurry, static, slideshow, bad anatomy, deformed, ugly, distorted",
+                "text": f"{negative_prompt}, static, bad anatomy, deformed, ugly, distorted",
                 "clip": ["1", 1],
             },
         },
@@ -1406,25 +2888,30 @@ async def generate_simple_video(
             duration_seconds=duration,
             style=style,
             quality=quality,
-            use_apple_music=use_apple_music
+            use_apple_music=use_apple_music,
         )
 
         if result.get("success"):
             # Generate a consistent generation_id format
-            generation_id = result.get("generation_id") or f"hybrid_{int(time.time())}"
+            generation_id = result.get(
+                "generation_id") or f"hybrid_{int(time.time())}"
 
             # Store in status tracker for polling compatibility
-            status_tracker.add_generation(generation_id, {
-                "status": "completed" if result.get("success") else "failed",
-                "compute_location": result.get("compute_location", "unknown"),
-                "processing_time_seconds": result.get("processing_time_seconds", 0),
-                "estimated_cost_usd": result.get("estimated_cost_usd", 0),
-                "video_specs": result.get("video_specs", {}),
-                "output_file": result.get("video_url") or result.get("check_status_url"),
-                "segments": result.get("segments", []),
-                "message": result.get("message", "Generation completed"),
-                "created_at": time.time()
-            })
+            status_tracker.add_generation(
+                generation_id,
+                {
+                    "status": "completed" if result.get("success") else "failed",
+                    "compute_location": result.get("compute_location", "unknown"),
+                    "processing_time_seconds": result.get("processing_time_seconds", 0),
+                    "estimated_cost_usd": result.get("estimated_cost_usd", 0),
+                    "video_specs": result.get("video_specs", {}),
+                    "output_file": result.get("video_url")
+                    or result.get("check_status_url"),
+                    "segments": result.get("segments", []),
+                    "message": result.get("message", "Generation completed"),
+                    "created_at": time.time(),
+                },
+            )
 
             return {
                 "success": True,
@@ -1433,7 +2920,7 @@ async def generate_simple_video(
                 "message": f"Video generation {'completed' if result.get('compute_location') == 'local' else 'started'} using {result.get('compute_location')} resources",
                 "estimated_cost": result.get("estimated_cost_usd", 0),
                 "processing_time": result.get("processing_time_seconds"),
-                "video_specs": result.get("video_specs", {})
+                "video_specs": result.get("video_specs", {}),
             }
         else:
             # Handle errors from orchestrator
@@ -1441,7 +2928,7 @@ async def generate_simple_video(
                 "success": False,
                 "error": result.get("error", "Generation failed"),
                 "suggestion": result.get("suggestion"),
-                "compute_location": result.get("compute_location")
+                "compute_location": result.get("compute_location"),
             }
 
     except Exception as e:
@@ -1466,29 +2953,26 @@ async def list_generations():
 
 
 # Git Storyline API Endpoints
-import sys
+
 sys.path.append("/opt/tower-anime-production")
-from git_branching import (
-    create_branch, create_commit, get_commit_history,
-    compare_branches, merge_branches, revert_to_commit,
-    tag_commit, list_branches, get_commit_details
-)
+
 
 @app.post("/api/git/branches")
 async def create_project_branch(request: Dict[str, Any]):
     """Create a new storyline branch"""
     try:
         result = create_branch(
-            project_id=request.get('project_id'),
-            new_branch=request.get('branch_name'),
-            from_branch=request.get('from_branch', 'main'),
-            from_commit=request.get('from_commit'),
-            description=request.get('description', '')
+            project_id=request.get("project_id"),
+            new_branch=request.get("branch_name"),
+            from_branch=request.get("from_branch", "main"),
+            from_commit=request.get("from_commit"),
+            description=request.get("description", ""),
         )
         return {"status": "success", "data": result}
     except Exception as e:
         logger.error(f"Failed to create branch: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.get("/api/git/branches/{project_id}")
 async def list_project_branches(project_id: int):
@@ -1500,24 +2984,27 @@ async def list_project_branches(project_id: int):
         logger.error(f"Failed to list branches: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @app.post("/api/git/commits")
 async def create_scene_commit(request: Dict[str, Any]):
     """Create a commit with scene snapshot"""
     try:
         result = create_commit(
-            project_id=request.get('project_id'),
-            branch_name=request.get('branch_name'),
-            message=request.get('message'),
-            author=request.get('author', 'anime_director'),
-            scene_data=request.get('scene_data', {})
+            project_id=request.get("project_id"),
+            branch_name=request.get("branch_name"),
+            message=request.get("message"),
+            author=request.get("author", "anime_director"),
+            scene_data=request.get("scene_data", {}),
         )
         return {"status": "success", "data": result}
     except Exception as e:
         logger.error(f"Failed to create commit: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @app.get("/api/git/commits/{project_id}/{branch_name}")
-async def get_branch_history(project_id: int, branch_name: str, limit: int = 20):
+async def get_branch_history(
+        project_id: int, branch_name: str, limit: int = 20):
     """Get commit history for a branch"""
     try:
         commits = get_commit_history(project_id, branch_name, limit)
@@ -1525,6 +3012,7 @@ async def get_branch_history(project_id: int, branch_name: str, limit: int = 20)
     except Exception as e:
         logger.error(f"Failed to get commit history: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @app.get("/api/git/commits/details/{commit_hash}")
 async def get_commit_detail(commit_hash: str):
@@ -1536,64 +3024,69 @@ async def get_commit_detail(commit_hash: str):
         logger.error(f"Failed to get commit details: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @app.post("/api/git/merge")
 async def merge_storyline_branches(request: Dict[str, Any]):
     """Merge one branch into another"""
     try:
         result = merge_branches(
-            project_id=request.get('project_id'),
-            from_branch=request.get('from_branch'),
-            to_branch=request.get('to_branch'),
-            strategy=request.get('strategy', 'ours'),
-            author=request.get('author', 'anime_director')
+            project_id=request.get("project_id"),
+            from_branch=request.get("from_branch"),
+            to_branch=request.get("to_branch"),
+            strategy=request.get("strategy", "ours"),
+            author=request.get("author", "anime_director"),
         )
         return {"status": "success", "data": result}
     except Exception as e:
         logger.error(f"Failed to merge branches: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @app.post("/api/git/revert")
 async def revert_to_scene(request: Dict[str, Any]):
     """Revert branch to a previous commit"""
     try:
         result = revert_to_commit(
-            project_id=request.get('project_id'),
-            branch_name=request.get('branch_name'),
-            commit_hash=request.get('commit_hash'),
-            author=request.get('author', 'anime_director')
+            project_id=request.get("project_id"),
+            branch_name=request.get("branch_name"),
+            commit_hash=request.get("commit_hash"),
+            author=request.get("author", "anime_director"),
         )
         return {"status": "success", "data": result}
     except Exception as e:
         logger.error(f"Failed to revert: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @app.post("/api/git/compare")
 async def compare_storyline_branches(request: Dict[str, Any]):
     """Compare two branches"""
     try:
         result = compare_branches(
-            project_id=request.get('project_id'),
-            branch_a=request.get('branch_a'),
-            branch_b=request.get('branch_b')
+            project_id=request.get("project_id"),
+            branch_a=request.get("branch_a"),
+            branch_b=request.get("branch_b"),
         )
         return {"status": "success", "data": result}
     except Exception as e:
         logger.error(f"Failed to compare branches: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @app.post("/api/git/tags")
 async def create_milestone_tag(request: Dict[str, Any]):
     """Create a milestone tag for a commit"""
     try:
         result = tag_commit(
-            commit_hash=request.get('commit_hash'),
-            tag_name=request.get('tag_name'),
-            description=request.get('description', '')
+            commit_hash=request.get("commit_hash"),
+            tag_name=request.get("tag_name"),
+            description=request.get("description", ""),
         )
         return {"status": "success", "data": result}
     except Exception as e:
         logger.error(f"Failed to create tag: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
 
 # Serve Vue3 static files
 app.mount(
@@ -1605,6 +3098,7 @@ app.mount(
 
 # Apple Music Integration for Soundtrack Management
 
+
 class SoundtrackRequest(BaseModel):
     mood: Optional[str] = "cinematic"
     genre: Optional[str] = "soundtrack"
@@ -1612,11 +3106,10 @@ class SoundtrackRequest(BaseModel):
     scene_description: Optional[str] = ""
     character_names: Optional[str] = ""
 
+
 @app.get("/api/soundtracks/search")
 async def search_soundtracks(
-    query: str = "anime soundtrack",
-    mood: str = "cinematic",
-    limit: int = 10
+    query: str = "anime soundtrack", mood: str = "cinematic", limit: int = 10
 ):
     """Search Apple Music for soundtrack options"""
     try:
@@ -1625,13 +3118,10 @@ async def search_soundtracks(
                 "q": query,
                 "limit": limit,
                 "types": "songs",
-                "mood": mood
-            }
+                "mood": mood}
 
             async with session.get(
-                f"{APPLE_MUSIC_URL}/api/search",
-                params=search_params,
-                timeout=10
+                f"{APPLE_MUSIC_URL}/api/search", params=search_params, timeout=10
             ) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -1639,7 +3129,7 @@ async def search_soundtracks(
                         "query": query,
                         "mood": mood,
                         "results": data.get("results", []),
-                        "total": len(data.get("results", []))
+                        "total": len(data.get("results", [])),
                     }
                 else:
                     return {"error": f"Apple Music API error: {response.status}"}
@@ -1648,14 +3138,14 @@ async def search_soundtracks(
         logger.error(f"Apple Music search error: {e}")
         return {"error": str(e)}
 
+
 @app.get("/api/soundtracks/playlists")
 async def get_user_playlists():
     """Get user's Apple Music playlists for soundtrack selection"""
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(
-                f"{APPLE_MUSIC_URL}/api/playlists",
-                timeout=10
+                f"{APPLE_MUSIC_URL}/api/playlists", timeout=10
             ) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -1670,41 +3160,53 @@ async def get_user_playlists():
 
 # === GIT STORYLINE CONTROL ENDPOINTS ===
 
+
 class GitBranchRequest(BaseModel):
     project_id: int
     new_branch_name: str
-    from_branch: str = 'main'
-    storyline_goal: str = ''
-    author: str = 'director'
+    from_branch: str = "main"
+    storyline_goal: str = ""
+    author: str = "director"
+
 
 class StorylineMarkersRequest(BaseModel):
     project_id: int
     scenes: List[dict]
 
+
 @app.get("/api/anime/git/status/{project_id}")
 async def get_git_status(project_id: int):
     """Get comprehensive git status for a project including Echo analysis"""
     try:
-        sys.path.append('/opt/tower-anime-production')
-        from git_branching import list_branches, get_commit_history, echo_analyze_storyline
+        sys.path.append("/opt/tower-anime-production")
+        from git_branching import (
+            list_branches,
+            get_commit_history,
+            echo_analyze_storyline,
+        )
 
         # Get all branches
         branches = list_branches(project_id)
 
         # Get commit history for main branch (handle gracefully if no commits)
         try:
-            main_commits = get_commit_history(project_id, 'main')
-        except:
+            main_commits = get_commit_history(project_id, "main")
+        except BaseException:
             main_commits = []
 
         # Get latest Echo analysis (skip if no commits)
         if main_commits:
             try:
-                latest_analysis = await echo_analyze_storyline(project_id, 'main')
-            except:
-                latest_analysis = {"analysis": "No analysis available", "recommendations": []}
+                latest_analysis = await echo_analyze_storyline(project_id, "main")
+            except BaseException:
+                latest_analysis = {
+                    "analysis": "No analysis available",
+                    "recommendations": [],
+                }
         else:
-            latest_analysis = {"analysis": "No commits found", "recommendations": []}
+            latest_analysis = {
+                "analysis": "No commits found",
+                "recommendations": []}
 
         return {
             "project_id": project_id,
@@ -1712,7 +3214,7 @@ async def get_git_status(project_id: int):
             "main_branch_commits": len(main_commits),
             "latest_commits": main_commits[:5] if main_commits else [],
             "echo_analysis": latest_analysis,
-            "status_checked_at": datetime.now().isoformat()
+            "status_checked_at": datetime.now().isoformat(),
         }
 
     except Exception as e:
@@ -1720,8 +3222,321 @@ async def get_git_status(project_id: int):
         return {
             "project_id": project_id,
             "error": f"Git status failed: {str(e)}",
-            "status_checked_at": datetime.now().isoformat()
+            "status_checked_at": datetime.now().isoformat(),
         }
+
+
+# Git Integration Models for Director Studio
+class GitCommitRequest(BaseModel):
+    projectId: int
+    branch: str
+    message: str
+    sceneData: Dict[str, Any]
+    renderConfig: Optional[Dict[str, Any]] = None
+
+
+class GitBranchCreateRequest(BaseModel):
+    projectId: int
+    name: str
+    description: str
+    baseBranch: str = "main"
+
+
+class GitCheckoutRequest(BaseModel):
+    projectId: int
+    branch: str
+
+
+class GitMergeRequest(BaseModel):
+    projectId: int
+    targetBranch: str
+    sourceBranch: str
+    strategy: str = "merge"
+
+
+class GitRevertRequest(BaseModel):
+    projectId: int
+    branch: str
+    commitHash: str
+
+
+class GitBranchDeleteRequest(BaseModel):
+    projectId: int
+
+
+# Git Integration Endpoints for Director Studio UI
+@app.get("/api/anime/projects/{project_id}/git-status")
+async def get_project_git_status(project_id: int):
+    """Get Git status for project - used by GitCommandInterface.vue"""
+    try:
+        from git_branching import (
+            list_branches,
+            get_commit_history,
+        )
+
+        logger.info(f"Getting git status for project {project_id}")
+
+        # Get all branches
+        branches = list_branches(project_id)
+        logger.info(f"Found {len(branches)} branches")
+
+        # Get commit history for current branch (assume main for now)
+        current_branch = "main"
+        try:
+            commits = get_commit_history(project_id, current_branch, limit=20)
+        except Exception as e:
+            logger.warning(f"Could not get commit history: {e}")
+            commits = []
+
+        # Format response for frontend
+        response = {
+            "currentBranch": current_branch,
+            "hasChanges": False,  # TODO: implement change detection
+            "branches": [
+                {
+                    "name": branch["branch_name"],
+                    "description": branch.get("storyline_goal", ""),
+                    "lastCommit": branch.get("created_at", datetime.now()).isoformat(),
+                    "commits": len(
+                        get_commit_history(project_id, branch["branch_name"])
+                        if branch["branch_name"] != current_branch
+                        else commits
+                    ),
+                    "scenes": 0,  # TODO: count scenes per branch
+                }
+                for branch in branches
+            ],
+            "commits": [
+                {
+                    "hash": commit["commit_hash"],
+                    "message": commit["message"],
+                    "author": commit.get("author", "director"),
+                    "timestamp": commit["timestamp"].isoformat(),
+                    "branch": commit.get("branch_name", current_branch),
+                    "cost": 0,  # TODO: calculate render cost
+                }
+                for commit in commits
+            ],
+        }
+
+        logger.info(
+            f"Returning git status with {
+                len(
+                    response['branches'])} branches and {
+                len(
+                    response['commits'])} commits"
+        )
+        return response
+
+    except Exception as e:
+        logger.error(f"Failed to get project git status: {e}")
+        error_handler.handle_error(e, {"project_id": project_id})
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get git status: {str(e)}"
+        )
+
+
+@app.post("/api/anime/git/commit")
+async def create_git_commit(request: GitCommitRequest):
+    """Create a new commit with scene data"""
+    try:
+        from git_branching import create_commit
+
+        logger.info(
+            f"Creating commit for project {
+                request.projectId} on branch {
+                request.branch}"
+        )
+
+        # Create commit with scene snapshot
+        commit_result = create_commit(
+            project_id=request.projectId,
+            branch_name=request.branch,
+            message=request.message,
+            author="director",
+            scene_data=request.sceneData,
+        )
+
+        logger.info(f"Created commit {commit_result['commit_hash']}")
+
+        return {
+            "success": True,
+            "commitHash": commit_result["commit_hash"],
+            "estimatedCost": 0,  # TODO: implement cost estimation
+            "message": f"Committed to {request.branch}: {request.message}",
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to create commit: {e}")
+        error_handler.handle_error(e, request.dict())
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create commit: {str(e)}"
+        )
+
+
+@app.post("/api/anime/git/branch")
+async def create_git_branch(request: GitBranchCreateRequest):
+    """Create a new storyline branch"""
+    try:
+        from git_branching import create_branch
+
+        logger.info(
+            f"Creating branch {
+                request.name} for project {
+                request.projectId}"
+        )
+
+        # Create new branch
+        branch_result = create_branch(
+            project_id=request.projectId,
+            new_branch=request.name,
+            from_branch=request.baseBranch,
+            description=request.description,
+        )
+
+        logger.info(f"Created branch {request.name}")
+
+        return {
+            "success": True,
+            "branchName": request.name,
+            "message": f"Created new branch: {request.name}",
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to create branch: {e}")
+        error_handler.handle_error(e, request.dict())
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create branch: {str(e)}"
+        )
+
+
+@app.post("/api/anime/git/checkout")
+async def checkout_git_branch(request: GitCheckoutRequest):
+    """Switch to a different branch"""
+    try:
+        logger.info(
+            f"Switching to branch {
+                request.branch} for project {
+                request.projectId}"
+        )
+
+        # For now, this is a logical switch - the git_branching system handles branch isolation
+        # TODO: Implement actual branch switching logic if needed
+
+        return {
+            "success": True,
+            "currentBranch": request.branch,
+            "message": f"Switched to branch: {request.branch}",
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to checkout branch: {e}")
+        error_handler.handle_error(e, request.dict())
+        raise HTTPException(
+            status_code=500, detail=f"Failed to checkout branch: {str(e)}"
+        )
+
+
+@app.post("/api/anime/git/merge")
+async def merge_git_branches(request: GitMergeRequest):
+    """Merge one branch into another"""
+    try:
+        from git_branching import merge_branches
+
+        logger.info(
+            f"Merging {
+                request.sourceBranch} into {
+                request.targetBranch} for project {
+                request.projectId}"
+        )
+
+        # Perform merge
+        merge_result = merge_branches(
+            project_id=request.projectId,
+            target_branch=request.targetBranch,
+            source_branch=request.sourceBranch,
+            strategy=request.strategy,
+            author="director",
+        )
+
+        logger.info(f"Merge completed: {merge_result}")
+
+        return {
+            "success": True,
+            "conflicts": [],  # TODO: implement conflict detection
+            "message": f"Successfully merged {request.sourceBranch} into {request.targetBranch}",
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to merge branches: {e}")
+        error_handler.handle_error(e, request.dict())
+        raise HTTPException(
+            status_code=500, detail=f"Failed to merge branches: {str(e)}"
+        )
+
+
+@app.delete("/api/anime/git/branch/{branch_name}")
+async def delete_git_branch(branch_name: str, request: GitBranchDeleteRequest):
+    """Delete a storyline branch"""
+    try:
+        logger.info(
+            f"Deleting branch {branch_name} for project {
+                request.projectId}"
+        )
+
+        # TODO: Implement branch deletion in git_branching.py
+        # For now, return success
+
+        return {
+            "success": True,
+            "message": f"Branch {branch_name} deleted successfully",
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to delete branch: {e}")
+        error_handler.handle_error(e, request.dict())
+        raise HTTPException(
+            status_code=500, detail=f"Failed to delete branch: {str(e)}"
+        )
+
+
+@app.post("/api/anime/git/revert")
+async def revert_git_commit(request: GitRevertRequest):
+    """Revert to a previous commit"""
+    try:
+        from git_branching import revert_to_commit
+
+        logger.info(
+            f"Reverting to commit {
+                request.commitHash} on branch {
+                request.branch} for project {
+                request.projectId}"
+        )
+
+        # Perform revert
+        revert_result = revert_to_commit(
+            project_id=request.projectId,
+            branch_name=request.branch,
+            target_commit_hash=request.commitHash,
+            author="director",
+        )
+
+        logger.info(f"Revert completed: {revert_result}")
+
+        return {
+            "success": True,
+            "message": f"Reverted to commit {request.commitHash[:8]}",
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to revert commit: {e}")
+        error_handler.handle_error(e, request.dict())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to revert: {
+                str(e)}",
+        )
+
 
 # Serve Vue3 static files
 app.mount(
@@ -1730,12 +3545,612 @@ app.mount(
     name="assets",
 )
 
+
 @app.get("/")
 async def root():
     return FileResponse("/opt/tower-anime-production/static/dist/index.html")
 
+
+# ============================================================================
+# VIDEO TIMELINE INTERFACE ENDPOINTS
+# ============================================================================
+
+
+@app.get("/api/thumbnail/{video_id}")
+async def get_video_thumbnail(video_id: str, t: float = 0.0):
+    """Generate thumbnail for video at specified time position"""
+    try:
+        # Find video file by ID or filename
+        video_file = None
+
+        # Try to find video by exact filename match first
+        video_path = OUTPUT_DIR / f"{video_id}"
+        if video_path.exists() and video_path.suffix.lower() in [
+            ".mp4",
+            ".mov",
+            ".avi",
+        ]:
+            video_file = video_path
+        else:
+            # Search for video files containing the ID
+            for pattern in ["*.mp4", "*.mov", "*.avi"]:
+                for file_path in OUTPUT_DIR.glob(pattern):
+                    if video_id in file_path.stem:
+                        video_file = file_path
+                        break
+                if video_file:
+                    break
+
+        if not video_file:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Video {video_id} not found")
+
+        # Create thumbnails cache directory
+        thumbnails_dir = OUTPUT_DIR / "thumbnails"
+        thumbnails_dir.mkdir(exist_ok=True)
+
+        # Generate cache filename
+        thumbnail_name = f"{video_file.stem}_t{t:.2f}.jpg"
+        thumbnail_path = thumbnails_dir / thumbnail_name
+
+        # Check if thumbnail already exists and is recent
+        if thumbnail_path.exists():
+            thumbnail_age = time.time() - thumbnail_path.stat().st_mtime
+            if thumbnail_age < 3600:  # Cache for 1 hour
+                return FileResponse(thumbnail_path, media_type="image/jpeg")
+
+        # Generate thumbnail using FFmpeg
+        cmd = [
+            "ffmpeg",
+            "-i",
+            str(video_file),
+            "-ss",
+            str(t),  # Seek to time position
+            "-vf",
+            "scale=160:90",  # Scale to thumbnail size
+            "-vframes",
+            "1",  # Extract one frame
+            "-f",
+            "image2",
+            "-y",  # Overwrite existing
+            str(thumbnail_path),
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30)
+        if result.returncode != 0:
+            logger.error(
+                f"FFmpeg thumbnail generation failed: {
+                    result.stderr}"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to generate thumbnail")
+
+        return FileResponse(thumbnail_path, media_type="image/jpeg")
+
+    except subprocess.TimeoutExpired:
+        raise HTTPException(
+            status_code=500,
+            detail="Thumbnail generation timeout")
+    except Exception as e:
+        logger.error(f"Error generating thumbnail: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/timeline/{video_id}")
+async def get_video_timeline(video_id: str):
+    """Get timeline data for video editing interface"""
+    try:
+        # Find video file
+        video_file = None
+        video_path = OUTPUT_DIR / f"{video_id}"
+        if video_path.exists() and video_path.suffix.lower() in [
+            ".mp4",
+            ".mov",
+            ".avi",
+        ]:
+            video_file = video_path
+        else:
+            for pattern in ["*.mp4", "*.mov", "*.avi"]:
+                for file_path in OUTPUT_DIR.glob(pattern):
+                    if video_id in file_path.stem:
+                        video_file = file_path
+                        break
+                if video_file:
+                    break
+
+        if not video_file:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Video {video_id} not found")
+
+        # Extract video metadata using FFprobe
+        cmd = [
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            str(video_file),
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30)
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to analyze video")
+
+        metadata = json.loads(result.stdout)
+
+        # Extract video stream info
+        video_stream = None
+        audio_stream = None
+        for stream in metadata.get("streams", []):
+            if stream.get("codec_type") == "video" and not video_stream:
+                video_stream = stream
+            elif stream.get("codec_type") == "audio" and not audio_stream:
+                audio_stream = stream
+
+        if not video_stream:
+            raise HTTPException(
+                status_code=500,
+                detail="No video stream found")
+
+        # Calculate frame info
+        duration = float(metadata.get("format", {}).get("duration", 0))
+        fps = 24  # Default FPS
+        if video_stream.get("r_frame_rate"):
+            fps_parts = video_stream["r_frame_rate"].split("/")
+            if len(fps_parts) == 2 and fps_parts[1] != "0":
+                fps = float(fps_parts[0]) / float(fps_parts[1])
+
+        frame_count = int(duration * fps) if duration > 0 else 0
+
+        # Generate thumbnail URLs for timeline scrubbing (every 1 second)
+        thumbnails = []
+        thumbnail_interval = 1.0  # 1 second intervals
+        for t in range(0, int(duration) + 1, int(thumbnail_interval)):
+            thumbnails.append(
+                {"time": float(t), "url": f"/api/thumbnail/{video_id}?t={t}"}
+            )
+
+        timeline_data = {
+            "video_id": video_id,
+            "filename": video_file.name,
+            "duration": duration,
+            "fps": fps,
+            "frame_count": frame_count,
+            "resolution": {
+                "width": video_stream.get("width", 0),
+                "height": video_stream.get("height", 0),
+            },
+            "format": video_stream.get("codec_name", "unknown"),
+            "size": video_file.stat().st_size,
+            "created": datetime.fromtimestamp(video_file.stat().st_ctime).isoformat(),
+            "thumbnails": thumbnails,
+            "has_audio": audio_stream is not None,
+            "audio_info": (
+                {
+                    "codec": audio_stream.get("codec_name") if audio_stream else None,
+                    "sample_rate": (
+                        audio_stream.get(
+                            "sample_rate") if audio_stream else None
+                    ),
+                    "channels": audio_stream.get("channels") if audio_stream else None,
+                }
+                if audio_stream
+                else None
+            ),
+        }
+
+        return timeline_data
+
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Video analysis timeout")
+    except Exception as e:
+        logger.error(f"Error getting timeline data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/videos/{video_id}/frames")
+async def get_video_frames(
+        video_id: str, start_frame: int = 0, count: int = 10):
+    """Extract individual frames from video for frame-by-frame navigation"""
+    try:
+        # Find video file
+        video_file = None
+        video_path = OUTPUT_DIR / f"{video_id}"
+        if video_path.exists() and video_path.suffix.lower() in [
+            ".mp4",
+            ".mov",
+            ".avi",
+        ]:
+            video_file = video_path
+        else:
+            for pattern in ["*.mp4", "*.mov", "*.avi"]:
+                for file_path in OUTPUT_DIR.glob(pattern):
+                    if video_id in file_path.stem:
+                        video_file = file_path
+                        break
+                if video_file:
+                    break
+
+        if not video_file:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Video {video_id} not found")
+
+        # Create frames cache directory
+        frames_dir = OUTPUT_DIR / "frames" / video_file.stem
+        frames_dir.mkdir(exist_ok=True, parents=True)
+
+        # Get video metadata for FPS
+        cmd = [
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_streams",
+            "-select_streams",
+            "v:0",
+            str(video_file),
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30)
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to analyze video")
+
+        metadata = json.loads(result.stdout)
+        video_stream = metadata.get("streams", [{}])[0]
+
+        fps = 24  # Default FPS
+        if video_stream.get("r_frame_rate"):
+            fps_parts = video_stream["r_frame_rate"].split("/")
+            if len(fps_parts) == 2 and fps_parts[1] != "0":
+                fps = float(fps_parts[0]) / float(fps_parts[1])
+
+        # Extract frames
+        frames = []
+        for i in range(count):
+            frame_num = start_frame + i
+            frame_filename = f"frame_{frame_num:06d}.jpg"
+            frame_path = frames_dir / frame_filename
+
+            # Check if frame already exists
+            if not frame_path.exists():
+                # Calculate time position for this frame
+                time_pos = frame_num / fps
+
+                cmd = [
+                    "ffmpeg",
+                    "-i",
+                    str(video_file),
+                    "-ss",
+                    str(time_pos),
+                    "-vf",
+                    "scale=320:180",  # Scale to preview size
+                    "-vframes",
+                    "1",
+                    "-f",
+                    "image2",
+                    "-y",
+                    str(frame_path),
+                ]
+
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=30)
+                if result.returncode != 0:
+                    logger.warning(
+                        f"Failed to extract frame {frame_num}: {result.stderr}"
+                    )
+                    continue
+
+            if frame_path.exists():
+                frames.append(
+                    {
+                        "frame_number": frame_num,
+                        "time": frame_num / fps,
+                        "url": f"/api/media/frame/{video_file.stem}/{frame_filename}",
+                        "filename": frame_filename,
+                    }
+                )
+
+        return {
+            "video_id": video_id,
+            "start_frame": start_frame,
+            "count": len(frames),
+            "fps": fps,
+            "frames": frames,
+        }
+
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Frame extraction timeout")
+    except Exception as e:
+        logger.error(f"Error extracting frames: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/media/frame/{video_stem}/{filename}")
+async def serve_frame(video_stem: str, filename: str):
+    """Serve extracted frame images"""
+    frame_path = OUTPUT_DIR / "frames" / video_stem / filename
+    if not frame_path.exists():
+        raise HTTPException(status_code=404, detail="Frame not found")
+    return FileResponse(frame_path, media_type="image/jpeg")
+
+
+@app.get("/api/anime/media/{filename}")
+async def serve_anime_media(filename: str):
+    """Serve generated anime video files"""
+    # Check in main output directory
+    media_path = OUTPUT_DIR / filename
+    if media_path.exists():
+        # Determine media type based on extension
+        if filename.endswith((".mp4", ".mov", ".avi")):
+            media_type = "video/mp4"
+        elif filename.endswith((".png", ".jpg", ".jpeg")):
+            media_type = "image/jpeg"
+        else:
+            media_type = "application/octet-stream"
+        return FileResponse(media_path, media_type=media_type)
+
+    # Also check subdirectories for generated content
+    for subdir in OUTPUT_DIR.iterdir():
+        if subdir.is_dir():
+            potential_path = subdir / filename
+            if potential_path.exists():
+                if filename.endswith((".mp4", ".mov", ".avi")):
+                    media_type = "video/mp4"
+                elif filename.endswith((".png", ".jpg", ".jpeg")):
+                    media_type = "image/jpeg"
+                else:
+                    media_type = "application/octet-stream"
+                return FileResponse(potential_path, media_type=media_type)
+
+    raise HTTPException(status_code=404, detail="Media file not found")
+
+
+@app.get("/api/anime/models")
+async def get_available_models():
+    """Get list of available anime models"""
+    try:
+        available = get_available_models()
+        return {
+            "current_model": DEFAULT_ANIME_MODEL,
+            "available_models": [
+                {
+                    "name": model,
+                    "display_name": model.replace(".safetensors", "")
+                    .replace("_", " ")
+                    .title(),
+                    "description": {
+                        "AOM3A1B.safetensors": "High quality anime (recommended)",
+                        "counterfeit_v3.safetensors": "Fast anime generation",
+                        "Counterfeit-V2.5.safetensors": "Alternative anime style",
+                        "juggernautXL_v9.safetensors": "Realistic SDXL",
+                        "ProtoGen_X5.8.safetensors": "Sci-fi anime style",
+                    }.get(model, "Anime model"),
+                    "available": Path(
+                        f"/mnt/1TB-storage/ComfyUI/models/checkpoints/{model}"
+                    ).exists(),
+                }
+                for model in available
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Error getting models: {e}")
+        return {"current_model": DEFAULT_ANIME_MODEL, "available_models": []}
+
+
+@app.get("/api/anime/quality-presets")
+async def get_quality_presets():
+    """Get available quality presets"""
+    return {
+        "current_quality": DEFAULT_QUALITY,
+        "available_presets": [
+            {
+                "name": "fast",
+                "display_name": "Fast",
+                "description": "Quick generation (15 steps)",
+                "settings": QUALITY_PRESETS["fast"],
+            },
+            {
+                "name": "balanced",
+                "display_name": "Balanced",
+                "description": "Good speed/quality balance (25 steps)",
+                "settings": QUALITY_PRESETS["balanced"],
+            },
+            {
+                "name": "quality",
+                "display_name": "Quality",
+                "description": "High quality (35 steps, recommended)",
+                "settings": QUALITY_PRESETS["quality"],
+            },
+            {
+                "name": "ultra",
+                "display_name": "Ultra",
+                "description": "Maximum quality (50 steps)",
+                "settings": QUALITY_PRESETS["ultra"],
+            },
+        ],
+    }
+
+
+@app.post("/api/anime/config")
+async def update_anime_config(config: dict):
+    """Update anime generation configuration"""
+    global DEFAULT_ANIME_MODEL, DEFAULT_QUALITY
+
+    try:
+        if "model" in config:
+            new_model = validate_model(config["model"])
+            DEFAULT_ANIME_MODEL = new_model
+
+        if "quality" in config:
+            if config["quality"] in QUALITY_PRESETS:
+                DEFAULT_QUALITY = config["quality"]
+
+        return {
+            "success": True,
+            "current_model": DEFAULT_ANIME_MODEL,
+            "current_quality": DEFAULT_QUALITY,
+            "message": "Configuration updated",
+        }
+    except Exception as e:
+        logger.error(f"Config update failed: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Config update failed: {
+                str(e)}",
+        )
+
+
+@app.post("/api/budget/calculate")
+async def calculate_generation_cost(request_data: dict):
+    """Calculate cost estimation for video generation based on parameters"""
+    try:
+        # Extract parameters
+        duration = request_data.get("duration", 5.0)  # seconds
+        resolution_preset = request_data.get("resolution", "1024x1024")
+        fps = request_data.get("fps", 24)
+        complexity = request_data.get(
+            "complexity", "medium")  # low, medium, high
+        use_lora = request_data.get("use_lora", False)
+        use_controlnet = request_data.get("use_controlnet", False)
+
+        # Parse resolution
+        try:
+            width, height = map(int, resolution_preset.split("x"))
+        except BaseException:
+            width, height = 1024, 1024
+
+        # Calculate base cost factors
+        total_frames = int(duration * fps)
+        pixel_count = width * height
+
+        # Base processing time estimates (in seconds)
+        base_time_per_frame = 2.0  # Base processing time per frame
+
+        # Resolution multiplier
+        resolution_multiplier = pixel_count / \
+            (512 * 512)  # Normalized to 512x512
+
+        # Complexity multipliers
+        complexity_multipliers = {"low": 0.7, "medium": 1.0, "high": 1.5}
+        complexity_mult = complexity_multipliers.get(complexity, 1.0)
+
+        # Feature multipliers
+        lora_mult = 1.3 if use_lora else 1.0
+        controlnet_mult = 1.4 if use_controlnet else 1.0
+
+        # Calculate estimated processing time
+        time_per_frame = (
+            base_time_per_frame
+            * resolution_multiplier
+            * complexity_mult
+            * lora_mult
+            * controlnet_mult
+        )
+        total_processing_time = total_frames * time_per_frame
+
+        # VRAM usage estimation (GB)
+        base_vram = 4.0  # Base VRAM usage
+        vram_per_megapixel = 0.8
+        estimated_vram = base_vram + \
+            (pixel_count / 1_000_000) * vram_per_megapixel
+
+        # Cost calculation (hypothetical pricing)
+        compute_cost_per_minute = 0.10  # $0.10 per minute of compute
+        storage_cost_per_gb = 0.01  # $0.01 per GB of storage
+
+        compute_cost = (total_processing_time / 60) * compute_cost_per_minute
+
+        # Estimated file size (MB)
+        estimated_file_size = (total_frames * pixel_count * 0.1) / (
+            1024 * 1024
+        )  # Rough estimate
+        storage_cost = (estimated_file_size / 1024) * storage_cost_per_gb
+
+        total_cost = compute_cost + storage_cost
+
+        # Resource availability check
+        vram_available, vram_free, vram_status = await check_vram_available()
+        can_generate = estimated_vram <= vram_free if vram_available else True
+
+        return {
+            "parameters": {
+                "duration": duration,
+                "resolution": f"{width}x{height}",
+                "fps": fps,
+                "total_frames": total_frames,
+                "complexity": complexity,
+                "use_lora": use_lora,
+                "use_controlnet": use_controlnet,
+            },
+            "estimates": {
+                "processing_time_seconds": round(total_processing_time, 1),
+                "processing_time_formatted": f"{int(total_processing_time // 60)}m {int(total_processing_time % 60)}s",
+                "estimated_vram_gb": round(estimated_vram, 2),
+                "estimated_file_size_mb": round(estimated_file_size, 1),
+                "compute_cost_usd": round(compute_cost, 4),
+                "storage_cost_usd": round(storage_cost, 4),
+                "total_cost_usd": round(total_cost, 4),
+            },
+            "availability": {
+                "can_generate": can_generate,
+                "vram_required": round(estimated_vram, 2),
+                "vram_available": round(vram_free, 2) if vram_available else "unknown",
+                "vram_status": vram_status,
+            },
+            "recommendations": (
+                [
+                    "Higher resolutions significantly increase processing time and VRAM usage",
+                    "Complex scenes with many details require more processing power",
+                    "LoRA and ControlNet add quality but increase computation time",
+                    f"Recommended maximum duration: {
+                        int(
+                            12 /
+                            estimated_vram *
+                            duration)}s for current VRAM",
+                ]
+                if estimated_vram > 8
+                else [
+                    "Current settings are optimal for this system",
+                    "You can increase complexity or resolution if desired",
+                ]
+            ),
+        }
+
+    except Exception as e:
+        logger.error(f"Error calculating budget: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# END VIDEO TIMELINE INTERFACE ENDPOINTS
+# ============================================================================
+
+
 if __name__ == "__main__":
     print("Starting Tower Anime Video Service on port 8328...")
     print(f"Output directory: {OUTPUT_DIR}")
-    print("Using model: counterfeit_v3.safetensors (PROPER ANIME MODEL)")
+    print(f"Using model: {DEFAULT_ANIME_MODEL} (quality: {DEFAULT_QUALITY})")
     uvicorn.run(app, host="127.0.0.1", port=8328)

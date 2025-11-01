@@ -14,12 +14,17 @@ import aiohttp
 import cv2
 import numpy as np
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import hashlib
+
+# Import security utilities
+sys.path.append(str(Path(__file__).parent.parent))
+from security_utils import credential_manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,13 +36,8 @@ class ComfyUIQualityIntegration:
         self.echo_brain_url = "http://127.0.0.1:8309"
         self.websocket_url = "ws://127.0.0.1:8188/ws"
 
-        # Database connection
-        self.db_params = {
-            'host': 'localhost',
-            'database': 'tower_consolidated',
-            'user': 'patrick',
-            'password': 'tower_echo_brain_secret_key_2025'
-        }
+        # Database connection with secure credential management
+        self.db_params = credential_manager.get_database_config()
 
         # Quality standards for rejection
         self.quality_thresholds = {

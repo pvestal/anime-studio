@@ -10,6 +10,8 @@ import json
 import logging
 import aiohttp
 import numpy as np
+import os
+import hvac
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 import psycopg2
@@ -26,13 +28,58 @@ class AutoCorrectionSystem:
         self.comfyui_url = "http://127.0.0.1:8188"
         self.echo_brain_url = "http://127.0.0.1:8309"
 
-        # Database connection
+        # Database connection with secure credential management
         self.db_params = {
-            'host': 'localhost',
-            'database': 'tower_consolidated',
-            'user': 'patrick',
-            'password': 'tower_echo_brain_secret_key_2025'
+            'host': os.getenv('DB_HOST', 'localhost'),
+            'database': os.getenv('DB_NAME', 'tower_consolidated'),
+            'user': os.getenv('DB_USER', 'patrick'),
+            'password': self._get_secure_db_password()
         }
+
+    def _get_secure_db_password(self) -> str:
+        """Securely retrieve database password from Vault or environment"""
+        try:
+            # Try Vault first
+            vault_client = hvac.Client(url=os.getenv('VAULT_ADDR', 'http://127.0.0.1:8200'))
+
+            # Get vault token
+            vault_token = os.getenv('VAULT_TOKEN')
+            if not vault_token:
+                token_paths = [
+                    Path('/opt/vault/.vault-token'),
+                    Path('/opt/vault/data/vault-token')
+                ]
+                for token_path in token_paths:
+                    if token_path.exists():
+                        vault_token = token_path.read_text().strip()
+                        break
+
+            if vault_token:
+                vault_client.token = vault_token
+                if vault_client.is_authenticated():
+                    # Try different secret paths
+                    for path in ['secret/tower/database', 'secret/anime_production/database']:
+                        try:
+                            response = vault_client.secrets.kv.v2.read_secret_version(path=path)
+                            if response and 'data' in response and 'data' in response['data']:
+                                password = response['data']['data'].get('password')
+                                if password:
+                                    logger.info(f"Retrieved database password from Vault")
+                                    return password
+                        except Exception:
+                            continue
+        except Exception as e:
+            logger.warning(f"Failed to retrieve password from Vault: {e}")
+
+        # Fallback to environment variable
+        env_password = os.getenv('DB_PASSWORD')
+        if env_password:
+            logger.info("Using database password from environment variable")
+            return env_password
+
+        # Critical security warning
+        logger.critical("SECURITY WARNING: No secure password found, using empty password")
+        return ''
 
         # Correction strategies
         self.correction_strategies = {
@@ -621,12 +668,9 @@ class AutoCorrectionSystem:
 async def create_correction_tables():
     """Create tables for auto-correction system"""
     try:
-        conn = psycopg2.connect(
-            host='localhost',
-            database='tower_consolidated',
-            user='patrick',
-            password=''
-        )
+        # Use secure database connection parameters
+        auto_correction = AutoCorrectionSystem()
+        conn = psycopg2.connect(**auto_correction.db_params)
         cur = conn.cursor()
 
         cur.execute("""

@@ -339,7 +339,7 @@ class ComfyUIClient:
             },
             "4": {
                 "inputs": {
-                    "ckpt_name": "epicrealism_v5.safetensors"  # Better model for photorealistic
+                    "ckpt_name": "counterfeit_v3.safetensors"  # Anime model that actually exists
                 },
                 "class_type": "CheckpointLoaderSimple"
             },

@@ -174,7 +174,7 @@ def main():
 
             success = submit_and_wait(workflow, description, duration)
             if success:
-                logger.info(f"✅ {description} - COMPLETED")
+                logger.info(f"✅ {description} - Done")
             else:
                 logger.error(f"❌ {description} - FAILED")
 

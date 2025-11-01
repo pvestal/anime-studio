@@ -1,0 +1,449 @@
+/* Cyberpunk Anime Studio Theme
+ * Based on analysis of Patrick's generated content:
+ * - Cyberpunk Goblin Slayer: Dark atmospheres, orange/amber glows, industrial settings
+ * - Range from psychological thriller to lighter anime styles
+ * - Professional anime studio interface requirements
+ */
+
+:root {
+  /* Core Cyberpunk Color Palette - Based on Generated Frames */
+  --cp-bg-primary: #0a0a0a;           /* Deep black backgrounds */
+  --cp-bg-secondary: #1a1a1a;        /* Elevated surfaces */
+  --cp-bg-tertiary: #2a2a2a;         /* Interactive elements */
+
+  /* Cyberpunk Orange/Amber Accents - From Goblin Slayer frames */
+  --cp-accent-primary: #ff6b35;      /* Orange glow primary */
+  --cp-accent-secondary: #ffaa44;    /* Amber highlights */
+  --cp-accent-tertiary: #ff9500;     /* Warning/energy states */
+
+  /* Neon Accent Colors */
+  --cp-neon-cyan: #00ffff;           /* Cyan for data/tech elements */
+  --cp-neon-purple: #8a2be2;         /* Purple for psychological elements */
+  --cp-neon-green: #39ff14;          /* Green for success/active states */
+  --cp-neon-red: #ff073a;            /* Red for danger/critical states */
+
+  /* Text Colors */
+  --cp-text-primary: #e0e0e0;        /* Main text */
+  --cp-text-secondary: #999999;      /* Secondary text */
+  --cp-text-tertiary: #666666;       /* Muted text */
+  --cp-text-inverse: #0a0a0a;        /* Text on bright backgrounds */
+
+  /* Border and Surface Colors */
+  --cp-border-primary: #333333;      /* Main borders */
+  --cp-border-accent: #ff6b35;       /* Accent borders */
+  --cp-border-subtle: #222222;       /* Subtle divisions */
+
+  /* Gradient Backgrounds */
+  --cp-gradient-primary: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+  --cp-gradient-accent: linear-gradient(135deg, #ff6b35 0%, #ffaa44 100%);
+  --cp-gradient-neon: linear-gradient(90deg, #00ffff 0%, #8a2be2 50%, #ff073a 100%);
+
+  /* Animation Variables */
+  --cp-transition-fast: 0.15s ease-out;
+  --cp-transition-normal: 0.3s ease-out;
+  --cp-transition-slow: 0.5s ease-out;
+
+  /* Glow Effects */
+  --cp-glow-orange: 0 0 20px rgba(255, 107, 53, 0.5);
+  --cp-glow-cyan: 0 0 20px rgba(0, 255, 255, 0.5);
+  --cp-glow-purple: 0 0 20px rgba(138, 43, 226, 0.5);
+
+  /* Typography */
+  --cp-font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  --cp-font-family-display: 'Orbitron', 'Exo 2', sans-serif;
+}
+
+/* Base Cyberpunk Styling */
+.cyberpunk-theme {
+  background: var(--cp-bg-primary);
+  color: var(--cp-text-primary);
+  font-family: var(--cp-font-family);
+  min-height: 100vh;
+}
+
+/* Cyberpunk Card Components */
+.cp-card {
+  background: var(--cp-gradient-primary);
+  border: 1px solid var(--cp-border-primary);
+  border-radius: 8px;
+  padding: 1.5rem;
+  position: relative;
+  overflow: hidden;
+  transition: all var(--cp-transition-normal);
+}
+
+.cp-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 2px;
+  background: var(--cp-gradient-accent);
+  transition: left var(--cp-transition-slow);
+}
+
+.cp-card:hover::before {
+  left: 100%;
+}
+
+.cp-card:hover {
+  border-color: var(--cp-accent-primary);
+  box-shadow: var(--cp-glow-orange);
+  transform: translateY(-2px);
+}
+
+/* Cyberpunk Buttons */
+.cp-button {
+  background: var(--cp-bg-secondary);
+  border: 1px solid var(--cp-border-primary);
+  color: var(--cp-text-primary);
+  padding: 0.75rem 1.5rem;
+  border-radius: 4px;
+  font-family: var(--cp-font-family);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: all var(--cp-transition-fast);
+}
+
+.cp-button:hover {
+  border-color: var(--cp-accent-primary);
+  color: var(--cp-accent-primary);
+  box-shadow: var(--cp-glow-orange);
+}
+
+.cp-button.primary {
+  background: var(--cp-gradient-accent);
+  border-color: var(--cp-accent-primary);
+  color: var(--cp-text-inverse);
+}
+
+.cp-button.neon-cyan {
+  border-color: var(--cp-neon-cyan);
+  color: var(--cp-neon-cyan);
+}
+
+.cp-button.neon-cyan:hover {
+  box-shadow: var(--cp-glow-cyan);
+  background: rgba(0, 255, 255, 0.1);
+}
+
+/* Cyberpunk Input Fields */
+.cp-input {
+  background: var(--cp-bg-secondary);
+  border: 1px solid var(--cp-border-primary);
+  color: var(--cp-text-primary);
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  font-family: var(--cp-font-family);
+  font-size: 0.9rem;
+  transition: all var(--cp-transition-fast);
+  width: 100%;
+}
+
+.cp-input:focus {
+  outline: none;
+  border-color: var(--cp-accent-primary);
+  box-shadow: var(--cp-glow-orange);
+  background: var(--cp-bg-primary);
+}
+
+.cp-input::placeholder {
+  color: var(--cp-text-tertiary);
+  opacity: 1;
+}
+
+/* Cyberpunk Timeline Component */
+.cp-timeline {
+  background: var(--cp-bg-secondary);
+  border: 1px solid var(--cp-border-primary);
+  border-radius: 8px;
+  padding: 1rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.cp-timeline-track {
+  height: 60px;
+  background: var(--cp-bg-primary);
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.cp-timeline-progress {
+  height: 100%;
+  background: var(--cp-gradient-accent);
+  border-radius: 4px;
+  position: relative;
+  transition: width var(--cp-transition-normal);
+}
+
+.cp-timeline-progress::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 100%);
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Cyberpunk Character Generation Panel */
+.cp-character-panel {
+  background: var(--cp-gradient-primary);
+  border: 1px solid var(--cp-border-primary);
+  border-radius: 8px;
+  padding: 1.5rem;
+  position: relative;
+}
+
+.cp-character-panel::before {
+  content: 'CHARACTER GENERATION';
+  position: absolute;
+  top: -1px;
+  left: 1rem;
+  background: var(--cp-bg-primary);
+  color: var(--cp-accent-primary);
+  padding: 0 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.cp-parameter-slider {
+  margin: 1rem 0;
+}
+
+.cp-parameter-slider label {
+  display: block;
+  color: var(--cp-text-secondary);
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.cp-slider {
+  width: 100%;
+  height: 6px;
+  background: var(--cp-bg-primary);
+  border-radius: 3px;
+  outline: none;
+  opacity: 0.8;
+  transition: opacity var(--cp-transition-fast);
+}
+
+.cp-slider:hover {
+  opacity: 1;
+}
+
+.cp-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--cp-accent-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: var(--cp-glow-orange);
+}
+
+.cp-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--cp-accent-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  box-shadow: var(--cp-glow-orange);
+}
+
+/* Music Synchronization Display */
+.cp-music-sync {
+  background: var(--cp-bg-secondary);
+  border: 1px solid var(--cp-border-primary);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.cp-waveform {
+  height: 80px;
+  background: var(--cp-bg-primary);
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: end;
+  justify-content: space-around;
+  padding: 5px;
+}
+
+.cp-waveform-bar {
+  width: 3px;
+  background: var(--cp-accent-primary);
+  border-radius: 2px;
+  opacity: 0.6;
+  animation: pulse 0.5s infinite alternate;
+}
+
+.cp-waveform-bar:nth-child(even) {
+  animation-delay: 0.1s;
+}
+
+.cp-waveform-bar:nth-child(3n) {
+  animation-delay: 0.2s;
+}
+
+@keyframes pulse {
+  from { opacity: 0.3; transform: scaleY(0.5); }
+  to { opacity: 1; transform: scaleY(1); }
+}
+
+/* Status Indicators */
+.cp-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.cp-status.active {
+  background: rgba(57, 255, 20, 0.2);
+  color: var(--cp-neon-green);
+  border: 1px solid var(--cp-neon-green);
+}
+
+.cp-status.processing {
+  background: rgba(255, 107, 53, 0.2);
+  color: var(--cp-accent-primary);
+  border: 1px solid var(--cp-accent-primary);
+}
+
+.cp-status.error {
+  background: rgba(255, 7, 58, 0.2);
+  color: var(--cp-neon-red);
+  border: 1px solid var(--cp-neon-red);
+}
+
+/* Cyberpunk Toolbar */
+.cp-toolbar {
+  background: var(--cp-bg-secondary);
+  border-bottom: 1px solid var(--cp-border-primary);
+  padding: 1rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cp-toolbar h2 {
+  font-family: var(--cp-font-family-display);
+  font-weight: 700;
+  color: var(--cp-accent-primary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 0;
+  text-shadow: var(--cp-glow-orange);
+}
+
+/* Cyberpunk Data Table */
+.cp-table {
+  background: var(--cp-bg-secondary);
+  border: 1px solid var(--cp-border-primary);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.cp-table th {
+  background: var(--cp-bg-primary);
+  color: var(--cp-accent-primary);
+  padding: 1rem;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+  border-bottom: 1px solid var(--cp-border-accent);
+}
+
+.cp-table td {
+  padding: 1rem;
+  border-bottom: 1px solid var(--cp-border-subtle);
+  transition: background var(--cp-transition-fast);
+}
+
+.cp-table tr:hover td {
+  background: var(--cp-bg-tertiary);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .cp-toolbar {
+    padding: 0.75rem 1rem;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .cp-card {
+    padding: 1rem;
+  }
+
+  .cp-character-panel {
+    padding: 1rem;
+  }
+}
+
+/* Animation Classes */
+.cp-fade-in {
+  animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.cp-slide-in {
+  animation: slideIn 0.5s ease-out;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(-100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* Cyberpunk Scrollbar */
+.cyberpunk-theme ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.cyberpunk-theme ::-webkit-scrollbar-track {
+  background: var(--cp-bg-primary);
+}
+
+.cyberpunk-theme ::-webkit-scrollbar-thumb {
+  background: var(--cp-accent-primary);
+  border-radius: 4px;
+}
+
+.cyberpunk-theme ::-webkit-scrollbar-thumb:hover {
+  background: var(--cp-accent-secondary);
+  box-shadow: var(--cp-glow-orange);
+}

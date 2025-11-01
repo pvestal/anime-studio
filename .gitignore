@@ -82,3 +82,9 @@ generated_images/
 exports/
 renders/
 output_*/
+
+# Backup files
+*.backup*
+*.bak
+*.old
+backups/

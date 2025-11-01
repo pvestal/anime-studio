@@ -122,7 +122,7 @@ class EchoIntegratedTrailerGenerator:
                 logger.info(f"Progress: {status['progress_percent']}% - {status['message']}")
 
                 if status['status'] == 'completed':
-                    logger.info("✅ GENERATION COMPLETE!")
+                    logger.info("✅ Generation finished")
                     logger.info(f"Final video: {status['final_video']}")
                     logger.info(f"KB Compliant: {status['kb_compliant']}")
 
