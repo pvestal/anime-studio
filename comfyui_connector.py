@@ -206,8 +206,8 @@ class WorkflowManager:
         """Optimize workflow for given parameters"""
         optimized = workflow.copy()
 
-        # Calculate frame counts based on duration
-        base_frames = min(24, duration * 12)  # 12fps base for VRAM efficiency
+        # Calculate frame counts based on duration - RTX 3060 optimization
+        base_frames = min(8, duration * 8)  # 8fps base for RTX 3060 VRAM efficiency
         target_frames = duration * 24  # Final target: 24fps
 
         # Quality presets
