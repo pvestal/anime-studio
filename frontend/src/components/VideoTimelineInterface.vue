@@ -199,19 +199,79 @@
       </div>
     </div>
 
-    <!-- Music Synchronization Panel -->
+    <!-- Enhanced Music Synchronization Panel -->
     <div v-if="musicSyncEnabled" class="music-sync-panel cp-fade-in">
       <div class="sync-header">
-        <h4>Music Synchronization</h4>
-        <button class="cp-button" @click="detectBeats">
-          <i class="pi pi-search"></i> Auto-Detect Beats
-        </button>
+        <h4>Enhanced Music Synchronization</h4>
+        <div class="sync-header-controls">
+          <button class="cp-button" @click="detectBeats">
+            <i class="pi pi-search"></i> Auto-Detect Beats
+          </button>
+          <button class="cp-button" @click="toggleAdvancedMode" :class="{ 'neon-cyan': advancedModeEnabled }">
+            <i class="pi pi-cog"></i> Advanced
+          </button>
+        </div>
       </div>
 
-      <div class="sync-controls">
+      <!-- Enhanced BPM Visualizer Integration -->
+      <div class="bpm-visualizer-container">
+        <EnhancedBPMVisualizer
+          :audioFile="currentAudioFile"
+          :videoDuration="totalDuration"
+          :autoAnalyze="true"
+          :showManualControls="advancedModeEnabled"
+          @bpmDetected="onBPMDetected"
+          @beatMarker="onBeatMarker"
+          @analysisComplete="onAnalysisComplete"
+        />
+      </div>
+
+      <!-- Video-Audio Sync Controls -->
+      <div class="video-sync-controls" v-if="advancedModeEnabled">
+        <div class="sync-section">
+          <h5>Video Sync Events</h5>
+          <div class="sync-events-grid">
+            <div v-for="event in syncEvents" :key="event.id" class="sync-event-item">
+              <div class="event-info">
+                <span class="event-type">{{ getEventIcon(event.type) }} {{ event.name }}</span>
+                <span class="event-time">{{ formatTime(event.timestamp) }}</span>
+              </div>
+              <div class="event-controls">
+                <button @click="previewEvent(event)" class="preview-btn">
+                  <i class="pi pi-play"></i>
+                </button>
+                <button @click="editEvent(event)" class="edit-btn">
+                  <i class="pi pi-pencil"></i>
+                </button>
+                <button @click="deleteEvent(event)" class="delete-btn">
+                  <i class="pi pi-trash"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="add-event-controls">
+            <select v-model="newEventType" class="event-type-select">
+              <option value="sword_clash">Sword Clash</option>
+              <option value="explosion">Explosion</option>
+              <option value="character_entrance">Character Entrance</option>
+              <option value="dialogue_start">Dialogue Start</option>
+              <option value="scene_transition">Scene Transition</option>
+              <option value="emotional_peak">Emotional Peak</option>
+              <option value="action_sequence">Action Sequence</option>
+            </select>
+            <button @click="addSyncEvent" class="add-event-btn">
+              <i class="pi pi-plus"></i> Add Event
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Traditional Sync Controls (Simplified) -->
+      <div class="basic-sync-controls" v-if="!advancedModeEnabled">
         <div class="bpm-control">
-          <label>BPM</label>
-          <input type="number" v-model="musicBPM" class="cp-input" min="60" max="200" />
+          <label>Manual BPM</label>
+          <input type="number" v-model="musicBPM" class="cp-input" min="60" max="200" @input="updateManualBPM" />
           <button class="cp-button" @click="tapTempo">Tap Tempo</button>
         </div>
 
@@ -229,18 +289,18 @@
             Auto-sync visual effects
           </label>
         </div>
-      </div>
 
-      <div class="rhythm-visualizer">
-        <div class="rhythm-pattern">
-          <div
-            v-for="(beat, index) in rhythmPattern"
-            :key="index"
-            class="rhythm-beat"
-            :class="{ active: beat.active, current: beat.current }"
-            @click="toggleBeat(index)"
-          >
-            {{ index + 1 }}
+        <div class="rhythm-visualizer">
+          <div class="rhythm-pattern">
+            <div
+              v-for="(beat, index) in rhythmPattern"
+              :key="index"
+              class="rhythm-beat"
+              :class="{ active: beat.active, current: beat.current }"
+              @click="toggleBeat(index)"
+            >
+              {{ index + 1 }}
+            </div>
           </div>
         </div>
       </div>
@@ -326,6 +386,7 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import EnhancedBPMVisualizer from './EnhancedBPMVisualizer.vue'
 
 // Props and emits
 const emit = defineEmits(['timeline-updated', 'clip-selected', 'sync-updated'])
@@ -350,6 +411,15 @@ const musicBPM = ref(120)
 const snapToBeats = ref(true)
 const highlightDownbeats = ref(true)
 const autoSyncEffects = ref(false)
+
+// Enhanced BPM & Sync properties
+const advancedModeEnabled = ref(false)
+const currentAudioFile = ref(null)
+const syncEvents = ref([])
+const newEventType = ref('sword_clash')
+const detectedBPM = ref(120)
+const bpmConfidence = ref(0)
+const analysisData = ref(null)
 
 // Timeline refs
 const timelineContainer = ref(null)
@@ -661,6 +731,160 @@ function drawWaveform() {
   ctx.lineTo(playheadX, height)
   ctx.stroke()
 }
+
+// Enhanced BPM & Sync Methods
+const toggleAdvancedMode = () => {
+  advancedModeEnabled.value = !advancedModeEnabled.value
+}
+
+const onBPMDetected = (data) => {
+  detectedBPM.value = data.bpm
+  bpmConfidence.value = data.confidence
+  musicBPM.value = Math.round(data.bpm)
+
+  // Sync with existing beat markers
+  generateBeatsFromBPM(data.bpm)
+
+  // Emit update
+  emit('sync-updated', { bpm: data.bpm, confidence: data.confidence })
+}
+
+const onBeatMarker = (data) => {
+  // Add beat marker to timeline
+  beatMarkers.value.push({
+    time: data.timestamp,
+    type: data.type || 'beat',
+    strength: 'medium'
+  })
+}
+
+const onAnalysisComplete = (data) => {
+  analysisData.value = data
+  console.log('BPM Analysis complete:', data)
+}
+
+const generateBeatsFromBPM = (bpm) => {
+  const beatInterval = 60 / bpm
+  const newBeats = []
+
+  for (let time = 0; time < totalDuration.value; time += beatInterval) {
+    newBeats.push({
+      time: time,
+      type: 'auto',
+      strength: time % (beatInterval * 4) === 0 ? 'strong' : 'weak'
+    })
+  }
+
+  beatMarkers.value = newBeats
+}
+
+const updateManualBPM = () => {
+  if (musicBPM.value !== detectedBPM.value) {
+    generateBeatsFromBPM(musicBPM.value)
+  }
+}
+
+// Sync Events Management
+const getEventIcon = (type) => {
+  const icons = {
+    sword_clash: '[CLASH]',
+    explosion: '[BOOM]',
+    character_entrance: '[ENTER]',
+    dialogue_start: '[TALK]',
+    scene_transition: '[CUT]',
+    emotional_peak: '[PEAK]',
+    action_sequence: '[ACTION]'
+  }
+  return icons[type] || '[EVENT]'
+}
+
+const addSyncEvent = () => {
+  const newEvent = {
+    id: Date.now(),
+    type: newEventType.value,
+    name: newEventType.value.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()),
+    timestamp: currentTime.value,
+    frame: Math.floor(currentTime.value * fps.value)
+  }
+
+  syncEvents.value.push(newEvent)
+  syncEvents.value.sort((a, b) => a.timestamp - b.timestamp)
+}
+
+const previewEvent = (event) => {
+  // Jump to event timestamp and play
+  currentTime.value = event.timestamp
+  playing.value = true
+
+  // Stop after 2 seconds
+  setTimeout(() => {
+    playing.value = false
+  }, 2000)
+}
+
+const editEvent = (event) => {
+  // Simple inline editing - in a real app this would open a modal
+  const newName = prompt('Event name:', event.name)
+  if (newName) {
+    event.name = newName
+  }
+}
+
+const deleteEvent = (event) => {
+  const index = syncEvents.value.findIndex(e => e.id === event.id)
+  if (index > -1) {
+    syncEvents.value.splice(index, 1)
+  }
+}
+
+// Video Synchronization
+const syncVideoToMusic = async () => {
+  if (!currentAudioFile.value) {
+    console.warn('No audio file selected for sync')
+    return
+  }
+
+  try {
+    // Call music production service for video-audio sync
+    const response = await fetch('http://127.0.0.1:8308/api/sync/video-audio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        video_path: videoClips.value[0]?.path || '/mnt/1TB-storage/ComfyUI/output/anime_30sec_final_00006.mp4',
+        audio_path: currentAudioFile.value,
+        sync_type: 'beat_sync'
+      })
+    })
+
+    if (response.ok) {
+      const result = await response.json()
+      console.log('Video-audio sync complete:', result)
+
+      // Update UI with sync results
+      if (result.synced_path) {
+        // Update video clip with synced version
+        const syncedClip = {
+          id: Date.now(),
+          name: 'Synced Video',
+          startTime: 0,
+          duration: result.duration || totalDuration.value,
+          path: result.synced_path,
+          type: 'synced_video'
+        }
+        videoClips.value.unshift(syncedClip)
+      }
+    }
+  } catch (error) {
+    console.error('Video sync failed:', error)
+  }
+}
+
+// Set current audio file from selected clip
+watch(selectedClip, (newClip) => {
+  if (newClip && newClip.type === 'audio') {
+    currentAudioFile.value = newClip.path || newClip.name
+  }
+})
 
 // Lifecycle
 onMounted(() => {
@@ -1209,4 +1433,207 @@ watch([audioClips, timelineWidth], () => {
     flex-direction: column;
     gap: 1rem;
   }
+}
+
+/* Enhanced BPM & Sync Styles */
+.sync-header-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.bmp-visualizer-container {
+  margin: 1rem 0;
+  border: 1px solid var(--cp-border-secondary);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.video-sync-controls {
+  background: var(--cp-bg-tertiary);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.sync-section h5 {
+  color: var(--cp-accent-secondary);
+  margin: 0 0 1rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sync-events-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 1rem;
+  padding: 0.5rem;
+  background: var(--cp-bg-secondary);
+  border-radius: 6px;
+}
+
+.sync-event-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: var(--cp-bg-primary);
+  border: 1px solid var(--cp-border-primary);
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.sync-event-item:hover {
+  border-color: var(--cp-accent-primary);
+  transform: translateY(-1px);
+}
+
+.event-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.event-type {
+  font-weight: 600;
+  color: var(--cp-text-primary);
+}
+
+.event-time {
+  font-size: 0.875rem;
+  color: var(--cp-text-secondary);
+  font-family: monospace;
+}
+
+.event-controls {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.preview-btn, .edit-btn, .delete-btn {
+  padding: 0.5rem;
+  border: 1px solid var(--cp-border-primary);
+  border-radius: 4px;
+  background: var(--cp-bg-secondary);
+  color: var(--cp-text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.75rem;
+}
+
+.preview-btn:hover {
+  background: var(--cp-accent-success);
+  border-color: var(--cp-accent-success);
+}
+
+.edit-btn:hover {
+  background: var(--cp-accent-warning);
+  border-color: var(--cp-accent-warning);
+}
+
+.delete-btn:hover {
+  background: var(--cp-accent-danger);
+  border-color: var(--cp-accent-danger);
+}
+
+.add-event-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.event-type-select {
+  flex: 1;
+  padding: 0.5rem;
+  background: var(--cp-bg-secondary);
+  border: 1px solid var(--cp-border-primary);
+  border-radius: 4px;
+  color: var(--cp-text-primary);
+}
+
+.add-event-btn {
+  padding: 0.5rem 1rem;
+  background: var(--cp-accent-success);
+  border: 1px solid var(--cp-accent-success);
+  border-radius: 4px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-weight: 600;
+}
+
+.add-event-btn:hover {
+  background: var(--cp-accent-success-dark);
+  transform: translateY(-1px);
+}
+
+.basic-sync-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.basic-sync-controls .bpm-control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.basic-sync-controls .sync-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.basic-sync-controls .rhythm-visualizer {
+  grid-column: span 2;
+  margin-top: 1rem;
+}
+
+/* Advanced mode toggle */
+.cp-button.neon-cyan {
+  background: linear-gradient(135deg, var(--cp-accent-primary), var(--cp-accent-secondary));
+  border-color: var(--cp-accent-primary);
+  box-shadow: 0 0 10px rgba(0, 212, 170, 0.3);
+}
+
+/* Animation classes */
+.cp-fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .basic-sync-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .sync-events-grid {
+    max-height: 150px;
+  }
+
+  .add-event-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .event-type-select {
+    margin-bottom: 0.5rem;
+  }
+}
 }</style>

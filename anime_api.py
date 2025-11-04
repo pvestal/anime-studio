@@ -19,6 +19,7 @@ import os
 import shutil
 import logging
 from contextlib import contextmanager
+from project_bible_api import ProjectBibleAPI, ProjectBibleCreate, ProjectBibleUpdate, CharacterDefinition
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -1015,11 +1016,37 @@ async def generate_from_command(project_id: int, request: Dict[str, Any]):
             echo_data = echo_response.json()
             interpretation = echo_data.get('response', '')
         
-        # Step 2: Extract parameters from Echo's response
-        # For now, use command directly as prompt and add defaults
+        # Step 2: Use USER-PROVIDED character data, not database garbage
+        # Get project info to determine which character set to use
+        with get_db() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute('SELECT name, description FROM episodes WHERE id = %s', (project_id,))
+            project = cursor.fetchone()
+
+        # USER'S ACTUAL CHARACTER DATA - use this instead of database
+        user_characters = {}
+        if "Tokyo Debt Desire" in project['name']:
+            user_characters = {
+                "Harem comedy anime": "photorealistic scenes of financial desperation in Tokyo urban setting",
+                "Multiple female characters": "diverse personalities and backgrounds in debt situations",
+                "Tokyo setting": "modern urban environment, office buildings, financial district"
+            }
+        elif "Cyberpunk" in project['name'] or "Goblin Slayer" in project['name']:
+            user_characters = {
+                "Kai Nakamura": "cyberpunk character in futuristic Tokyo setting",
+                "Goblin Slayer elements": "dark fantasy mixed with cyberpunk aesthetics",
+                "Futuristic Tokyo": "neon lights, high-tech urban environment"
+            }
+
+        # Build enhanced prompt with USER'S character data
+        enhanced_prompt = command
+        if user_characters:
+            char_descriptions = [f"{name}: {desc}" for name, desc in user_characters.items()]
+            enhanced_prompt = f"{command}. Characters: {'; '.join(char_descriptions)}"
+
         generation_params = {
-            "prompt": command,
-            "character": "anime character",
+            "prompt": enhanced_prompt,
+            "character": list(user_characters.keys())[0] if user_characters else "anime character",
             "duration": 5,
             "frames": 120,
             "style": "anime masterpiece",
@@ -1446,3 +1473,84 @@ async def get_git_status(project_id: int):
     except Exception as e:
         logger.error(f"Git status check failed: {e}")
         raise HTTPException(status_code=500, detail=f"Git status failed: {str(e)}")
+
+# Project Bible API endpoints
+bible_api = None
+
+def get_bible_api():
+    global bible_api
+    if bible_api is None:
+        # Create simple database manager that uses existing get_db context
+        class SimpleDBManager:
+            def get_connection(self):
+                return get_db()
+
+        db_manager = SimpleDBManager()
+        bible_api = ProjectBibleAPI(db_manager)
+    return bible_api
+
+@app.post("/api/anime/projects/{project_id}/bible", response_model=Dict[str, Any])
+async def create_project_bible(project_id: int, bible_data: ProjectBibleCreate):
+    """Create a new project bible for a project"""
+    try:
+        bible_api = get_bible_api()
+        result = await bible_api.create_project_bible(project_id, bible_data)
+        return result
+    except Exception as e:
+        logger.error(f"Error creating project bible: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/anime/projects/{project_id}/bible", response_model=Dict[str, Any])
+async def get_project_bible(project_id: int):
+    """Get project bible for a project"""
+    try:
+        bible_api = get_bible_api()
+        result = await bible_api.get_project_bible(project_id)
+        return result
+    except Exception as e:
+        logger.error(f"Error getting project bible: {e}")
+        raise HTTPException(status_code=404, detail="Project bible not found")
+
+@app.put("/api/anime/projects/{project_id}/bible", response_model=Dict[str, Any])
+async def update_project_bible(project_id: int, bible_update: ProjectBibleUpdate):
+    """Update project bible"""
+    try:
+        bible_api = get_bible_api()
+        result = await bible_api.update_project_bible(project_id, bible_update)
+        return result
+    except Exception as e:
+        logger.error(f"Error updating project bible: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/anime/projects/{project_id}/bible/characters", response_model=Dict[str, Any])
+async def add_character_to_bible(project_id: int, character: CharacterDefinition):
+    """Add character definition to project bible"""
+    try:
+        bible_api = get_bible_api()
+        result = await bible_api.add_character_to_bible(project_id, character)
+        return result
+    except Exception as e:
+        logger.error(f"Error adding character to bible: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/anime/projects/{project_id}/bible/characters", response_model=List[Dict[str, Any]])
+async def get_bible_characters(project_id: int):
+    """Get all characters from project bible"""
+    try:
+        bible_api = get_bible_api()
+        result = await bible_api.get_bible_characters(project_id)
+        return result
+    except Exception as e:
+        logger.error(f"Error getting bible characters: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/anime/projects/{project_id}/bible/history", response_model=List[Dict[str, Any]])
+async def get_bible_history(project_id: int):
+    """Get revision history for project bible"""
+    try:
+        bible_api = get_bible_api()
+        result = await bible_api.get_bible_history(project_id)
+        return result
+    except Exception as e:
+        logger.error(f"Error getting bible history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

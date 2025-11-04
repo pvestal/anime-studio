@@ -27,9 +27,9 @@ class ComfyUIIntegration:
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
 
-            # Echo Brain optimization: AnimateDiff 24 frame limit with VRAM-conscious approach
-            # Use 12fps base (lower VRAM) and let RIFE interpolate to 24fps
-            base_frames = min(24, duration * 12)  # 12fps base for VRAM efficiency
+            # Echo Brain optimization: AnimateDiff with proper frame handling
+            # Use 24fps base for smooth animation, segment if needed
+            base_frames = min(120, duration * 24)  # 24fps base, max 120 frames per segment
             target_frames = duration * 24  # Final target: 24fps
 
             logger.info(f"🧠 Echo optimization: {base_frames} base frames, RIFE interpolation for {duration}s video")

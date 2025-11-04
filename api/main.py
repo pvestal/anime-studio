@@ -84,6 +84,31 @@ class ProductionJob(Base):
     quality_score = Column(Float)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+# Bible Database Models
+class ProjectBible(Base):
+    __tablename__ = "project_bibles"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, index=True)  # FK to AnimeProject
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False)
+    visual_style = Column(JSONB, default={})
+    world_setting = Column(JSONB, default={})
+    narrative_guidelines = Column(JSONB, default={})
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+class BibleCharacter(Base):
+    __tablename__ = "bible_characters"
+    id = Column(Integer, primary_key=True, index=True)
+    bible_id = Column(Integer, index=True)  # FK to ProjectBible
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=False)
+    visual_traits = Column(JSONB, default={})
+    personality_traits = Column(JSONB, default={})
+    relationships = Column(JSONB, default={})
+    evolution_arc = Column(JSONB, default=[])
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 # Pydantic Models
 class AnimeProjectBase(BaseModel):
     name: str
@@ -114,6 +139,57 @@ class PersonalCreativeRequest(BaseModel):
     personal_context: Optional[str] = None
     style_preferences: Optional[str] = None
     biometric_data: Optional[dict] = None
+
+# Bible Pydantic Models
+class ProjectBibleCreate(BaseModel):
+    title: str
+    description: str
+    visual_style: Optional[dict] = {}
+    world_setting: Optional[dict] = {}
+    narrative_guidelines: Optional[dict] = {}
+
+class ProjectBibleUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    visual_style: Optional[dict] = None
+    world_setting: Optional[dict] = None
+    narrative_guidelines: Optional[dict] = None
+
+class CharacterDefinition(BaseModel):
+    name: str
+    description: str
+    visual_traits: Optional[dict] = {}
+    personality_traits: Optional[dict] = {}
+    relationships: Optional[dict] = {}
+    evolution_arc: Optional[List[dict]] = []
+
+class ProjectBibleResponse(BaseModel):
+    id: int
+    project_id: int
+    title: str
+    description: str
+    visual_style: dict
+    world_setting: dict
+    narrative_guidelines: dict
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class CharacterResponse(BaseModel):
+    id: int
+    bible_id: int
+    name: str
+    description: str
+    visual_traits: dict
+    personality_traits: dict
+    relationships: dict
+    evolution_arc: List[dict]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 # Dependency
 def get_db():
@@ -152,31 +228,91 @@ async def submit_comfyui_workflow(workflow_data: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"ComfyUI connection failed: {str(e)}")
 
-async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura", style: str = "anime"):
-    """Generate anime using Echo Brain service"""
+async def generate_with_fixed_workflow(prompt: str, character: str = None, style: str = "anime"):
+    """Generate anime using FIXED ComfyUI workflow with working parameters"""
     try:
-        async with aiohttp.ClientSession() as session:
-            request_data = {
-                "prompt": prompt,
-                "character_name": character,
-                "scene_type": "cyberpunk_action",
-                "generation_type": "video",
-                "quality_level": "professional",
-                "style_preference": style,
-                "width": 1024,
-                "height": 1024,
-                "steps": 30
-            }
+        # Enhanced character-specific prompt
+        if character and character.lower() == "kai":
+            enhanced_prompt = f"1boy, Kai Nakamura, cyberpunk male character, spiky black hair, tech augmented eyes, black jacket, neon city background, {prompt}, anime style, high quality, detailed"
+        else:
+            enhanced_prompt = f"{prompt}, anime style, high quality, detailed animation, masterpiece"
 
-            async with session.post(f"{ECHO_SERVICE_URL}/api/echo/anime/generate", json=request_data) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    return result
-                else:
-                    error_text = await response.text()
-                    raise HTTPException(status_code=500, detail=f"Echo service error: {response.status} - {error_text}")
+        # Fixed workflow using working parameters from test
+        import time
+        timestamp = int(time.time())
+
+        workflow = {
+            "1": {
+                "class_type": "CheckpointLoaderSimple",
+                "inputs": {"ckpt_name": "counterfeit_v3.safetensors"}
+            },
+            "2": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"text": enhanced_prompt, "clip": ["1", 1]}
+            },
+            "3": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {"text": "worst quality, low quality, blurry, distorted", "clip": ["1", 1]}
+            },
+            "4": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {"width": 512, "height": 512, "batch_size": 120}
+            },
+            "5": {
+                "class_type": "ADE_AnimateDiffLoaderGen1",
+                "inputs": {
+                    "model": ["1", 0],
+                    "model_name": "mm-Stabilized_high.pth",
+                    "beta_schedule": "sqrt_linear (AnimateDiff)"
+                }
+            },
+            "6": {
+                "class_type": "KSampler",
+                "inputs": {
+                    "seed": timestamp,
+                    "steps": 20,
+                    "cfg": 7.0,
+                    "sampler_name": "dpmpp_2m",
+                    "scheduler": "karras",
+                    "denoise": 1.0,
+                    "model": ["5", 0],
+                    "positive": ["2", 0],
+                    "negative": ["3", 0],
+                    "latent_image": ["4", 0]
+                }
+            },
+            "7": {
+                "class_type": "VAEDecode",
+                "inputs": {"samples": ["6", 0], "vae": ["1", 2]}
+            },
+            "8": {
+                "class_type": "VHS_VideoCombine",
+                "inputs": {
+                    "images": ["7", 0],
+                    "frame_rate": 8.0,
+                    "loop_count": 0,
+                    "filename_prefix": f"fixed_anime_{timestamp}",
+                    "format": "video/h264-mp4",
+                    "pingpong": False,
+                    "save_output": True
+                }
+            }
+        }
+
+        # Submit directly to ComfyUI
+        job_id = await submit_comfyui_workflow({"prompt": workflow})
+
+        return {
+            "status": "success",
+            "job_id": job_id,
+            "output_path": f"/mnt/1TB-storage/ComfyUI/output/fixed_anime_{timestamp}",
+            "workflow_type": "fixed_high_quality",
+            "resolution": "512x512",
+            "model": "counterfeit_v3.safetensors"
+        }
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Echo service connection failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Fixed workflow generation failed: {str(e)}")
 
 async def get_real_comfyui_progress(request_id: str) -> float:
     """Get REAL progress from ComfyUI queue system"""
@@ -221,10 +357,10 @@ async def health_check():
 
 @app.post("/api/anime/generate")
 async def generate_anime_video(request: AnimeGenerationRequest, db: Session = Depends(get_db)):
-    """Direct anime video generation endpoint"""
+    """Direct anime video generation endpoint - FIXED WORKFLOW"""
     try:
-        # Generate using Echo Brain + ComfyUI
-        echo_result = await generate_with_echo_service(
+        # Generate using FIXED workflow (no more broken Echo workflow)
+        result = await generate_with_fixed_workflow(
             prompt=request.prompt,
             character=request.character,
             style=request.style
@@ -234,17 +370,20 @@ async def generate_anime_video(request: AnimeGenerationRequest, db: Session = De
             job_type="video_generation",
             prompt=request.prompt,
             parameters=request.json(),
-            status="completed",
-            output_path=echo_result.get("output_path") if echo_result else None
+            status="processing",
+            output_path=result.get("output_path") if result else None
         )
         db.add(job)
         db.commit()
 
         return {
             "job_id": job.id,
-            "status": "completed",
-            "echo_result": echo_result,
-            "message": "Video generation completed"
+            "comfyui_job_id": result.get("job_id"),
+            "status": "processing",
+            "workflow_type": result.get("workflow_type"),
+            "resolution": result.get("resolution"),
+            "model": result.get("model"),
+            "message": "High-quality video generation started with fixed workflow"
         }
     except Exception as e:
         job = ProductionJob(
@@ -298,6 +437,116 @@ async def delete_project(project_id: int, db: Session = Depends(get_db)):
     db.delete(project)
     db.commit()
     return {"message": "Project deleted successfully"}
+
+# ============================================================================
+# PROJECT BIBLE ENDPOINTS
+# ============================================================================
+
+@app.post("/api/anime/projects/{project_id}/bible", response_model=ProjectBibleResponse)
+async def create_project_bible(project_id: int, bible_data: ProjectBibleCreate, db: Session = Depends(get_db)):
+    """Create a new project bible for a project"""
+    # Check if project exists
+    project = db.query(AnimeProject).filter(AnimeProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Check if bible already exists
+    existing_bible = db.query(ProjectBible).filter(ProjectBible.project_id == project_id).first()
+    if existing_bible:
+        raise HTTPException(status_code=400, detail="Project bible already exists")
+
+    # Create project bible
+    bible = ProjectBible(
+        project_id=project_id,
+        title=bible_data.title,
+        description=bible_data.description,
+        visual_style=bible_data.visual_style,
+        world_setting=bible_data.world_setting,
+        narrative_guidelines=bible_data.narrative_guidelines
+    )
+
+    db.add(bible)
+    db.commit()
+    db.refresh(bible)
+
+    return bible
+
+@app.get("/api/anime/projects/{project_id}/bible", response_model=ProjectBibleResponse)
+async def get_project_bible(project_id: int, db: Session = Depends(get_db)):
+    """Get project bible for a project"""
+    bible = db.query(ProjectBible).filter(ProjectBible.project_id == project_id).first()
+    if not bible:
+        raise HTTPException(status_code=404, detail="Project bible not found")
+
+    return bible
+
+@app.put("/api/anime/projects/{project_id}/bible", response_model=ProjectBibleResponse)
+async def update_project_bible(project_id: int, bible_update: ProjectBibleUpdate, db: Session = Depends(get_db)):
+    """Update project bible"""
+    bible = db.query(ProjectBible).filter(ProjectBible.project_id == project_id).first()
+    if not bible:
+        raise HTTPException(status_code=404, detail="Project bible not found")
+
+    # Update fields if provided
+    if bible_update.title is not None:
+        bible.title = bible_update.title
+    if bible_update.description is not None:
+        bible.description = bible_update.description
+    if bible_update.visual_style is not None:
+        bible.visual_style = bible_update.visual_style
+    if bible_update.world_setting is not None:
+        bible.world_setting = bible_update.world_setting
+    if bible_update.narrative_guidelines is not None:
+        bible.narrative_guidelines = bible_update.narrative_guidelines
+
+    bible.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(bible)
+
+    return bible
+
+@app.post("/api/anime/projects/{project_id}/bible/characters", response_model=CharacterResponse)
+async def add_character_to_bible(project_id: int, character: CharacterDefinition, db: Session = Depends(get_db)):
+    """Add character definition to project bible"""
+    # Check if project bible exists
+    bible = db.query(ProjectBible).filter(ProjectBible.project_id == project_id).first()
+    if not bible:
+        raise HTTPException(status_code=404, detail="Project bible not found")
+
+    # Check if character already exists
+    existing_character = db.query(BibleCharacter).filter(
+        BibleCharacter.bible_id == bible.id,
+        BibleCharacter.name == character.name
+    ).first()
+    if existing_character:
+        raise HTTPException(status_code=400, detail="Character already exists in bible")
+
+    # Create character
+    new_character = BibleCharacter(
+        bible_id=bible.id,
+        name=character.name,
+        description=character.description,
+        visual_traits=character.visual_traits,
+        personality_traits=character.personality_traits,
+        relationships=character.relationships,
+        evolution_arc=character.evolution_arc
+    )
+
+    db.add(new_character)
+    db.commit()
+    db.refresh(new_character)
+
+    return new_character
+
+@app.get("/api/anime/projects/{project_id}/bible/characters", response_model=List[CharacterResponse])
+async def get_bible_characters(project_id: int, db: Session = Depends(get_db)):
+    """Get all characters from project bible"""
+    bible = db.query(ProjectBible).filter(ProjectBible.project_id == project_id).first()
+    if not bible:
+        raise HTTPException(status_code=404, detail="Project bible not found")
+
+    characters = db.query(BibleCharacter).filter(BibleCharacter.bible_id == bible.id).all()
+    return characters
 
 @app.post("/api/anime/generate/project/{project_id}")
 async def generate_video_for_project(project_id: int, request: AnimeGenerationRequest, db: Session = Depends(get_db)):
