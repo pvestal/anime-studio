@@ -229,77 +229,162 @@ async def submit_comfyui_workflow(workflow_data: dict):
         raise HTTPException(status_code=500, detail=f"ComfyUI connection failed: {str(e)}")
 
 async def generate_with_fixed_workflow(prompt: str, character: str = None, style: str = "anime", duration: int = 5):
-    """Generate anime using FIXED ComfyUI workflow with working parameters"""
+    """Generate anime using FIXED ComfyUI workflow with AnimateDiff context windows for 5-second videos"""
     try:
         # Enhanced character-specific prompt
         if character and character.lower() == "kai":
             enhanced_prompt = f"1boy, Kai Nakamura, cyberpunk male character, spiky black hair, tech augmented eyes, black jacket, neon city background, {prompt}, anime style, high quality, detailed"
         else:
-            enhanced_prompt = f"{prompt}, anime style, high quality, detailed animation, masterpiece"
+            enhanced_prompt = f"masterpiece, best quality, {prompt}, anime style, beautiful detailed eyes, flowing hair, dynamic movement, colorful background, high resolution, detailed animation"
 
         # Fixed workflow using working parameters from test
         import time
         timestamp = int(time.time())
 
-        # Calculate frames based on duration
+        # Calculate frames based on duration (5 seconds @ 24fps = 120 frames)
         frames = min(120, duration * 24)
         print(f"DEBUG: Generating {duration}s video with {frames} frames")
         logger.info(f"Generating {duration}s video with {frames} frames (batch_size)")
 
         workflow = {
             "1": {
-                "class_type": "CheckpointLoaderSimple",
-                "inputs": {"ckpt_name": "counterfeit_v3.safetensors"}
-            },
-            "2": {
-                "class_type": "CLIPTextEncode",
-                "inputs": {"text": enhanced_prompt, "clip": ["1", 1]}
-            },
-            "3": {
-                "class_type": "CLIPTextEncode",
-                "inputs": {"text": "worst quality, low quality, blurry, distorted", "clip": ["1", 1]}
-            },
-            "4": {
-                "class_type": "EmptyLatentImage",
-                "inputs": {"width": 512, "height": 512, "batch_size": frames}
-            },
-            "5": {
-                "class_type": "ADE_AnimateDiffLoaderGen1",
                 "inputs": {
-                    "model": ["1", 0],
-                    "model_name": "mm-Stabilized_high.pth",
-                    "beta_schedule": "sqrt_linear (AnimateDiff)"
+                    "text": enhanced_prompt,
+                    "clip": ["4", 1]
+                },
+                "class_type": "CLIPTextEncode",
+                "_meta": {
+                    "title": "CLIP Text Encode (Prompt)"
                 }
             },
-            "6": {
-                "class_type": "KSampler",
+            "2": {
+                "inputs": {
+                    "text": "worst quality, low quality, blurry, ugly, distorted, static, still image, text, watermark",
+                    "clip": ["4", 1]
+                },
+                "class_type": "CLIPTextEncode",
+                "_meta": {
+                    "title": "CLIP Text Encode (Negative)"
+                }
+            },
+            "3": {
                 "inputs": {
                     "seed": timestamp,
-                    "steps": 20,
-                    "cfg": 7.0,
+                    "steps": 40,
+                    "cfg": 8.5,
                     "sampler_name": "dpmpp_2m",
                     "scheduler": "karras",
                     "denoise": 1.0,
-                    "model": ["5", 0],
-                    "positive": ["2", 0],
-                    "negative": ["3", 0],
-                    "latent_image": ["4", 0]
+                    "model": ["12", 0],
+                    "positive": ["1", 0],
+                    "negative": ["2", 0],
+                    "latent_image": ["5", 0]
+                },
+                "class_type": "KSampler",
+                "_meta": {
+                    "title": "KSampler"
+                }
+            },
+            "4": {
+                "inputs": {
+                    "ckpt_name": "counterfeit_v3.safetensors"
+                },
+                "class_type": "CheckpointLoaderSimple",
+                "_meta": {
+                    "title": "Load Checkpoint"
+                }
+            },
+            "5": {
+                "inputs": {
+                    "width": 1024,
+                    "height": 1024,
+                    "batch_size": frames
+                },
+                "class_type": "EmptyLatentImage",
+                "_meta": {
+                    "title": f"Empty Latent Image ({frames} frames for {duration} seconds @ 24fps)"
+                }
+            },
+            "6": {
+                "inputs": {
+                    "samples": ["3", 0],
+                    "vae": ["13", 0]
+                },
+                "class_type": "VAEDecode",
+                "_meta": {
+                    "title": "VAE Decode"
                 }
             },
             "7": {
-                "class_type": "VAEDecode",
-                "inputs": {"samples": ["6", 0], "vae": ["1", 2]}
-            },
-            "8": {
-                "class_type": "VHS_VideoCombine",
                 "inputs": {
-                    "images": ["7", 0],
-                    "frame_rate": 24.0,
+                    "images": ["6", 0],
+                    "frame_rate": 24,
                     "loop_count": 0,
-                    "filename_prefix": f"fixed_anime_{timestamp}",
+                    "filename_prefix": f"animatediff_5sec_{frames}frames_{timestamp}",
                     "format": "video/h264-mp4",
+                    "pix_fmt": "yuv420p",
+                    "crf": 12,
+                    "save_metadata": True,
                     "pingpong": False,
                     "save_output": True
+                },
+                "class_type": "VHS_VideoCombine",
+                "_meta": {
+                    "title": "Video Combine - 5 Second Video"
+                }
+            },
+            "10": {
+                "inputs": {
+                    "model_name": "mm-Stabilized_high.pth"
+                },
+                "class_type": "ADE_LoadAnimateDiffModel",
+                "_meta": {
+                    "title": "Load AnimateDiff Model"
+                }
+            },
+            "11": {
+                "inputs": {
+                    "motion_model": ["10", 0],
+                    "start_percent": 0.0,
+                    "end_percent": 1.0
+                },
+                "class_type": "ADE_ApplyAnimateDiffModel",
+                "_meta": {
+                    "title": "Apply AnimateDiff Model"
+                }
+            },
+            "12": {
+                "inputs": {
+                    "model": ["4", 0],
+                    "beta_schedule": "autoselect",
+                    "m_models": ["11", 0],
+                    "context_options": ["14", 0]
+                },
+                "class_type": "ADE_UseEvolvedSampling",
+                "_meta": {
+                    "title": "Use Evolved Sampling with Context"
+                }
+            },
+            "13": {
+                "inputs": {
+                    "vae_name": "vae-ft-mse-840000-ema-pruned.safetensors"
+                },
+                "class_type": "VAELoader",
+                "_meta": {
+                    "title": "Load VAE"
+                }
+            },
+            "14": {
+                "inputs": {
+                    "context_length": 24,
+                    "context_stride": 1,
+                    "context_overlap": 4,
+                    "context_schedule": "uniform",
+                    "closed_loop": False
+                },
+                "class_type": "ADE_LoopedUniformContextOptions",
+                "_meta": {
+                    "title": f"Context Window for {frames} frames (24-frame chunks)"
                 }
             }
         }
@@ -310,10 +395,13 @@ async def generate_with_fixed_workflow(prompt: str, character: str = None, style
         return {
             "status": "success",
             "job_id": job_id,
-            "output_path": f"/mnt/1TB-storage/ComfyUI/output/fixed_anime_{timestamp}",
-            "workflow_type": "fixed_high_quality",
-            "resolution": "512x512",
-            "model": "counterfeit_v3.safetensors"
+            "output_path": f"/mnt/1TB-storage/ComfyUI/output/animatediff_5sec_{frames}frames_{timestamp}",
+            "workflow_type": "animatediff_with_context_window",
+            "resolution": "1024x1024",
+            "model": "counterfeit_v3.safetensors",
+            "frames": frames,
+            "duration": duration,
+            "context_window": "24 frames with 4 overlap"
         }
 
     except Exception as e:
