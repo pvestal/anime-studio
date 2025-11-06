@@ -31,7 +31,7 @@ async def quick_test():
 
     # Test 2: Check workflow file
     print("2️⃣ Testing workflow file...")
-    workflow_file = Path("/opt/tower-anime-production/workflows/comfyui/anime_30sec_working_workflow.json")
+    workflow_file = Path("/opt/tower-anime-production/workflows/comfyui/anime_30sec_standard.json")
 
     if workflow_file.exists():
         with open(workflow_file, 'r') as f:

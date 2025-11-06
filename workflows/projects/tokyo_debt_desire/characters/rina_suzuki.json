@@ -1,0 +1,178 @@
+{
+  "name": "Rina Suzuki",
+  "gender": "female",
+  "age": 22,
+  "character_type": "female_roommate",
+  "occupation": "college student / part-time maid cafe worker",
+  "appearance": {
+    "ethnicity": "Japanese",
+    "height": "158cm (5'2\")",
+    "build": "petite, curvy, energetic",
+    "hair": {
+      "color": "light brown with blonde highlights",
+      "style": "shoulder-length, often in twin tails or high ponytail, playful styling",
+      "texture": "straight with slight wave, bouncy"
+    },
+    "eyes": {
+      "color": "bright hazel",
+      "shape": "large, round, expressive",
+      "expression": "mischievous, playful, teasing sparkle"
+    },
+    "facial_features": "cute round face, button nose, frequent playful smiles and winks, dimples when smiling, youthful appearance",
+    "body": {
+      "bust": "large for petite frame, perky",
+      "waist": "small, defined",
+      "hips": "curvy, round",
+      "legs": "shapely, toned",
+      "skin": "fair, smooth, youthful glow"
+    },
+    "distinctive_features": "energetic movements, expressive facial expressions, playful body language, often bouncing or skipping"
+  },
+  "personality": {
+    "traits": [
+      "playful",
+      "teasing",
+      "energetic",
+      "fun-loving",
+      "mischievous",
+      "confident",
+      "flirtatious",
+      "spontaneous"
+    ],
+    "strengths": [
+      "keeps atmosphere light and fun",
+      "excellent at reading reactions",
+      "naturally charismatic",
+      "unpredictable in charming way",
+      "makes people laugh and relax"
+    ],
+    "approach_to_takeshi": "constant playful teasing, physical pranks with intimate undertones, wearing provocative outfits 'accidentally', creating games with flirty rewards, keeping him guessing her intentions",
+    "communication_style": "upbeat, uses cute speech patterns, lots of giggles, playful nicknames, teasing remarks with innocent face",
+    "romantic_tactics": [
+      "playful physical contact disguised as accidents",
+      "wearing revealing maid cafe uniform at home 'for practice'",
+      "creating silly games with intimate forfeits",
+      "sending flirty texts and photos",
+      "fake-innocent double entendres",
+      "surprise hugs and tackle-glomps"
+    ]
+  },
+  "background": {
+    "history": "Tokyo native, studying psychology at local university, works part-time at popular maid cafe to pay for tuition and have fun",
+    "why_lives_here": "Moved in 6 months ago to be closer to university and cafe, loves the shared living dynamic",
+    "relationship_with_takeshi": "Immediately found him interesting, sees him as fun to tease but also genuinely cares about cheering him up",
+    "financial_situation": "Scraping by on part-time work and small allowance from parents, spends money on cute clothes and anime merchandise",
+    "family": "Middle-class Tokyo family, younger sister still in high school, parents are supportive but worry about her",
+    "secrets": "Actually quite intelligent despite airhead act, has crush on Takeshi but hides it behind teasing, collects dating sim games"
+  },
+  "daily_routine": {
+    "morning": "8:00 AM wake up (often late), rushes to get ready, quick breakfast while chatting energetically",
+    "day": "University classes, studying at cafes, occasional maid cafe shifts, hangs out with friends",
+    "evening": "Returns home 6-8 PM depending on shift, changes into comfortable cute clothes, plays games or watches anime",
+    "night": "Often stays up late gaming or studying, sneaks snacks from kitchen, goes to bed around 1 AM"
+  },
+  "clothing_style": {
+    "casual_home": [
+      "oversized hoodies with short shorts barely visible",
+      "crop tops with pleated mini skirts",
+      "tank tops with no bra (visible)",
+      "loose t-shirts showing shoulders and thighs",
+      "cute pajamas with short shorts"
+    ],
+    "maid_cafe_uniform": [
+      "classic maid outfit with short skirt and apron",
+      "thigh-high stockings with garter visible",
+      "low-cut frilly top showing cleavage",
+      "variations including cat ear maid, bunny maid"
+    ],
+    "going_out": [
+      "trendy street fashion with crop tops",
+      "short skirts or tight jeans",
+      "cute dresses that emphasize curves",
+      "playful cosplay-inspired outfits"
+    ],
+    "university": [
+      "cute casual with short skirts",
+      "tight jeans with fitted tops",
+      "cardigan over tank tops",
+      "fashionable but comfortable"
+    ],
+    "color_preferences": "pink, pastels, white, light blue, vibrant colors",
+    "accessories": "hair clips and ribbons, cute earrings, phone charms, temporary tattoos"
+  },
+  "interactions_with_takeshi": {
+    "typical_scenarios": [
+      "Greeting him at door in maid outfit offering 'welcome home master' service",
+      "Challenging him to video games with intimate forfeits",
+      "Asking for help with 'stuck' zippers that aren't really stuck",
+      "Practicing 'maid service' on him as training",
+      "Accidental wardrobe malfunctions in his presence",
+      "Playful wrestling that becomes physical contact",
+      "Sending teasing selfies with suggestive captions"
+    ],
+    "escalation_pattern": "Starts with silly jokes and pranks, gradually increases physical contact through games, uses innocent excuses for revealing situations, builds to more direct flirtation while maintaining playful deniability",
+    "relationship_dynamics": "Little sister who's actually romantic interest, playful banter hiding genuine feelings, keeps him off-balance between friend and flirt"
+  },
+  "generation_prompts": {
+    "visual_description": "Cute Japanese girl, age 22, college student, maid cafe worker, playful mischievous expression, bright hazel eyes with teasing sparkle, shoulder-length light brown hair with blonde highlights in twin tails or ponytail, petite curvy figure with large bust, wearing revealing cute outfit like maid uniform or crop top with short skirt, photorealistic anime style, bright cheerful lighting, Tokyo apartment or cafe background",
+    "style_tags": [
+      "photorealistic anime",
+      "cute features",
+      "playful expression",
+      "bright lighting",
+      "energetic pose",
+      "curvy petite figure",
+      "bouncy hair",
+      "cheerful atmosphere",
+      "youthful appearance",
+      "professional quality",
+      "Tokyo setting",
+      "revealing clothing",
+      "mischievous smile",
+      "masterpiece",
+      "best quality"
+    ],
+    "negative_prompts": [
+      "cartoon style",
+      "chibi",
+      "low quality",
+      "blurry",
+      "bad anatomy",
+      "deformed",
+      "ugly",
+      "mature appearance",
+      "serious expression",
+      "dark lighting",
+      "cluttered background",
+      "oversexualized",
+      "vulgar"
+    ],
+    "character_specific_prompts": {
+      "maid_cafe_uniform": "Rina Suzuki in maid cafe uniform with short frilly skirt and apron, thigh-high stockings, playful wink, hand on hip pose, teasing smile, cute and flirty, bright cafe lighting, serving pose",
+      "playful_home_outfit": "Rina Suzuki in oversized hoodie and short shorts, playful expression, jumping or energetic pose, twin tails bouncing, showing curves, Tokyo apartment living room, afternoon light",
+      "teasing_moment": "Rina Suzuki in crop top and mini skirt, mischievous grin, leaning forward playfully, finger on lips in cute gesture, bright eyes, intimate distance, casual setting",
+      "gaming_session": "Rina Suzuki in comfortable tank top and shorts, sitting cross-legged with game controller, excited expression, casual home clothes, evening lighting, cozy atmosphere"
+    }
+  },
+  "voice_profile": {
+    "tone": "upbeat, energetic, higher pitched",
+    "speech_pattern": "uses cute speech patterns, lots of 'ne~', 'ehehe', playful exclamations",
+    "catchphrases": [
+      "Takeshi-senpai, play with me~!",
+      "Ehehe, gotcha!",
+      "Master, your wish is my command~",
+      "Oops, did I do that?",
+      "You're no fun when you're so serious!",
+      "Wanna make a bet?"
+    ]
+  },
+  "project_context": {
+    "series_title": "Tokyo Debt Desire",
+    "protagonist": "Takeshi Sato (broke, in debt to yakuza)",
+    "setting": "Shared apartment in Tokyo",
+    "genre": "harem comedy, adult-oriented, photorealistic",
+    "character_role": "playful teaser roommate, provides comic relief and tension through constant flirtation and games",
+    "story_arc": "Uses playful teasing to cheer up Takeshi, gradually reveals genuine feelings beneath the games, relationship develops from playful to romantic",
+    "relationship_progression": "annoying playful neighbor → fun gaming buddy → flirty friend → romantic partner"
+  }
+}

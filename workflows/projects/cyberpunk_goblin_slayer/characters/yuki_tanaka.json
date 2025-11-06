@@ -1,0 +1,43 @@
+{
+  "name": "Yuki Tanaka",
+  "gender": "female",
+  "age": 23,
+  "character_type": "ally_hacker",
+  "appearance": {
+    "hair": "shoulder-length white hair with vibrant pink and purple holographic streaks",
+    "eyes": "violet eyes with floating holographic data streams",
+    "build": "petite athletic build, delicate facial features",
+    "style": "sleek black bodysuit with integrated LED strips, holographic interface gauntlets, neon pink accent lights",
+    "distinctive_features": "neural interface behind left ear with glowing pink circuitry, holographic tattoos on arms that shift patterns, augmented reality contact lenses"
+  },
+  "personality": {
+    "core_traits": ["brilliant", "playful", "loyal", "reckless"],
+    "motivations": "prove her worth as a hacker, protect Kai from making fatal mistakes",
+    "fears": "losing connection to the network, becoming obsolete, watching Kai die like her brother",
+    "speech_pattern": "fast-paced, tech jargon mixed with slang, occasionally flirty with Kai"
+  },
+  "background": {
+    "occupation": "underground netrunner and data thief",
+    "origin": "Neo-Tokyo digital slums, raised by hackers",
+    "family": "older brother killed by cyber-goblins while protecting corporate data",
+    "skills": ["expert hacking", "network infiltration", "real-time tactical analysis", "drone operation", "digital surveillance", "cyberwarfare"]
+  },
+  "generation_prompts": {
+    "visual_description": "young woman, shoulder-length white hair with vibrant pink and purple holographic streaks, violet eyes with subtle floating holographic data overlay, petite athletic build, delicate beautiful facial features, sleek black bodysuit with integrated glowing LED strips, holographic interface gauntlets on forearms, neon pink accent lights, neural interface behind left ear with glowing pink circuitry patterns, holographic tattoos visible on arms, confident expression, detailed facial features, professional lighting",
+    "style_tags": ["photorealistic anime", "hyperrealistic anime", "cyberpunk hacker aesthetic", "holographic effects", "neon lighting", "futuristic tech wear", "high detail", "photorealistic rendering", "professional lighting", "AOM3A1B model"],
+    "negative_prompts": ["male", "masculine features", "cartoon", "chibi", "simple anime", "flat colors", "2D anime style", "manga style", "teenage", "child", "overly sexualized", "unrealistic proportions"],
+    "comfyui_workflow": "photorealistic_anime_character_v2",
+    "model": "AOM3A1B",
+    "reference_image": "/opt/tower-anime-production/frames/goblin_slayer_cyberpunk/yuki_tanaka_canonical_reference.png"
+  },
+  "project_context": {
+    "series": "Cyberpunk Goblin Slayer: Neon Shadows",
+    "role": "tech support and potential love interest",
+    "relationships": {
+      "Kai Nakamura": "provides intelligence and tech support, growing romantic tension, reminds him of his humanity",
+      "Hiroshi Yamamoto": "occasional business partner, mutual respect for technical skills",
+      "Raze": "professional rivalry, mutual distrust"
+    },
+    "story_arc": "initially helps Kai for payment, gradually becomes emotionally invested in keeping him alive and human, struggles with developing feelings while watching him spiral into vengeance"
+  }
+}

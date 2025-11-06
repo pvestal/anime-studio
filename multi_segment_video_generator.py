@@ -188,7 +188,7 @@ class MultiSegmentVideoGenerator:
 
     async def _load_workflow_template(self) -> Optional[Dict]:
         """Load the working workflow template"""
-        workflow_path = Path("/opt/tower-anime-production/workflows/comfyui/anime_30sec_working_workflow.json")
+        workflow_path = Path("/opt/tower-anime-production/workflows/comfyui/anime_30sec_standard.json")
 
         try:
             with open(workflow_path, 'r') as f:

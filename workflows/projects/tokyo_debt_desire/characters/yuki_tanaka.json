@@ -1,0 +1,39 @@
+{
+  "name": "Yuki Tanaka",
+  "gender": "female",
+  "age": 24,
+  "character_type": "female_roommate",
+  "occupation": "part-time hostess",
+  "appearance": {
+    "hair": "long straight black hair with red highlights",
+    "eyes": "intense dark brown eyes with sharp gaze",
+    "body_type": "curvy hourglass figure, large breasts",
+    "style": "revealing red dress with deep neckline, fishnet stockings",
+    "distinctive_features": "fierce competitive expression, always dressed provocatively"
+  },
+  "personality": {
+    "core_traits": ["aggressive", "jealous", "possessive", "competitive", "passionate"],
+    "motivations": "win Takeshi's exclusive attention, eliminate competition",
+    "approach_to_protagonist": "direct aggressive pursuit, physical contact, jealous outbursts"
+  },
+  "background": {
+    "occupation": "hostess at upscale club",
+    "origin": "Tokyo, wealthy family she ran away from",
+    "skills": ["seduction", "manipulation", "fashion", "social engineering"]
+  },
+  "generation_prompts": {
+    "visual_description": "beautiful Japanese woman age 24, long straight black hair with red highlights, intense dark brown eyes, sharp fierce gaze, curvy hourglass figure, large breasts, revealing red dress with deep neckline, fishnet stockings, provocative pose, competitive fierce expression, photorealistic detailed features, Tokyo apartment interior",
+    "style_tags": ["photorealistic anime", "hyperrealistic", "sexy revealing clothing", "curvy figure", "high detail", "professional lighting", "intense gaze"],
+    "negative_prompts": ["modest clothing", "shy", "cartoon", "chibi", "flat chest", "simple anime", "2D style", "innocent"],
+    "comfyui_workflow": "photorealistic_anime_character_v2"
+  },
+  "project_context": {
+    "series": "Tokyo Debt Desire",
+    "role": "aggressive pursuer roommate",
+    "relationships": {
+      "Takeshi Sato": "aggressively pursuing, possessive",
+      "Mei Kobayashi": "rival, constantly competing",
+      "Rina Suzuki": "rival, dismissive of her playful approach"
+    }
+  }
+}

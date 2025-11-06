@@ -1,0 +1,39 @@
+# Pre-commit hooks for anime production system
+repos:
+  - repo: local
+    hooks:
+      - id: anime-system-tests
+        name: Anime System Tests
+        entry: python tests/test_complete_system.py
+        language: python
+        stages: [commit]
+        pass_filenames: false
+        always_run: true
+
+      - id: python-syntax-check
+        name: Python Syntax Check
+        entry: python -m py_compile
+        language: python
+        files: \.py$
+
+      - id: workflow-json-validation
+        name: Workflow JSON Validation
+        entry: python -m json.tool
+        language: python
+        files: \.json$
+
+      - id: critical-file-check
+        name: Critical File Check
+        entry: bash -c 'test -f workflows/comfyui/anime_30sec_standard.json || (echo "Critical workflow file missing!" && exit 1)'
+        language: system
+        stages: [commit]
+        pass_filenames: false
+        always_run: true
+
+      - id: service-availability-check
+        name: Service Availability Check
+        entry: bash -c 'curl -s http://127.0.0.1:8188/system_stats > /dev/null || (echo "ComfyUI service not available!" && exit 1)'
+        language: system
+        stages: [commit]
+        pass_filenames: false
+        always_run: true

@@ -1,0 +1,224 @@
+{
+  "project_name": "Cyberpunk Goblin Slayer: Neon Shadows",
+  "genre": "cyberpunk action, dark fantasy, revenge thriller",
+  "premise": "In a neon-drenched Neo-Tokyo overrun by cyber-enhanced goblins, a cybernetically-augmented warrior seeks revenge for his murdered family while battling the darkness within himself",
+  
+  "visual_style": {
+    "art_style": "photorealistic cyberpunk anime",
+    "aesthetic": "hyperrealistic characters with cyberpunk enhancements, gritty neon-noir atmosphere",
+    "color_palette": {
+      "primary": ["electric neon blues", "hot pink magentas", "deep cyber purples", "toxic greens"],
+      "secondary": ["industrial grays and blacks", "blood reds", "holographic rainbow shimmer", "acidic yellows"],
+      "environmental": ["rain-slicked neon reflections", "dark alley shadows", "holographic advertisements", "cybernetic glow effects"]
+    },
+    "cinematography": {
+      "shot_types": ["dynamic action sequences", "extreme close-ups on cybernetic details", "wide establishing shots of Neo-Tokyo", "POV cybernetic eye scans"],
+      "camera_angles": ["low angles for power dynamics", "dutch angles for chaos and violence", "overhead for tactical planning", "first-person for immersion"],
+      "visual_metaphors": ["rain as cleansing/blood", "neon lights as false hope", "darkness consuming light", "glitching technology as moral decay"],
+      "lighting": "high contrast neon lighting, rim lighting on characters, volumetric fog and rain, cybernetic glow accents"
+    },
+    "comfyui_settings": {
+      "model": "counterfeit_v3.safetensors",
+      "resolution": "768x768",
+      "steps": 28,
+      "cfg": 7.5,
+      "sampler": "dpmpp_2m",
+      "scheduler": "karras",
+      "animatediff": {
+        "context_length": 16,
+        "context_overlap": 8,
+        "fps": 24,
+        "frame_count": 120
+      },
+      "style_modifiers": ["cyberpunk aesthetic", "neon lighting", "rain effects", "holographic displays", "motion blur on action"]
+    }
+  },
+  
+  "world_setting": {
+    "location": {
+      "primary": "Neo-Tokyo - sprawling cyberpunk megacity",
+      "districts": [
+        "Neon District - entertainment and red light areas with heaviest goblin activity",
+        "Industrial Sprawl - factories and goblin nests",
+        "Upper City - corporate towers where wealthy hide from goblin threat",
+        "Undercity - slums and black markets"
+      ],
+      "atmosphere": "perpetual night, constant rain, neon-drenched streets, technological decay"
+    },
+    "time_period": "near future (2080s)",
+    "technology_level": {
+      "cybernetics": "widespread human augmentation, military-grade combat implants, black market modifications",
+      "weapons": "smart guns, energy blades, hacking tools, EMP devices",
+      "environment": "holographic advertisements, flying vehicles, megastructures, automated systems"
+    },
+    "socioeconomic": "corporate-controlled society, wealth inequality, cybernetic enhancement divides classes",
+    "supernatural_elements": "cyber-goblins - fantasy creatures merged with stolen technology, corrupted by industrial pollution"
+  },
+  
+  "narrative_guidelines": {
+    "tone": {
+      "primary": "dark and gritty action",
+      "secondary": "psychological thriller, moral ambiguity",
+      "balance": "60% intense action, 25% character drama, 15% world-building"
+    },
+    "themes": [
+      "revenge and its costs",
+      "humanity vs. technology",
+      "becoming the monster you fight",
+      "corporate exploitation and survival",
+      "found family in darkness",
+      "redemption through violence"
+    ],
+    "narrative_structure": {
+      "episode_format": "serialized story with episodic goblin hunts",
+      "story_beats": ["goblin threat introduced", "tactical planning", "intense action sequence", "moral complication", "character revelation", "cliffhanger escalation"],
+      "pacing": "fast-paced action with moments of quiet tension"
+    },
+    "story_arcs": [
+      {
+        "arc_name": "The Revenge Quest",
+        "description": "Kai hunts the cyber-goblin warlord who killed his family",
+        "episodes": "main serialized arc spanning entire series"
+      },
+      {
+        "arc_name": "Humanity Lost",
+        "description": "Kai struggles with increasing cybernetic augmentation and losing his humanity",
+        "episodes": "ongoing internal conflict"
+      },
+      {
+        "arc_name": "Mentor and Student",
+        "description": "Kai's relationship with tech specialist Hiroshi Yamamoto",
+        "episodes": "character development arc"
+      },
+      {
+        "arc_name": "Goblin Origin Mystery",
+        "description": "Uncovering the corporate conspiracy behind cyber-goblin creation",
+        "episodes": "mystery investigation arc"
+      }
+    ]
+  },
+  
+  "characters_summary": {
+    "total_count": 2,
+    "protagonist": {
+      "name": "Kai Nakamura",
+      "role": "cybernetic goblin slayer",
+      "archetype": "tragic hero seeking revenge"
+    },
+    "supporting_cast": [
+      {
+        "name": "Hiroshi Yamamoto",
+        "role": "mentor and tech specialist",
+        "archetype": "wise veteran guide"
+      }
+    ],
+    "antagonists": [
+      {
+        "name": "Cyber-Goblins",
+        "role": "primary threat",
+        "types": ["basic grunts", "enhanced warriors", "warlords", "final boss"]
+      },
+      {
+        "name": "Corporate Conspiracy",
+        "role": "hidden antagonists",
+        "threat_level": "ultimate revelation"
+      }
+    ]
+  },
+  
+  "visual_direction": {
+    "character_design": {
+      "kai_nakamura": {
+        "cybernetics": "visible circuit patterns on face, glowing cyan cybernetic eye, mechanical joints at jawline",
+        "clothing": "black tactical vest with glowing blue circuit patterns, military-inspired gear",
+        "color_scheme": "black base with electric blue and cyan accents"
+      },
+      "general_principles": "photorealistic anime faces with cybernetic enhancements, detailed mechanical parts, realistic proportions"
+    },
+    "environment_design": {
+      "neo_tokyo": "dense vertical city, neon signs in Japanese and English, holographic advertisements, rain-slicked streets",
+      "goblin_nests": "industrial decay merged with organic corruption, stolen tech integration, toxic waste aesthetics"
+    },
+    "action_choreography": {
+      "combat_style": "tactical and brutal, cybernetic-enhanced moves, weapon variety",
+      "camera_work": "dynamic angles, motion blur for speed, slow-motion for impact moments",
+      "effects": "energy weapon trails, blood spray, sparks from damaged cybernetics, holographic UI overlays"
+    },
+    "cyberpunk_aesthetics": {
+      "neon_integration": "every scene has neon light sources, color-coded for mood",
+      "rain_usage": "constant rain for atmosphere and neon reflections",
+      "holographics": "UI elements, advertisements, data screens",
+      "decay": "rusted metal, broken technology, graffiti"
+    }
+  },
+  
+  "goblin_design_guide": {
+    "appearance": "twisted fusion of fantasy goblin and scavenged cybernetics",
+    "variations": [
+      {
+        "type": "grunt",
+        "description": "small, crude tech implants, rusty weapons, green skin with circuitry scars"
+      },
+      {
+        "type": "warrior",
+        "description": "military-grade stolen implants, larger build, organized pack tactics"
+      },
+      {
+        "type": "warlord",
+        "description": "heavily augmented, custom weapons, intelligent, glowing cybernetic enhancements"
+      }
+    ],
+    "behavior": "savage but cunning, use stolen tech instinctively, pack hunters"
+  },
+  
+  "content_rating": {
+    "target_audience": "mature (18+)",
+    "content_warnings": ["graphic violence", "dark themes", "body horror (cybernetic modifications)", "revenge themes"],
+    "rating": "TV-MA / 18+"
+  },
+  
+  "production_notes": {
+    "episode_length": "5 seconds per scene (120 frames @ 24fps)",
+    "series_format": "serialized narrative with episodic action",
+    "target_platform": "Jellyfin AI_Generated library",
+    "technical_requirements": {
+      "gpu": "NVIDIA RTX 3060 (12GB VRAM)",
+      "generation_time": "8-9 minutes per 5-second scene",
+      "output_location": "/mnt/1TB-storage/ComfyUI/output/",
+      "jellyfin_library": "/mnt/10TB2/Anime/AI_Generated/Cyberpunk_Goblin_Slayer/"
+    },
+    "special_effects_needs": [
+      "neon glow effects on cybernetics",
+      "rain and reflection rendering",
+      "holographic UI overlays",
+      "energy weapon effects",
+      "motion blur for action sequences"
+    ]
+  },
+  
+  "reference_materials": {
+    "influences": [
+      "Goblin Slayer (dark fantasy, revenge)",
+      "Cyberpunk: Edgerunners (cyberpunk aesthetic)",
+      "Blade Runner (neo-noir atmosphere)",
+      "Ghost in the Shell (cybernetic philosophy)",
+      "Akira (Neo-Tokyo setting)"
+    ],
+    "visual_references": [
+      "Cyberpunk 2077 lighting and neon design",
+      "Blade Runner rain and atmosphere",
+      "photorealistic anime rendering",
+      "tactical military gear aesthetics"
+    ],
+    "mood_references": [
+      "dark revenge narratives",
+      "noir detective atmosphere",
+      "brutal action sequences",
+      "philosophical cyberpunk themes"
+    ]
+  },
+  
+  "version": "1.0",
+  "created": "2025-11-04",
+  "last_updated": "2025-11-04"
+}

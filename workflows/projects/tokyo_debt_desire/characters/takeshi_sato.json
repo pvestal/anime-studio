@@ -1,0 +1,40 @@
+{
+  "name": "Takeshi Sato",
+  "gender": "male",
+  "age": 28,
+  "character_type": "protagonist",
+  "occupation": "unemployed (doing odd jobs)",
+  "appearance": {
+    "hair": "messy dark brown hair",
+    "eyes": "tired brown eyes with dark circles",
+    "build": "average build, slightly unkempt",
+    "style": "casual worn clothing, cheap t-shirts and jeans",
+    "distinctive_features": "perpetually stressed expression, nervous energy"
+  },
+  "personality": {
+    "core_traits": ["perverted", "conflicted", "desperate", "opportunistic", "cowardly"],
+    "motivations": "survive yakuza debt while enjoying attention from roommates",
+    "fears": "yakuza enforcers, losing his roommates, being broke forever"
+  },
+  "background": {
+    "occupation": "unemployed, doing odd jobs for cash",
+    "origin": "Tokyo, failed businessman",
+    "debt": "owes 5 million yen to local yakuza",
+    "living_situation": "shares apartment with 3 female roommates who pursue him"
+  },
+  "generation_prompts": {
+    "visual_description": "young Japanese man age 28, messy dark brown hair, tired brown eyes with dark circles, average build, worn casual clothing, cheap t-shirt and jeans, stressed nervous expression, realistic detailed facial features, Tokyo apartment background",
+    "style_tags": ["photorealistic anime", "hyperrealistic anime", "urban Tokyo setting", "detailed character", "professional lighting", "high detail"],
+    "negative_prompts": ["muscular", "confident", "wealthy", "cartoon", "chibi", "simple anime", "flat colors", "2D style"],
+    "comfyui_workflow": "photorealistic_anime_character_v2"
+  },
+  "project_context": {
+    "series": "Tokyo Debt Desire",
+    "role": "protagonist",
+    "relationships": {
+      "Yuki Tanaka": "aggressive pursuer, jealous type",
+      "Mei Kobayashi": "gentle seductress",
+      "Rina Suzuki": "playful teaser"
+    }
+  }
+}

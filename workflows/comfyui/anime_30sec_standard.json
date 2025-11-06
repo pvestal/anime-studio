@@ -28,8 +28,8 @@
   "3": {
     "inputs": {
       "seed": 42,
-      "steps": 40,
-      "cfg": 8.5,
+      "steps": 28,
+      "cfg": 7.5,
       "sampler_name": "dpmpp_2m",
       "scheduler": "karras",
       "denoise": 1.0,
@@ -52,7 +52,7 @@
     },
     "class_type": "KSampler",
     "_meta": {
-      "title": "KSampler"
+      "title": "KSampler - Standard Quality (28 steps, 7.5 CFG)"
     }
   },
   "4": {
@@ -66,13 +66,13 @@
   },
   "5": {
     "inputs": {
-      "width": 1024,
-      "height": 1024,
+      "width": 768,
+      "height": 768,
       "batch_size": 120
     },
     "class_type": "EmptyLatentImage",
     "_meta": {
-      "title": "Empty Latent Image (120 frames for 5 seconds @ 24fps)"
+      "title": "Empty Latent Image (768x768, 120 frames for 5 seconds @ 24fps)"
     }
   },
   "6": {

@@ -1,110 +1,148 @@
 #!/usr/bin/env python3
 """
-Movie-Length Video Generator
-Generates long-form anime by creating segments and concatenating them
+Segment-based video generator - generates 1-second segments and merges them
+Much faster than single long generation!
 """
-import requests
-import time
+import asyncio
+import httpx
 import subprocess
-import json
+import os
+import time
 from pathlib import Path
 
-ANIME_API = 'http://localhost:8328/api/generate'
-SEGMENT_LENGTH = 120  # frames per segment (5 seconds @ 24fps)
-OVERLAP_FRAMES = 8    # frames to overlap between segments for smooth transitions
+async def generate_1_second_segment(prompt, segment_num, style="anime"):
+    """Generate a 1-second video segment"""
+    async with httpx.AsyncClient(timeout=300) as client:
+        response = await client.post(
+            "http://localhost:8328/api/anime/generate",
+            json={
+                "prompt": f"{prompt}, continuation part {segment_num}",
+                "duration": 1,  # 1 second = 24 frames, FAST!
+                "character": None,
+                "style": style
+            }
+        )
+        return response.json()
 
-def generate_segment(prompt: str, segment_num: int, frames: int = SEGMENT_LENGTH):
-    """Generate a single video segment"""
-    print(f"\n🎬 Generating segment {segment_num} ({frames} frames)...")
+async def generate_segments_parallel(prompt, num_seconds=5, style="anime"):
+    """Generate multiple 1-second segments in parallel"""
+    print(f"Generating {num_seconds} segments in parallel...")
     
-    response = requests.post(ANIME_API, json={
-        'prompt': prompt,
-        'frames': frames,
-        'width': 512,
-        'height': 512
-    })
+    # Create tasks for parallel generation
+    tasks = []
+    for i in range(num_seconds):
+        task = generate_1_second_segment(prompt, i+1, style)
+        tasks.append(task)
     
-    if response.status_code != 200:
-        raise Exception(f"Generation failed: {response.text}")
-    
-    data = response.json()
-    gen_id = data['generation_id']
-    
-    # Poll for completion
-    while True:
-        status_response = requests.get(f'http://localhost:8328/api/status/{gen_id}')
-        status = status_response.json()
-        
-        if status['status'] == 'completed':
-            print(f"✅ Segment {segment_num} completed: {status.get('output_file')}")
-            return status.get('output_file')
-        elif status['status'] == 'failed':
-            raise Exception(f"Segment generation failed: {status.get('message')}")
-        
-        print(f"  Progress: {status.get('progress', 0)}%")
-        time.sleep(10)
+    # Wait for all segments
+    results = await asyncio.gather(*tasks)
+    print(f"All {num_seconds} segments queued!")
+    return results
 
-def concatenate_segments(segments: list, output_path: str):
-    """Concatenate video segments with crossfade transitions"""
-    print(f"\n🎞️ Concatenating {len(segments)} segments...")
+def wait_for_completion(job_ids, timeout=300):
+    """Wait for all jobs to complete"""
+    start_time = time.time()
+    completed = []
     
-    # Create file list for ffmpeg
-    list_file = '/tmp/segments.txt'
-    with open(list_file, 'w') as f:
-        for seg in segments:
-            f.write(f"file '{seg}'\n")
+    while len(completed) < len(job_ids) and (time.time() - start_time) < timeout:
+        for job_id in job_ids:
+            if job_id not in completed:
+                # Check if job completed (simplified check)
+                result = subprocess.run(
+                    f"ls /mnt/1TB-storage/ComfyUI/output/*{job_id}*.mp4 2>/dev/null",
+                    shell=True, capture_output=True, text=True
+                )
+                if result.stdout.strip():
+                    completed.append(job_id)
+                    print(f"Segment {job_id} completed!")
+        
+        if len(completed) < len(job_ids):
+            time.sleep(5)
     
-    # Concatenate with ffmpeg
+    return completed
+
+def merge_segments(video_files, output_path):
+    """Merge video segments using ffmpeg"""
+    if not video_files:
+        print("No video files to merge!")
+        return None
+    
+    # Create concat list file
+    list_file = "/tmp/concat_list.txt"
+    with open(list_file, "w") as f:
+        for video in video_files:
+            f.write(f"file '{video}'\n")
+    
+    # Merge videos
     cmd = [
-        'ffmpeg', '-y',
-        '-f', 'concat',
-        '-safe', '0',
-        '-i', list_file,
-        '-c', 'copy',
+        "ffmpeg", "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", list_file,
+        "-c", "copy",
         output_path
     ]
     
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0:
-        print(f"✅ Movie created: {output_path}")
+        print(f"Successfully merged to {output_path}")
         return output_path
     else:
-        raise Exception(f"Concatenation failed: {result.stderr}")
+        print(f"Merge failed: {result.stderr}")
+        return None
 
-def generate_movie(prompt: str, duration_seconds: int, output_dir: str = '/home/patrick/Videos/anime_movies'):
-    """Generate a movie-length anime video"""
+async def generate_5_second_video_fast(prompt, style="anime"):
+    """Generate a 5-second video using segment approach"""
+    print(f"Starting fast 5-second generation for: {prompt}")
     
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    # Step 1: Generate segments in parallel
+    job_results = await generate_segments_parallel(prompt, 5, style)
+    job_ids = [r.get("comfyui_job_id") for r in job_results if "comfyui_job_id" in r]
     
-    total_frames = duration_seconds * 24  # 24fps
-    num_segments = (total_frames + SEGMENT_LENGTH - 1) // SEGMENT_LENGTH
+    print(f"Waiting for {len(job_ids)} segments to complete...")
     
-    print(f"\n🎬 GENERATING {duration_seconds}s MOVIE")
-    print(f"Total frames: {total_frames}")
-    print(f"Segments: {num_segments}")
-    print(f"Prompt: {prompt}\n")
+    # Step 2: Wait for segments to complete
+    completed = wait_for_completion(job_ids, timeout=300)
     
-    segments = []
-    for i in range(num_segments):
-        segment_file = generate_segment(prompt, i + 1)
-        if segment_file:
-            segments.append(segment_file)
+    # Step 3: Find the generated files
+    video_files = []
+    for job_id in completed:
+        result = subprocess.run(
+            f"ls /mnt/1TB-storage/ComfyUI/output/*{job_id}*.mp4 2>/dev/null | head -1",
+            shell=True, capture_output=True, text=True
+        )
+        if result.stdout.strip():
+            video_files.append(result.stdout.strip())
     
-    # Concatenate
-    timestamp = int(time.time())
-    output_file = f"{output_dir}/anime_movie_{timestamp}.mp4"
-    return concatenate_segments(segments, output_file)
+    print(f"Found {len(video_files)} video segments")
+    
+    # Step 4: Merge segments
+    if video_files:
+        timestamp = int(time.time())
+        output_path = f"/mnt/1TB-storage/ComfyUI/output/merged_5sec_{timestamp}.mp4"
+        final_video = merge_segments(sorted(video_files), output_path)
+        
+        if final_video:
+            # Check duration
+            result = subprocess.run(
+                f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {final_video}",
+                shell=True, capture_output=True, text=True
+            )
+            duration = float(result.stdout.strip()) if result.stdout.strip() else 0
+            
+            return {
+                "success": True,
+                "output": final_video,
+                "duration": duration,
+                "segments": len(video_files)
+            }
+    
+    return {"success": False, "error": "Failed to generate segments"}
 
-if __name__ == '__main__':
-    import sys
-    
-    if len(sys.argv) < 3:
-        print("Usage: python3 segment_generator.py <duration_seconds> <prompt>")
-        print("Example: python3 segment_generator.py 60 'epic samurai battle'")
-        sys.exit(1)
-    
-    duration = int(sys.argv[1])
-    prompt = ' '.join(sys.argv[2:])
-    
-    movie_file = generate_movie(prompt, duration)
-    print(f"\n🎉 MOVIE COMPLETE: {movie_file}")
+if __name__ == "__main__":
+    # Test with a simple prompt
+    result = asyncio.run(generate_5_second_video_fast(
+        "anime girl walking through cherry blossoms, dynamic movement",
+        style="anime"
+    ))
+    print(f"Result: {result}")

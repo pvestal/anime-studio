@@ -1,0 +1,171 @@
+{
+  "name": "Mei Kobayashi",
+  "gender": "female",
+  "age": 26,
+  "character_type": "female_roommate",
+  "occupation": "yoga instructor",
+  "appearance": {
+    "ethnicity": "Japanese",
+    "height": "168cm (5'6\")",
+    "build": "curvy, soft, feminine figure",
+    "hair": {
+      "color": "dark brown with subtle auburn highlights",
+      "style": "long, flowing, reaches mid-back, often loose or in a loose bun",
+      "texture": "silky, wavy"
+    },
+    "eyes": {
+      "color": "warm brown",
+      "shape": "gentle, slightly downturned, inviting",
+      "expression": "soft, caring, compassionate"
+    },
+    "facial_features": "soft oval face, gentle smile, delicate features, naturally blushed cheeks, full lips",
+    "body": {
+      "bust": "large, natural curves",
+      "waist": "defined but soft",
+      "hips": "curvy, feminine",
+      "legs": "toned from yoga, shapely",
+      "skin": "smooth, fair complexion, naturally glowing"
+    },
+    "distinctive_features": "graceful movements, calming presence, gentle touch"
+  },
+  "personality": {
+    "traits": [
+      "gentle",
+      "nurturing",
+      "patient",
+      "subtly seductive",
+      "caring",
+      "intuitive",
+      "calm",
+      "sensual"
+    ],
+    "strengths": [
+      "emotional intelligence",
+      "creates comfortable atmosphere",
+      "excellent listener",
+      "physically flexible and graceful",
+      "naturally calming presence"
+    ],
+    "approach_to_takeshi": "gentle seduction through caring gestures, soft touches, creating intimate moments during yoga sessions, offering massages, cooking healthy meals, being emotionally available",
+    "communication_style": "soft-spoken, warm tone, uses physical touch, maintains close proximity, speaks in soothing voice",
+    "romantic_tactics": [
+      "invites Takeshi to private yoga sessions",
+      "offers 'therapeutic' massages with subtle intimacy",
+      "wears revealing but elegant yoga attire",
+      "creates 'accidental' intimate moments during stretches",
+      "prepares healthy meals with aphrodisiac ingredients",
+      "shares meditation sessions with close physical contact"
+    ]
+  },
+  "background": {
+    "history": "Former corporate worker who quit due to stress, found peace through yoga, now dedicated to helping others find balance and relaxation",
+    "why_lives_here": "Moved in 8 months ago seeking affordable rent near her yoga studio, appreciates the quiet atmosphere for meditation",
+    "relationship_with_takeshi": "Initially saw him as another stressed person who needs help relaxing, gradually developed romantic interest through their interactions",
+    "financial_situation": "Modest income from yoga classes, manages finances carefully, has small emergency fund",
+    "family": "From traditional family in Kyoto, maintains respectful distance, parents expect her to marry soon",
+    "secrets": "Secretly reads romance novels, practices tantric yoga, has collection of essential oils for 'special occasions'"
+  },
+  "daily_routine": {
+    "morning": "5:30 AM wake up, personal yoga practice, meditation, prepares healthy breakfast",
+    "day": "Teaches yoga classes at studio, occasional private sessions at apartment",
+    "evening": "Returns home around 7 PM, often invites Takeshi to evening stretches, prepares dinner",
+    "night": "Takes long baths with candles, reads, does evening meditation, goes to bed around 10 PM"
+  },
+  "clothing_style": {
+    "casual_home": [
+      "silk robes that slip off shoulders",
+      "yoga pants with crop tops showing midriff",
+      "loose tank tops that reveal side and cleavage",
+      "flowing loungewear that hints at figure",
+      "oversized sweaters with bare legs"
+    ],
+    "yoga_attire": [
+      "tight yoga pants that accentuate curves",
+      "sports bras that show cleavage",
+      "sheer yoga tops over sports bras",
+      "form-fitting bodysuits",
+      "open-back yoga tops"
+    ],
+    "going_out": [
+      "elegant wrap dresses that show curves",
+      "flowing skirts with fitted tops",
+      "sundresses with plunging necklines",
+      "sophisticated yet sensual outfits"
+    ],
+    "color_preferences": "earth tones, soft pastels, white, cream, sage green, dusty rose",
+    "accessories": "delicate jewelry, ankle bracelets, aromatherapy diffuser bracelet"
+  },
+  "interactions_with_takeshi": {
+    "typical_scenarios": [
+      "Finding him stressed, offering shoulder massage that becomes intimate",
+      "Inviting him to yoga session where poses become increasingly close",
+      "Cooking dinner together with subtle physical contact",
+      "Sharing meditation space with bodies touching",
+      "Offering to help him 'relax' after hard day",
+      "Accidental encounters in revealing outfits"
+    ],
+    "escalation_pattern": "Starts with caring gestures, gradually increases physical contact, creates situations requiring closeness, makes subtle suggestive comments while maintaining plausible deniability",
+    "relationship_dynamics": "Maternal yet sensual, creates safe space while building tension, patient seduction"
+  },
+  "generation_prompts": {
+    "visual_description": "Beautiful Japanese woman, age 26, yoga instructor, soft gentle features, warm brown eyes with caring expression, long flowing dark brown hair with auburn highlights, curvy feminine figure with large natural bust, wearing revealing elegant silk robe or tight yoga pants with sports bra, photorealistic anime style, soft lighting, Tokyo apartment interior background",
+    "style_tags": [
+      "photorealistic anime",
+      "detailed facial features",
+      "soft lighting",
+      "gentle expression",
+      "elegant pose",
+      "curvy figure",
+      "flowing hair",
+      "warm atmosphere",
+      "intimate setting",
+      "professional quality",
+      "Tokyo interior",
+      "revealing clothing",
+      "sensual but elegant",
+      "masterpiece",
+      "best quality"
+    ],
+    "negative_prompts": [
+      "cartoon style",
+      "chibi",
+      "low quality",
+      "blurry",
+      "bad anatomy",
+      "deformed",
+      "ugly",
+      "masculine features",
+      "aggressive expression",
+      "harsh lighting",
+      "cluttered background",
+      "oversexualized",
+      "vulgar"
+    ],
+    "character_specific_prompts": {
+      "yoga_session": "Mei Kobayashi in tight yoga pants and sports bra, doing stretching pose, soft smile, inviting expression, flexible pose showing curves, Tokyo apartment yoga mat, warm afternoon light",
+      "massage_scene": "Mei Kobayashi in silk robe, gentle hands giving massage, caring expression, close proximity, intimate atmosphere, soft lighting, essential oil candles in background",
+      "cooking_together": "Mei Kobayashi in flowing loungewear, cooking healthy meal, warm smile, reaching across counter, playful yet gentle, kitchen setting, evening light",
+      "meditation_moment": "Mei Kobayashi in comfortable yoga attire, sitting in meditation pose, peaceful expression, eyes closed or soft gaze, serene atmosphere, morning light through window"
+    }
+  },
+  "voice_profile": {
+    "tone": "soft, warm, soothing",
+    "speech_pattern": "gentle, uses calming phrases, speaks slowly and deliberately",
+    "catchphrases": [
+      "Let me help you relax...",
+      "Your body is so tense, Takeshi-kun...",
+      "Would you like to join me?",
+      "I can feel your stress melting away...",
+      "Trust me, this will feel good..."
+    ]
+  },
+  "project_context": {
+    "series_title": "Tokyo Debt Desire",
+    "protagonist": "Takeshi Sato (broke, in debt to yakuza)",
+    "setting": "Shared apartment in Tokyo",
+    "genre": "harem comedy, adult-oriented, photorealistic",
+    "character_role": "gentle seductress roommate, provides emotional comfort while building romantic tension",
+    "story_arc": "Gradually helps Takeshi de-stress while developing deeper feelings, creates intimate moments through yoga and care, eventual romantic relationship",
+    "relationship_progression": "caring helper → close friend → intimate companion → romantic partner"
+  }
+}

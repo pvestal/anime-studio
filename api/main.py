@@ -14,10 +14,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import sessionmaker, Session
 from typing import List, Optional
-import requests
 import os
 import uuid
-import asyncio
 import aiohttp
 import sys
 import logging
@@ -28,18 +26,22 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Add pipeline to path
-sys.path.append('/opt/tower-anime-production/pipeline')
-sys.path.append('/opt/tower-anime-production/quality')
+sys.path.append("/opt/tower-anime-production/pipeline")
+sys.path.append("/opt/tower-anime-production/quality")
 
 # Import integrated pipeline
 try:
     from test_pipeline_simple import SimplifiedAnimePipeline
+
     PIPELINE_AVAILABLE = True
 except ImportError:
     PIPELINE_AVAILABLE = False
 
 # Database Setup
-DATABASE_URL = "postgresql://patrick@localhost/anime_production"
+DATABASE_URL = "postgresql://patrick:tower_echo_brain_secret_key_2025@192.168.50.135/anime_production"
+
+# ComfyUI Configuration
+COMFYUI_URL = "http://192.168.50.135:8188"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -47,7 +49,7 @@ Base = declarative_base()
 app = FastAPI(
     title="Tower Anime Production API",
     description="Unified anime production service integrating professional workflows with personal creative tools. Character modifications (name/sex changes) supported via all generation endpoints.",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 # CORS configuration
@@ -59,17 +61,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # Database Models
 class AnimeProject(Base):
     __tablename__ = "anime_projects"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)  # Changed from title to name to match existing table
+    name = Column(
+        String, index=True
+    )  # Changed from title to name to match existing table
     description = Column(Text)
     status = Column(String, default="draft")
     settings = Column(JSONB)  # JSON settings (matches existing JSONB column)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow)
+
 
 class ProductionJob(Base):
     __tablename__ = "production_jobs"
@@ -84,6 +93,7 @@ class ProductionJob(Base):
     quality_score = Column(Float)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
 # Bible Database Models
 class ProjectBible(Base):
     __tablename__ = "project_bibles"
@@ -97,6 +107,7 @@ class ProjectBible(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
+
 class BibleCharacter(Base):
     __tablename__ = "bible_characters"
     id = Column(Integer, primary_key=True, index=True)
@@ -109,13 +120,16 @@ class BibleCharacter(Base):
     evolution_arc = Column(JSONB, default=[])
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
 # Pydantic Models
 class AnimeProjectBase(BaseModel):
     name: str
     description: Optional[str] = None
 
+
 class AnimeProjectCreate(AnimeProjectBase):
     pass
+
 
 class AnimeProjectResponse(AnimeProjectBase):
     id: int
@@ -126,6 +140,7 @@ class AnimeProjectResponse(AnimeProjectBase):
     class Config:
         from_attributes = True
 
+
 class AnimeGenerationRequest(BaseModel):
     prompt: str
     character: str = "original"
@@ -134,11 +149,13 @@ class AnimeGenerationRequest(BaseModel):
     style: str = "anime"
     type: str = "professional"  # professional, personal, creative
 
+
 class PersonalCreativeRequest(BaseModel):
     mood: str = "neutral"
     personal_context: Optional[str] = None
     style_preferences: Optional[str] = None
     biometric_data: Optional[dict] = None
+
 
 # Bible Pydantic Models
 class ProjectBibleCreate(BaseModel):
@@ -148,12 +165,14 @@ class ProjectBibleCreate(BaseModel):
     world_setting: Optional[dict] = {}
     narrative_guidelines: Optional[dict] = {}
 
+
 class ProjectBibleUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     visual_style: Optional[dict] = None
     world_setting: Optional[dict] = None
     narrative_guidelines: Optional[dict] = None
+
 
 class CharacterDefinition(BaseModel):
     name: str
@@ -162,6 +181,7 @@ class CharacterDefinition(BaseModel):
     personality_traits: Optional[dict] = {}
     relationships: Optional[dict] = {}
     evolution_arc: Optional[List[dict]] = []
+
 
 class ProjectBibleResponse(BaseModel):
     id: int
@@ -177,6 +197,7 @@ class ProjectBibleResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 class CharacterResponse(BaseModel):
     id: int
     bible_id: int
@@ -191,6 +212,7 @@ class CharacterResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 # Dependency
 def get_db():
     db = SessionLocal()
@@ -199,8 +221,9 @@ def get_db():
     finally:
         db.close()
 
+
 # Integration Services
-COMFYUI_URL = "http://192.168.50.135:8188"
+COMFYUI_URL = "http://localhost:8188"
 ECHO_SERVICE_URL = "http://192.168.50.135:8309"
 
 # Initialize integrated pipeline
@@ -213,22 +236,36 @@ if PIPELINE_AVAILABLE:
         logger.error(f"❌ Failed to initialize pipeline: {e}")
         pipeline = None
 else:
-    logger.warning("⚠️ Integrated pipeline not available - using fallback methods")
+    logger.warning(
+        "⚠️ Integrated pipeline not available - using fallback methods")
+
 
 async def submit_comfyui_workflow(workflow_data: dict):
     """Submit workflow to ComfyUI and return job ID"""
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(f"{COMFYUI_URL}/prompt", json=workflow_data) as response:
+        timeout = aiohttp.ClientTimeout(
+            total=30
+        )  # 30 second timeout for ComfyUI request
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                f"{COMFYUI_URL}/prompt", json=workflow_data
+            ) as response:
                 if response.status == 200:
                     result = await response.json()
                     return result.get("prompt_id")
                 else:
-                    raise HTTPException(status_code=500, detail=f"ComfyUI error: {response.status}")
+                    raise HTTPException(
+                        status_code=500, detail=f"ComfyUI error: {response.status}"
+                    )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"ComfyUI connection failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"ComfyUI connection failed: {str(e)}"
+        )
 
-async def generate_with_fixed_workflow(prompt: str, character: str = None, style: str = "anime", duration: int = 5):
+
+async def generate_with_fixed_workflow(
+    prompt: str, character: str = None, style: str = "anime", duration: int = 5
+):
     """Generate anime using FIXED ComfyUI workflow with AnimateDiff context windows for 5-second videos"""
     try:
         # Enhanced character-specific prompt
@@ -239,155 +276,205 @@ async def generate_with_fixed_workflow(prompt: str, character: str = None, style
 
         # Fixed workflow using working parameters from test
         import time
+
         timestamp = int(time.time())
 
         # Calculate frames based on duration (5 seconds @ 24fps = 120 frames)
         frames = min(120, duration * 24)
         print(f"DEBUG: Generating {duration}s video with {frames} frames")
-        logger.info(f"Generating {duration}s video with {frames} frames (batch_size)")
+        logger.info(
+            f"Generating {duration}s video with {frames} frames (batch_size)")
 
-        workflow = {
-            "1": {
-                "inputs": {
-                    "text": enhanced_prompt,
-                    "clip": ["4", 1]
+        # Determine if we need context windows for longer videos
+        if frames > 24:
+            # Use ADVANCED workflow with context windows for longer videos
+            workflow = {
+                "1": {
+                    "inputs": {"text": enhanced_prompt, "clip": ["4", 1]},
+                    "class_type": "CLIPTextEncode",
+                    "_meta": {"title": "CLIP Text Encode (Prompt)"},
                 },
-                "class_type": "CLIPTextEncode",
-                "_meta": {
-                    "title": "CLIP Text Encode (Prompt)"
-                }
-            },
-            "2": {
-                "inputs": {
-                    "text": "worst quality, low quality, blurry, ugly, distorted, static, still image, text, watermark",
-                    "clip": ["4", 1]
+                "2": {
+                    "inputs": {
+                        "text": "worst quality, low quality, blurry, ugly, distorted, static, still image, text, watermark, no motion, slideshow",
+                        "clip": ["4", 1],
+                    },
+                    "class_type": "CLIPTextEncode",
+                    "_meta": {"title": "CLIP Text Encode (Negative)"},
                 },
-                "class_type": "CLIPTextEncode",
-                "_meta": {
-                    "title": "CLIP Text Encode (Negative)"
-                }
-            },
-            "3": {
-                "inputs": {
-                    "seed": timestamp,
-                    "steps": 40,
-                    "cfg": 8.5,
-                    "sampler_name": "dpmpp_2m",
-                    "scheduler": "karras",
-                    "denoise": 1.0,
-                    "model": ["12", 0],
-                    "positive": ["1", 0],
-                    "negative": ["2", 0],
-                    "latent_image": ["5", 0]
+                "3": {
+                    "inputs": {
+                        "seed": timestamp,
+                        "steps": 25,
+                        "cfg": 8.0,
+                        "sampler_name": "dpmpp_2m",
+                        "scheduler": "karras",
+                        "denoise": 1.0,
+                        "model": ["12", 0],
+                        "positive": ["1", 0],
+                        "negative": ["2", 0],
+                        "latent_image": ["5", 0],
+                    },
+                    "class_type": "KSampler",
+                    "_meta": {"title": "KSampler"},
                 },
-                "class_type": "KSampler",
-                "_meta": {
-                    "title": "KSampler"
-                }
-            },
-            "4": {
-                "inputs": {
-                    "ckpt_name": "counterfeit_v3.safetensors"
+                "4": {
+                    "inputs": {"ckpt_name": "AOM3A1B.safetensors"},
+                    "class_type": "CheckpointLoaderSimple",
+                    "_meta": {"title": "Load Checkpoint"},
                 },
-                "class_type": "CheckpointLoaderSimple",
-                "_meta": {
-                    "title": "Load Checkpoint"
-                }
-            },
-            "5": {
-                "inputs": {
-                    "width": 1024,
-                    "height": 1024,
-                    "batch_size": frames
+                "5": {
+                    "inputs": {"width": 768, "height": 768, "batch_size": frames},
+                    "class_type": "EmptyLatentImage",
+                    "_meta": {
+                        "title": f"Empty Latent Image ({frames} frames for {duration} seconds @ 24fps)"
+                    },
                 },
-                "class_type": "EmptyLatentImage",
-                "_meta": {
-                    "title": f"Empty Latent Image ({frames} frames for {duration} seconds @ 24fps)"
-                }
-            },
-            "6": {
-                "inputs": {
-                    "samples": ["3", 0],
-                    "vae": ["13", 0]
+                "6": {
+                    "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
+                    "class_type": "VAEDecode",
+                    "_meta": {"title": "VAE Decode"},
                 },
-                "class_type": "VAEDecode",
-                "_meta": {
-                    "title": "VAE Decode"
-                }
-            },
-            "7": {
-                "inputs": {
-                    "images": ["6", 0],
-                    "frame_rate": 24,
-                    "loop_count": 0,
-                    "filename_prefix": f"animatediff_5sec_{frames}frames_{timestamp}",
-                    "format": "video/h264-mp4",
-                    "pix_fmt": "yuv420p",
-                    "crf": 12,
-                    "save_metadata": True,
-                    "pingpong": False,
-                    "save_output": True
+                "7": {
+                    "inputs": {
+                        "images": ["6", 0],
+                        "frame_rate": 24,
+                        "loop_count": 0,
+                        "filename_prefix": f"animatediff_context_{frames}frames_{timestamp}",
+                        "format": "video/h264-mp4",
+                        "pix_fmt": "yuv420p",
+                        "crf": 18,
+                        "save_metadata": True,
+                        "pingpong": False,
+                        "save_output": True,
+                    },
+                    "class_type": "VHS_VideoCombine",
+                    "_meta": {"title": "Video Combine - Context Window Animation"},
                 },
-                "class_type": "VHS_VideoCombine",
-                "_meta": {
-                    "title": "Video Combine - 5 Second Video"
-                }
-            },
-            "10": {
-                "inputs": {
-                    "model_name": "mm-Stabilized_high.pth"
+                "10": {
+                    "inputs": {"model_name": "mm-Stabilized_high.pth"},
+                    "class_type": "ADE_LoadAnimateDiffModel",
+                    "_meta": {"title": "Load AnimateDiff Model"},
                 },
-                "class_type": "ADE_LoadAnimateDiffModel",
-                "_meta": {
-                    "title": "Load AnimateDiff Model"
-                }
-            },
-            "11": {
-                "inputs": {
-                    "motion_model": ["10", 0],
-                    "start_percent": 0.0,
-                    "end_percent": 1.0
+                "11": {
+                    "inputs": {
+                        "motion_model": ["10", 0],
+                        "start_percent": 0.0,
+                        "end_percent": 1.0,
+                    },
+                    "class_type": "ADE_ApplyAnimateDiffModel",
+                    "_meta": {"title": "Apply AnimateDiff Model"},
                 },
-                "class_type": "ADE_ApplyAnimateDiffModel",
-                "_meta": {
-                    "title": "Apply AnimateDiff Model"
-                }
-            },
-            "12": {
-                "inputs": {
-                    "model": ["4", 0],
-                    "beta_schedule": "autoselect",
-                    "m_models": ["11", 0],
-                    "context_options": ["14", 0]
+                "12": {
+                    "inputs": {
+                        "model": ["4", 0],
+                        "beta_schedule": "autoselect",
+                        "m_models": ["11", 0],
+                        "context_options": ["14", 0],
+                    },
+                    "class_type": "ADE_UseEvolvedSampling",
+                    "_meta": {"title": "Use Evolved Sampling with Context"},
                 },
-                "class_type": "ADE_UseEvolvedSampling",
-                "_meta": {
-                    "title": "Use Evolved Sampling with Context"
-                }
-            },
-            "13": {
-                "inputs": {
-                    "vae_name": "vae-ft-mse-840000-ema-pruned.safetensors"
+                "14": {
+                    "inputs": {
+                        "context_length": 16,
+                        "context_stride": 1,
+                        "context_overlap": 4,
+                        "context_schedule": "uniform",
+                        "closed_loop": True,
+                    },
+                    "class_type": "ADE_LoopedUniformContextOptions",
+                    "_meta": {
+                        "title": f"Context Window for {frames} frames (16-frame chunks with 4 overlap)"
+                    },
                 },
-                "class_type": "VAELoader",
-                "_meta": {
-                    "title": "Load VAE"
-                }
-            },
-            "14": {
-                "inputs": {
-                    "context_length": 24,
-                    "context_stride": 1,
-                    "context_overlap": 4,
-                    "context_schedule": "uniform",
-                    "closed_loop": False
-                },
-                "class_type": "ADE_LoopedUniformContextOptions",
-                "_meta": {
-                    "title": f"Context Window for {frames} frames (24-frame chunks)"
-                }
             }
-        }
+        else:
+            # Use SIMPLE workflow for short videos (≤24 frames) - based on
+            # working example
+            workflow = {
+                "1": {
+                    "inputs": {"text": enhanced_prompt, "clip": ["4", 1]},
+                    "class_type": "CLIPTextEncode",
+                    "_meta": {"title": "CLIP Text Encode (Prompt)"},
+                },
+                "2": {
+                    "inputs": {
+                        "text": "worst quality, low quality, blurry, ugly, distorted, static, still image, no motion, slideshow",
+                        "clip": ["4", 1],
+                    },
+                    "class_type": "CLIPTextEncode",
+                    "_meta": {"title": "CLIP Text Encode (Negative)"},
+                },
+                "3": {
+                    "inputs": {
+                        "seed": timestamp,
+                        "steps": 25,
+                        "cfg": 8.0,
+                        "sampler_name": "dpmpp_2m",
+                        "scheduler": "karras",
+                        "denoise": 1.0,
+                        "model": ["12", 0],
+                        "positive": ["1", 0],
+                        "negative": ["2", 0],
+                        "latent_image": ["5", 0],
+                    },
+                    "class_type": "KSampler",
+                    "_meta": {"title": "KSampler"},
+                },
+                "4": {
+                    "inputs": {"ckpt_name": "AOM3A1B.safetensors"},
+                    "class_type": "CheckpointLoaderSimple",
+                    "_meta": {"title": "Load Checkpoint"},
+                },
+                "5": {
+                    "inputs": {"width": 768, "height": 768, "batch_size": frames},
+                    "class_type": "EmptyLatentImage",
+                    "_meta": {
+                        "title": f"Empty Latent Image ({frames} frames for {duration} seconds @ 24fps)"
+                    },
+                },
+                "6": {
+                    "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
+                    "class_type": "VAEDecode",
+                    "_meta": {"title": "VAE Decode"},
+                },
+                "7": {
+                    "inputs": {
+                        "images": ["6", 0],
+                        "frame_rate": 24,
+                        "loop_count": 0,
+                        "filename_prefix": f"animatediff_simple_{frames}frames_{timestamp}",
+                        "format": "video/h264-mp4",
+                        "pix_fmt": "yuv420p",
+                        "crf": 18,
+                        "save_metadata": True,
+                        "pingpong": False,
+                        "save_output": True,
+                    },
+                    "class_type": "VHS_VideoCombine",
+                    "_meta": {"title": "Video Combine - Simple Animation"},
+                },
+                "10": {
+                    "inputs": {"model_name": "mm-Stabilized_high.pth"},
+                    "class_type": "ADE_LoadAnimateDiffModel",
+                    "_meta": {"title": "Load AnimateDiff Model"},
+                },
+                "11": {
+                    "inputs": {"motion_model": ["10", 0]},
+                    "class_type": "ADE_ApplyAnimateDiffModelSimple",
+                    "_meta": {"title": "Apply AnimateDiff Model Simple"},
+                },
+                "12": {
+                    "inputs": {
+                        "model": ["4", 0],
+                        "beta_schedule": "autoselect",
+                        "m_models": ["11", 0],
+                    },
+                    "class_type": "ADE_UseEvolvedSampling",
+                    "_meta": {"title": "Use Evolved Sampling"},
+                },
+            }
 
         # Submit directly to ComfyUI
         job_id = await submit_comfyui_workflow({"prompt": workflow})
@@ -401,11 +488,14 @@ async def generate_with_fixed_workflow(prompt: str, character: str = None, style
             "model": "counterfeit_v3.safetensors",
             "frames": frames,
             "duration": duration,
-            "context_window": "24 frames with 4 overlap"
+            "context_window": "24 frames with 4 overlap",
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Fixed workflow generation failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Fixed workflow generation failed: {str(e)}"
+        )
+
 
 async def get_real_comfyui_progress(request_id: str) -> float:
     """Get REAL progress from ComfyUI queue system"""
@@ -441,15 +531,324 @@ async def get_real_comfyui_progress(request_id: str) -> float:
         logger.error(f"Error getting ComfyUI progress: {e}")
         return 0.0
 
+
 # API Endpoints
+
 
 @app.get("/api/anime/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "tower-anime-production"}
 
+
+@app.get("/api/anime-enhanced/health")
+async def enhanced_health_check():
+    """Enhanced health check endpoint (alias for compatibility)"""
+    return {"status": "healthy",
+            "service": "tower-anime-production", "enhanced": True}
+
+
+@app.get("/api/anime/status")
+async def service_status(db: Session = Depends(get_db)):
+    """Get comprehensive service status"""
+    try:
+        # Check database connection
+        project_count = db.query(AnimeProject).count()
+        job_count = db.query(ProductionJob).count()
+
+        # Check ComfyUI connection
+        comfyui_status = "unknown"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{COMFYUI_URL}/queue", timeout=5) as response:
+                    if response.status == 200:
+                        comfyui_status = "connected"
+                    else:
+                        comfyui_status = "error"
+        except BaseException:
+            comfyui_status = "disconnected"
+
+        return {
+            "status": "healthy",
+            "service": "tower-anime-production",
+            "database": {
+                "connected": True,
+                "projects": project_count,
+                "jobs": job_count,
+            },
+            "comfyui": {"status": comfyui_status, "url": COMFYUI_URL},
+            "endpoints": {
+                "generate": "/api/anime/generate",
+                "projects": "/api/anime/projects",
+                "status": "/api/anime/generation/{id}/status",
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(
+            e), "service": "tower-anime-production"}
+
+
+@app.post("/api/anime/test-generate")
+async def test_generate_with_quality(quality: str = "low", duration: int = 2):
+    """Test generation with different quality levels for performance testing - Progressive 2,3,5,10,30 seconds"""
+    import time
+
+    timestamp = int(time.time())
+
+    # Calculate frames based on duration
+    frames = duration * 24  # 24fps
+
+    # Quality presets for progressive testing
+    presets = {
+        "low": {
+            "width": 384,  # Increased for better quality
+            "height": 384,
+            "steps": 15,  # Reasonable quality
+            "frames": frames,
+            "crf": 20,  # Good quality compression
+        },
+        "medium": {
+            "width": 512,
+            "height": 512,
+            "steps": 20,
+            "frames": frames,
+            "crf": 18,
+        },
+        "high": {"width": 768, "height": 768, "steps": 25, "frames": frames, "crf": 16},
+    }
+
+    settings = presets.get(quality, presets["low"])
+
+    # Override frames from presets to use requested duration
+    settings["frames"] = frames
+
+    # FIXED: Use simple workflow for all test durations - context windows break motion
+    # Always use ADE_ApplyAnimateDiffModelSimple like the working
+    # goblin_slayer example
+    if False:  # Disable context window workflow - it breaks motion generation
+        # ADVANCED workflow with context windows for longer test videos
+        workflow = {
+            "1": {
+                "inputs": {
+                    "text": f"anime character walking, smooth motion, fluid animation, dynamic movement, {quality} quality test, detailed animation",
+                    "clip": ["4", 1],
+                },
+                "class_type": "CLIPTextEncode",
+                "_meta": {"title": "CLIP Text Encode (Prompt)"},
+            },
+            "2": {
+                "inputs": {
+                    "text": "static, no motion, slideshow, still image, worst quality, low quality, blurry, ugly, distorted",
+                    "clip": ["4", 1],
+                },
+                "class_type": "CLIPTextEncode",
+                "_meta": {"title": "CLIP Text Encode (Negative)"},
+            },
+            "3": {
+                "inputs": {
+                    "seed": timestamp,
+                    "steps": settings["steps"],
+                    "cfg": 8.0,
+                    "sampler_name": "dpmpp_2m",
+                    "scheduler": "karras",
+                    "denoise": 1.0,
+                    "model": ["12", 0],
+                    "positive": ["1", 0],
+                    "negative": ["2", 0],
+                    "latent_image": ["5", 0],
+                },
+                "class_type": "KSampler",
+                "_meta": {"title": "KSampler"},
+            },
+            "4": {
+                "inputs": {"ckpt_name": "AOM3A1B.safetensors"},
+                "class_type": "CheckpointLoaderSimple",
+                "_meta": {"title": "Load Checkpoint"},
+            },
+            "5": {
+                "inputs": {
+                    "width": settings["width"],
+                    "height": settings["height"],
+                    "batch_size": settings["frames"],
+                },
+                "class_type": "EmptyLatentImage",
+                "_meta": {"title": f"Empty Latent Image ({settings['frames']} frames)"},
+            },
+            "6": {
+                "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
+                "class_type": "VAEDecode",
+                "_meta": {"title": "VAE Decode"},
+            },
+            "7": {
+                "inputs": {
+                    "images": ["6", 0],
+                    "frame_rate": 24,
+                    "loop_count": 0,
+                    "filename_prefix": f"test_context_{quality}_{duration}s_{timestamp}",
+                    "format": "video/h264-mp4",
+                    "pix_fmt": "yuv420p",
+                    "crf": settings["crf"],
+                    "save_metadata": True,
+                    "pingpong": False,
+                    "save_output": True,
+                },
+                "class_type": "VHS_VideoCombine",
+                "_meta": {"title": "Video Combine - Context Test"},
+            },
+            "10": {
+                "inputs": {"model_name": "mm-Stabilized_high.pth"},
+                "class_type": "ADE_LoadAnimateDiffModel",
+                "_meta": {"title": "Load AnimateDiff Model"},
+            },
+            "11": {
+                "inputs": {
+                    "motion_model": ["10", 0],
+                    "start_percent": 0.0,
+                    "end_percent": 1.0,
+                },
+                "class_type": "ADE_ApplyAnimateDiffModel",
+                "_meta": {"title": "Apply AnimateDiff Model"},
+            },
+            "12": {
+                "inputs": {
+                    "model": ["4", 0],
+                    "beta_schedule": "autoselect",
+                    "m_models": ["11", 0],
+                    "context_options": ["14", 0],
+                },
+                "class_type": "ADE_UseEvolvedSampling",
+                "_meta": {"title": "Use Evolved Sampling with Context"},
+            },
+            "14": {
+                "inputs": {
+                    "context_length": 16,
+                    "context_stride": 1,
+                    "context_overlap": 4,
+                    "context_schedule": "uniform",
+                    "closed_loop": True,
+                },
+                "class_type": "ADE_LoopedUniformContextOptions",
+                "_meta": {"title": f"Context Options for {frames} frames"},
+            },
+        }
+    else:
+        # FIXED: Use SIMPLE workflow for ALL durations - based on working
+        # goblin_slayer example
+        workflow = {
+            "1": {
+                "inputs": {
+                    "text": f"1boy, solo focus, anime character, walking motion, step by step movement, fluid walking animation, natural gait, dynamic walking cycle, smooth locomotion, {quality} quality test, anime style, masterpiece",
+                    "clip": ["4", 1],
+                },
+                "class_type": "CLIPTextEncode",
+                "_meta": {"title": "CLIP Text Encode (Prompt)"},
+            },
+            "2": {
+                "inputs": {
+                    "text": "static, no motion, slideshow, still image, worst quality, low quality, blurry, ugly, distorted",
+                    "clip": ["4", 1],
+                },
+                "class_type": "CLIPTextEncode",
+                "_meta": {"title": "CLIP Text Encode (Negative)"},
+            },
+            "3": {
+                "inputs": {
+                    "seed": timestamp,
+                    "steps": settings["steps"],
+                    "cfg": 8.0,
+                    "sampler_name": "dpmpp_2m",
+                    "scheduler": "karras",
+                    "denoise": 1.0,
+                    "model": ["12", 0],
+                    "positive": ["1", 0],
+                    "negative": ["2", 0],
+                    "latent_image": ["5", 0],
+                },
+                "class_type": "KSampler",
+                "_meta": {"title": "KSampler"},
+            },
+            "4": {
+                "inputs": {"ckpt_name": "AOM3A1B.safetensors"},
+                "class_type": "CheckpointLoaderSimple",
+                "_meta": {"title": "Load Checkpoint"},
+            },
+            "5": {
+                "inputs": {
+                    "width": settings["width"],
+                    "height": settings["height"],
+                    "batch_size": settings["frames"],
+                },
+                "class_type": "EmptyLatentImage",
+                "_meta": {"title": f"Empty Latent Image ({settings['frames']} frames)"},
+            },
+            "6": {
+                "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
+                "class_type": "VAEDecode",
+                "_meta": {"title": "VAE Decode"},
+            },
+            "7": {
+                "inputs": {
+                    "images": ["6", 0],
+                    "frame_rate": 24,
+                    "loop_count": 0,
+                    "filename_prefix": f"test_simple_{quality}_{duration}s_{timestamp}",
+                    "format": "video/h264-mp4",
+                    "pix_fmt": "yuv420p",
+                    "crf": settings["crf"],
+                    "save_metadata": True,
+                    "pingpong": False,
+                    "save_output": True,
+                },
+                "class_type": "VHS_VideoCombine",
+                "_meta": {"title": "Video Combine - Simple Test"},
+            },
+            "10": {
+                "inputs": {"model_name": "mm-Stabilized_high.pth"},
+                "class_type": "ADE_LoadAnimateDiffModel",
+                "_meta": {"title": "Load AnimateDiff Model"},
+            },
+            "11": {
+                "inputs": {"motion_model": ["10", 0]},
+                "class_type": "ADE_ApplyAnimateDiffModelSimple",
+                "_meta": {"title": "Apply AnimateDiff Model Simple"},
+            },
+            "12": {
+                "inputs": {
+                    "model": ["4", 0],
+                    "beta_schedule": "autoselect",
+                    "m_models": ["11", 0],
+                },
+                "class_type": "ADE_UseEvolvedSampling",
+                "_meta": {"title": "Use Evolved Sampling"},
+            },
+        }
+
+    # Submit to ComfyUI with timeout
+    prompt_data = {"prompt": workflow}
+
+    async with aiohttp.ClientSession() as session:
+        start_time = time.time()
+        async with session.post(
+            f"{COMFYUI_URL}/prompt", json=prompt_data, timeout=30
+        ) as response:
+            if response.status == 200:
+                result = await response.json()
+                return {
+                    "job_id": result.get("prompt_id"),
+                    "quality": quality,
+                    "duration": duration,
+                    "settings": settings,
+                    "expected_time": f"{settings['steps'] * settings['frames'] / 10:.1f} seconds (estimate)",
+                    "started_at": start_time,
+                }
+            else:
+                return {"error": f"ComfyUI returned status {response.status}"}
+
+
 @app.post("/api/anime/generate")
-async def generate_anime_video(request: AnimeGenerationRequest, db: Session = Depends(get_db)):
+async def generate_anime_video(
+    request: AnimeGenerationRequest, db: Session = Depends(get_db)
+):
     """Direct anime video generation endpoint - FIXED WORKFLOW"""
     try:
         # Generate using FIXED workflow (no more broken Echo workflow)
@@ -457,15 +856,15 @@ async def generate_anime_video(request: AnimeGenerationRequest, db: Session = De
             prompt=request.prompt,
             character=request.character,
             style=request.style,
-            duration=request.duration
+            duration=request.duration,
         )
 
         job = ProductionJob(
             job_type="video_generation",
             prompt=request.prompt,
-            parameters=request.json(),
+            parameters=request.model_dump_json(),
             status="processing",
-            output_path=result.get("output_path") if result else None
+            output_path=result.get("output_path") if result else None,
         )
         db.add(job)
         db.commit()
@@ -477,18 +876,162 @@ async def generate_anime_video(request: AnimeGenerationRequest, db: Session = De
             "workflow_type": result.get("workflow_type"),
             "resolution": result.get("resolution"),
             "model": result.get("model"),
-            "message": "High-quality video generation started with fixed workflow"
+            "message": "High-quality video generation started with fixed workflow",
         }
     except Exception as e:
         job = ProductionJob(
             job_type="video_generation",
             prompt=request.prompt,
-            parameters=request.json(),
-            status="failed"
+            parameters=request.model_dump_json(),
+            status="failed",
         )
         db.add(job)
         db.commit()
-        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Generation failed: {
+                str(e)}",
+        )
+
+
+@app.post("/api/anime/generate-fast")
+async def generate_anime_video_fast(
+    request: AnimeGenerationRequest, db: Session = Depends(get_db)
+):
+    """Fast 5-second anime video generation using parallel segments via Echo Brain task queue"""
+    try:
+        # Validate duration (this endpoint is optimized for 5-second videos)
+        if request.duration > 10:
+            raise HTTPException(
+                status_code=400, detail="Fast generation limited to 10 seconds max"
+            )
+
+        # Calculate segments (1 second each = 24 frames per segment)
+        total_segments = max(1, request.duration)
+        frames_per_segment = 24  # 1 second at 24fps
+
+        logger.info(
+            f"Starting fast generation: {
+                request.duration}s video with {total_segments} segments"
+        )
+
+        # Create main job record
+        main_job = ProductionJob(
+            job_type="fast_video_generation",
+            prompt=request.prompt,
+            parameters=request.model_dump_json(),
+            status="segmenting",
+        )
+        db.add(main_job)
+        db.commit()
+
+        # Generate unique batch ID for tracking all segments
+        batch_id = str(uuid.uuid4())
+
+        # Submit parallel segment generation tasks to Echo Brain
+        segment_tasks = []
+        echo_brain_url = "http://localhost:8309/api/echo/tasks/implement"
+
+        async with aiohttp.ClientSession() as session:
+            for segment_num in range(total_segments):
+                # Create segment-specific prompt
+                segment_prompt = f"Segment {
+                    segment_num +
+                    1} of {total_segments}: {
+                    request.prompt}"
+                if request.character:
+                    segment_prompt += f" featuring {request.character}"
+
+                # Task payload for Echo Brain
+                task_payload = {
+                    "task": f"Generate 1-second anime segment {segment_num + 1}/{total_segments}",
+                    "service": "anime-production",
+                    "test": False,
+                    "context": {
+                        "batch_id": batch_id,
+                        "segment_number": segment_num + 1,
+                        "total_segments": total_segments,
+                        "prompt": segment_prompt,
+                        "character": request.character,
+                        "style": request.style,
+                        "duration": 1,  # Each segment is 1 second
+                        "frames": frames_per_segment,
+                        "main_job_id": main_job.id,
+                    },
+                }
+
+                try:
+                    async with session.post(
+                        echo_brain_url, json=task_payload
+                    ) as response:
+                        if response.status == 200:
+                            task_result = await response.json()
+                            segment_tasks.append(
+                                {
+                                    "segment": segment_num + 1,
+                                    "task_id": task_result["task_id"],
+                                    "status": "queued",
+                                }
+                            )
+                            logger.info(
+                                f"Queued segment {
+                                    segment_num +
+                                    1}: task_id {
+                                    task_result['task_id']}"
+                            )
+                        else:
+                            logger.error(
+                                f"Failed to queue segment {
+                                    segment_num +
+                                    1}: {
+                                    response.status}"
+                            )
+                except Exception as e:
+                    logger.error(
+                        f"Error queuing segment {
+                            segment_num +
+                            1}: {
+                            str(e)}"
+                    )
+
+        # Update main job with segment tracking data
+        main_job.status = "segments_queued"
+        import json
+
+        main_job.parameters = json.dumps(
+            {
+                "original_request": request.dict(),
+                "batch_id": batch_id,
+                "segment_tasks": segment_tasks,
+                "total_segments": total_segments,
+            }
+        )
+        db.commit()
+
+        return {
+            "job_id": main_job.id,
+            "batch_id": batch_id,
+            "status": "segments_queued",
+            "total_segments": total_segments,
+            "segment_tasks": segment_tasks,
+            # Rough estimate
+            "estimated_completion": f"{total_segments * 2} minutes",
+            "message": f"Fast generation started: {total_segments} segments queued for parallel processing",
+            "workflow_type": "fast_segmented_generation",
+            "poll_url": f"/api/anime/generation/{main_job.id}/status",
+        }
+
+    except Exception as e:
+        # Create failed job record
+        if "main_job" in locals():
+            main_job.status = "failed"
+            db.commit()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Fast generation failed: {
+                str(e)}",
+        )
+
 
 @app.get("/api/anime/projects", response_model=List[AnimeProjectResponse])
 async def get_projects(db: Session = Depends(get_db)):
@@ -496,8 +1039,10 @@ async def get_projects(db: Session = Depends(get_db)):
     projects = db.query(AnimeProject).all()
     return projects
 
+
 @app.post("/api/anime/projects", response_model=AnimeProjectResponse)
-async def create_project(project: AnimeProjectCreate, db: Session = Depends(get_db)):
+async def create_project(project: AnimeProjectCreate,
+                         db: Session = Depends(get_db)):
     """Create new anime project"""
     db_project = AnimeProject(**project.dict())
     db.add(db_project)
@@ -505,10 +1050,13 @@ async def create_project(project: AnimeProjectCreate, db: Session = Depends(get_
     db.refresh(db_project)
     return db_project
 
+
 @app.patch("/api/anime/projects/{project_id}")
-async def update_project(project_id: int, updates: dict, db: Session = Depends(get_db)):
+async def update_project(project_id: int, updates: dict,
+                         db: Session = Depends(get_db)):
     """Update anime project"""
-    project = db.query(AnimeProject).filter(AnimeProject.id == project_id).first()
+    project = db.query(AnimeProject).filter(
+        AnimeProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -521,10 +1069,12 @@ async def update_project(project_id: int, updates: dict, db: Session = Depends(g
     db.refresh(project)
     return project
 
+
 @app.delete("/api/anime/projects/{project_id}")
 async def delete_project(project_id: int, db: Session = Depends(get_db)):
     """Delete anime project"""
-    project = db.query(AnimeProject).filter(AnimeProject.id == project_id).first()
+    project = db.query(AnimeProject).filter(
+        AnimeProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -532,22 +1082,33 @@ async def delete_project(project_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Project deleted successfully"}
 
+
 # ============================================================================
 # PROJECT BIBLE ENDPOINTS
 # ============================================================================
 
-@app.post("/api/anime/projects/{project_id}/bible", response_model=ProjectBibleResponse)
-async def create_project_bible(project_id: int, bible_data: ProjectBibleCreate, db: Session = Depends(get_db)):
+
+@app.post("/api/anime/projects/{project_id}/bible",
+          response_model=ProjectBibleResponse)
+async def create_project_bible(
+    project_id: int, bible_data: ProjectBibleCreate, db: Session = Depends(get_db)
+):
     """Create a new project bible for a project"""
     # Check if project exists
-    project = db.query(AnimeProject).filter(AnimeProject.id == project_id).first()
+    project = db.query(AnimeProject).filter(
+        AnimeProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     # Check if bible already exists
-    existing_bible = db.query(ProjectBible).filter(ProjectBible.project_id == project_id).first()
+    existing_bible = (
+        db.query(ProjectBible).filter(
+            ProjectBible.project_id == project_id).first()
+    )
     if existing_bible:
-        raise HTTPException(status_code=400, detail="Project bible already exists")
+        raise HTTPException(
+            status_code=400,
+            detail="Project bible already exists")
 
     # Create project bible
     bible = ProjectBible(
@@ -556,7 +1117,7 @@ async def create_project_bible(project_id: int, bible_data: ProjectBibleCreate, 
         description=bible_data.description,
         visual_style=bible_data.visual_style,
         world_setting=bible_data.world_setting,
-        narrative_guidelines=bible_data.narrative_guidelines
+        narrative_guidelines=bible_data.narrative_guidelines,
     )
 
     db.add(bible)
@@ -565,19 +1126,27 @@ async def create_project_bible(project_id: int, bible_data: ProjectBibleCreate, 
 
     return bible
 
-@app.get("/api/anime/projects/{project_id}/bible", response_model=ProjectBibleResponse)
+
+@app.get("/api/anime/projects/{project_id}/bible",
+         response_model=ProjectBibleResponse)
 async def get_project_bible(project_id: int, db: Session = Depends(get_db)):
     """Get project bible for a project"""
-    bible = db.query(ProjectBible).filter(ProjectBible.project_id == project_id).first()
+    bible = db.query(ProjectBible).filter(
+        ProjectBible.project_id == project_id).first()
     if not bible:
         raise HTTPException(status_code=404, detail="Project bible not found")
 
     return bible
 
-@app.put("/api/anime/projects/{project_id}/bible", response_model=ProjectBibleResponse)
-async def update_project_bible(project_id: int, bible_update: ProjectBibleUpdate, db: Session = Depends(get_db)):
+
+@app.put("/api/anime/projects/{project_id}/bible",
+         response_model=ProjectBibleResponse)
+async def update_project_bible(
+    project_id: int, bible_update: ProjectBibleUpdate, db: Session = Depends(get_db)
+):
     """Update project bible"""
-    bible = db.query(ProjectBible).filter(ProjectBible.project_id == project_id).first()
+    bible = db.query(ProjectBible).filter(
+        ProjectBible.project_id == project_id).first()
     if not bible:
         raise HTTPException(status_code=404, detail="Project bible not found")
 
@@ -599,21 +1168,32 @@ async def update_project_bible(project_id: int, bible_update: ProjectBibleUpdate
 
     return bible
 
-@app.post("/api/anime/projects/{project_id}/bible/characters", response_model=CharacterResponse)
-async def add_character_to_bible(project_id: int, character: CharacterDefinition, db: Session = Depends(get_db)):
+
+@app.post(
+    "/api/anime/projects/{project_id}/bible/characters",
+    response_model=CharacterResponse,
+)
+async def add_character_to_bible(
+    project_id: int, character: CharacterDefinition, db: Session = Depends(get_db)
+):
     """Add character definition to project bible"""
     # Check if project bible exists
-    bible = db.query(ProjectBible).filter(ProjectBible.project_id == project_id).first()
+    bible = db.query(ProjectBible).filter(
+        ProjectBible.project_id == project_id).first()
     if not bible:
         raise HTTPException(status_code=404, detail="Project bible not found")
 
     # Check if character already exists
-    existing_character = db.query(BibleCharacter).filter(
-        BibleCharacter.bible_id == bible.id,
-        BibleCharacter.name == character.name
-    ).first()
+    existing_character = (
+        db.query(BibleCharacter)
+        .filter(
+            BibleCharacter.bible_id == bible.id, BibleCharacter.name == character.name
+        )
+        .first()
+    )
     if existing_character:
-        raise HTTPException(status_code=400, detail="Character already exists in bible")
+        raise HTTPException(status_code=400,
+                            detail="Character already exists in bible")
 
     # Create character
     new_character = BibleCharacter(
@@ -623,7 +1203,7 @@ async def add_character_to_bible(project_id: int, character: CharacterDefinition
         visual_traits=character.visual_traits,
         personality_traits=character.personality_traits,
         relationships=character.relationships,
-        evolution_arc=character.evolution_arc
+        evolution_arc=character.evolution_arc,
     )
 
     db.add(new_character)
@@ -632,20 +1212,32 @@ async def add_character_to_bible(project_id: int, character: CharacterDefinition
 
     return new_character
 
-@app.get("/api/anime/projects/{project_id}/bible/characters", response_model=List[CharacterResponse])
+
+@app.get(
+    "/api/anime/projects/{project_id}/bible/characters",
+    response_model=List[CharacterResponse],
+)
 async def get_bible_characters(project_id: int, db: Session = Depends(get_db)):
     """Get all characters from project bible"""
-    bible = db.query(ProjectBible).filter(ProjectBible.project_id == project_id).first()
+    bible = db.query(ProjectBible).filter(
+        ProjectBible.project_id == project_id).first()
     if not bible:
         raise HTTPException(status_code=404, detail="Project bible not found")
 
-    characters = db.query(BibleCharacter).filter(BibleCharacter.bible_id == bible.id).all()
+    characters = (
+        db.query(BibleCharacter).filter(
+            BibleCharacter.bible_id == bible.id).all()
+    )
     return characters
 
+
 @app.post("/api/anime/generate/project/{project_id}")
-async def generate_video_for_project(project_id: int, request: AnimeGenerationRequest, db: Session = Depends(get_db)):
-    """Generate video for specific project"""
-    project = db.query(AnimeProject).filter(AnimeProject.id == project_id).first()
+async def generate_video_for_project(
+    project_id: int, request: AnimeGenerationRequest, db: Session = Depends(get_db)
+):
+    """Generate video for specific project using fixed workflow (no more broken Echo workflow)"""
+    project = db.query(AnimeProject).filter(
+        AnimeProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -658,98 +1250,374 @@ async def generate_video_for_project(project_id: int, request: AnimeGenerationRe
         project_id=project_id,
         job_type="video_generation",
         prompt=request.prompt,
-        parameters=request.json(),
-        status="processing"
+        parameters=request.model_dump_json(),
+        status="processing",
     )
     db.add(job)
     db.commit()
     db.refresh(job)
 
     try:
-        # Generate using Echo Brain + ComfyUI
-        echo_result = await generate_with_echo_service(
+        # Use the FIXED workflow that actually works
+        result = await generate_with_fixed_workflow(
             prompt=request.prompt,
             character=request.character,
-            style=request.style
+            style=request.style,
+            duration=request.duration,
         )
 
         # Update job status
-        job.status = "completed"
-        job.output_path = echo_result.get("output_path", f"/opt/tower-anime/outputs/job_{job.id}")
+        job.status = "processing"  # ComfyUI is still processing
+        job.output_path = result.get("output_path")
         db.commit()
 
-        request_id = str(uuid.uuid4())
         return {
-            "request_id": request_id,
+            "request_id": result.get("job_id"),
             "job_id": job.id,
-            "status": "completed",
-            "message": "Video generation completed successfully",
-            "result": echo_result
+            "comfyui_job_id": result.get("job_id"),
+            "status": "processing",
+            "message": "Video generation started using fixed workflow",
+            "workflow_type": result.get("workflow_type"),
+            "resolution": result.get("resolution"),
+            "model": result.get("model"),
         }
 
     except Exception as e:
         # Mark job as failed
         job.status = "failed"
         db.commit()
-        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Generation failed: {
+                str(e)}",
+        )
 
-# FRONTEND COMPATIBILITY: Renamed to avoid routing conflicts with /generate/{type}
+
+# FRONTEND COMPATIBILITY: Renamed to avoid routing conflicts with
+# /generate/{type}
 @app.post("/api/anime/projects/{project_id}/generate")
-async def generate_video_frontend_compat(project_id: int, request: dict, db: Session = Depends(get_db)):
+async def generate_video_frontend_compat(
+    project_id: int, request: dict, db: Session = Depends(get_db)
+):
     """Generate video - Frontend compatibility endpoint"""
     # Convert frontend request format to backend format
     anime_request = AnimeGenerationRequest(
         prompt=request.get("prompt", ""),
         character=request.get("character", "original"),
         style=request.get("style", "anime"),
-        duration=request.get("duration", 30)
+        duration=request.get("duration", 30),
     )
 
     # Call the main generation function
     return await generate_video_for_project(project_id, anime_request, db)
 
+
 @app.get("/api/anime/generation/{request_id}/status")
-async def get_generation_status(request_id: str, db: Session = Depends(get_db)):
-    """Get generation status by request ID with REAL ComfyUI monitoring"""
-    # Try to find the job in database first
-    job = db.query(ProductionJob).filter(
-        ProductionJob.parameters.contains(request_id)
-    ).first()
+async def get_generation_status(
+        request_id: str, db: Session = Depends(get_db)):
+    """Get generation status by request ID with REAL ComfyUI monitoring and fast generation support"""
+    # Try to find the job in database first (supports both ID and request_id
+    # lookup)
+    job = None
+
+    logger.info(f"Status check for request_id: {request_id}")
+
+    # Try as integer job ID first
+    try:
+        job_id = int(request_id)
+        job = db.query(ProductionJob).filter(
+            ProductionJob.id == job_id).first()
+        logger.info(f"Found job by ID: {job.id if job else 'None'}")
+    except ValueError:
+        # Try as string in parameters (for ComfyUI job IDs)
+        jobs_with_id = (
+            db.query(ProductionJob)
+            .filter(ProductionJob.parameters.contains(request_id))
+            .all()
+        )
+        if jobs_with_id:
+            job = jobs_with_id[0]  # Take the first match
+            logger.info(f"Found job by parameters search: {job.id}")
 
     if job:
+        # Handle fast generation jobs with segment tracking
+        if job.job_type == "fast_video_generation":
+            return await check_fast_generation_status(job, db)
+
+        # Get real ComfyUI progress
+        comfyui_progress = await get_real_comfyui_progress(request_id)
+
+        # Update job status based on ComfyUI progress
+        if comfyui_progress >= 1.0 and job.status == "processing":
+            job.status = "completed"
+            db.commit()
+
+        # Handle regular generation jobs
         return {
             "id": request_id,
+            "job_id": job.id,
             "status": job.status,
-            "progress": await get_real_comfyui_progress(request_id),
+            "progress": comfyui_progress,
             "created_at": job.created_at.isoformat(),
-            "quality_score": job.quality_score
+            "quality_score": job.quality_score,
+            "output_path": job.output_path,
+            "job_type": job.job_type,
         }
 
-    # Fallback to ComfyUI queue check
+    # Fallback to ComfyUI queue check for orphaned jobs
     progress = await get_real_comfyui_progress(request_id)
-    status = "completed" if progress >= 1.0 else "processing" if progress > 0 else "queued"
+    status = (
+        "completed"
+        if progress >= 1.0
+        else "processing" if progress > 0 else "not_found"
+    )
+
+    logger.warning(
+        f"Job not found in database for request_id: {request_id}, ComfyUI progress: {progress}"
+    )
 
     return {
         "id": request_id,
         "status": status,
         "progress": progress,
-        "created_at": datetime.utcnow().isoformat()
+        "created_at": datetime.utcnow().isoformat(),
+        "note": "Job not found in database, showing ComfyUI status only",
     }
+
+
+async def check_fast_generation_status(job: ProductionJob, db: Session):
+    """Check status of fast generation job with segment tracking and auto-merging"""
+    try:
+        import json
+
+        params = (
+            json.loads(job.parameters)
+            if isinstance(job.parameters, str)
+            else job.parameters
+        )
+        segment_tasks = params.get("segment_tasks", [])
+        batch_id = params.get("batch_id")
+        total_segments = params.get("total_segments", 0)
+
+        if not segment_tasks:
+            return {
+                "id": job.id,
+                "status": "error",
+                "message": "No segment tasks found",
+            }
+
+        # Check Echo Brain task status for each segment
+        completed_segments = []
+        failed_segments = []
+        processing_segments = []
+
+        async with aiohttp.ClientSession() as session:
+            for segment_task in segment_tasks:
+                task_id = segment_task["task_id"]
+                segment_num = segment_task["segment"]
+
+                try:
+                    # Note: This endpoint might have issues as we saw earlier,
+                    # but we'll try
+                    async with session.get(
+                        f"http://localhost:8309/api/echo/tasks/status/{task_id}"
+                    ) as response:
+                        if response.status == 200:
+                            task_data = await response.json()
+                            task_status = task_data.get("status", "unknown")
+
+                            if task_status == "completed":
+                                completed_segments.append(segment_num)
+                            elif task_status == "failed":
+                                failed_segments.append(segment_num)
+                            else:
+                                processing_segments.append(segment_num)
+                        else:
+                            # If status check fails, assume still processing
+                            processing_segments.append(segment_num)
+                except Exception:
+                    # If can't check status, assume still processing
+                    processing_segments.append(segment_num)
+
+        # Calculate progress
+        total_completed = len(completed_segments)
+        progress = total_completed / total_segments if total_segments > 0 else 0
+
+        # Check if all segments are completed
+        if total_completed == total_segments:
+            # All segments done - trigger merging if not already done
+            if job.status != "completed":
+                merge_result = await merge_video_segments(
+                    batch_id, total_segments, params.get(
+                        "original_request", {})
+                )
+                if merge_result["success"]:
+                    job.status = "completed"
+                    job.output_path = merge_result["output_path"]
+                    db.commit()
+                else:
+                    job.status = "merge_failed"
+                    db.commit()
+                    return {
+                        "id": job.id,
+                        "status": "merge_failed",
+                        "progress": 1.0,
+                        "segments_completed": completed_segments,
+                        "segments_failed": failed_segments,
+                        "message": f"Merge failed: {merge_result['error']}",
+                    }
+
+        # Check if any segments failed
+        elif failed_segments:
+            job.status = "partially_failed"
+            db.commit()
+
+        return {
+            "id": job.id,
+            "status": job.status,
+            "progress": progress,
+            "segments_completed": completed_segments,
+            "segments_failed": failed_segments,
+            "segments_processing": processing_segments,
+            "total_segments": total_segments,
+            "batch_id": batch_id,
+            "output_path": job.output_path,
+            "created_at": job.created_at.isoformat(),
+            "estimated_completion": (
+                f"{len(processing_segments) * 2} minutes"
+                if processing_segments
+                else "Complete"
+            ),
+        }
+
+    except Exception as e:
+        logger.error(f"Error checking fast generation status: {str(e)}")
+        return {
+            "id": job.id,
+            "status": "status_check_failed",
+            "message": f"Status check error: {str(e)}",
+        }
+
+
+async def merge_video_segments(
+    batch_id: str, total_segments: int, original_request: dict
+):
+    """Merge completed video segments into final video using ffmpeg"""
+    try:
+        import subprocess
+        import os
+
+        # Define paths
+        output_dir = "/mnt/1TB-storage/ComfyUI/output/"
+        segments_dir = f"{output_dir}segments/{batch_id}/"
+        final_output = f"{output_dir}fast_generation_{batch_id}.mp4"
+
+        # Check if segments exist
+        segment_files = []
+        for i in range(1, total_segments + 1):
+            # Look for segment files (they might have various naming patterns)
+            possible_patterns = [
+                f"{segments_dir}segment_{i}.mp4",
+                f"{segments_dir}segment_{i}.gif",
+                f"{output_dir}segment_{batch_id}_{i}.mp4",
+                f"{output_dir}{batch_id}_segment_{i}.mp4",
+            ]
+
+            segment_file = None
+            for pattern in possible_patterns:
+                if os.path.exists(pattern):
+                    segment_file = pattern
+                    break
+
+            if segment_file:
+                segment_files.append(segment_file)
+            else:
+                logger.warning(f"Segment {i} not found for batch {batch_id}")
+
+        if len(segment_files) != total_segments:
+            return {
+                "success": False,
+                "error": f"Only found {len(segment_files)} of {total_segments} segments",
+            }
+
+        # Create concat file for ffmpeg
+        concat_file = f"{output_dir}concat_{batch_id}.txt"
+        with open(concat_file, "w") as f:
+            for segment_file in segment_files:
+                f.write(f"file '{segment_file}'\n")
+
+        # Run ffmpeg to concatenate segments
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-y",  # -y to overwrite output file
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            concat_file,
+            "-c",
+            "copy",  # Copy streams without re-encoding for speed
+            final_output,
+        ]
+
+        logger.info(f"Merging segments with command: {' '.join(ffmpeg_cmd)}")
+        result = subprocess.run(
+            ffmpeg_cmd,
+            capture_output=True,
+            text=True,
+            timeout=60)
+
+        # Clean up concat file
+        os.remove(concat_file)
+
+        if result.returncode == 0:
+            logger.info(
+                f"Successfully merged {
+                    len(segment_files)} segments into {final_output}"
+            )
+            return {
+                "success": True,
+                "output_path": final_output,
+                "segments_merged": len(segment_files),
+            }
+        else:
+            logger.error(f"ffmpeg failed: {result.stderr}")
+            return {"success": False, "error": f"ffmpeg error: {result.stderr}"}
+
+    except Exception as e:
+        logger.error(f"Merge error: {str(e)}")
+        return {"success": False, "error": str(e)}
+
 
 @app.post("/api/anime/generation/{request_id}/cancel")
 async def cancel_generation(request_id: str, db: Session = Depends(get_db)):
     """Cancel generation by request ID"""
     return {"message": "Generation cancelled"}
 
+
 @app.get("/api/anime/projects/{project_id}/history")
 async def get_project_history(project_id: int, db: Session = Depends(get_db)):
     """Get project history"""
-    project = db.query(AnimeProject).filter(AnimeProject.id == project_id).first()
+    project = db.query(AnimeProject).filter(
+        AnimeProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    jobs = db.query(ProductionJob).filter(ProductionJob.project_id == project_id).all()
-    return {"history": [{"id": job.id, "type": job.job_type, "status": job.status, "created_at": job.created_at} for job in jobs]}
+    jobs = db.query(ProductionJob).filter(
+        ProductionJob.project_id == project_id).all()
+    return {
+        "history": [
+            {
+                "id": job.id,
+                "type": job.job_type,
+                "status": job.status,
+                "created_at": job.created_at,
+            }
+            for job in jobs
+        ]
+    }
+
 
 @app.post("/api/anime/projects/clear-stuck")
 async def clear_stuck_projects(db: Session = Depends(get_db)):
@@ -758,15 +1626,23 @@ async def clear_stuck_projects(db: Session = Depends(get_db)):
         # Find stuck projects (generating for more than 10 minutes)
         stuck_cutoff = datetime.utcnow() - timedelta(minutes=10)
 
-        stuck_projects = db.query(AnimeProject).filter(
-            AnimeProject.status == "generating",
-            AnimeProject.updated_at < stuck_cutoff
-        ).all()
+        stuck_projects = (
+            db.query(AnimeProject)
+            .filter(
+                AnimeProject.status == "generating",
+                AnimeProject.updated_at < stuck_cutoff,
+            )
+            .all()
+        )
 
-        stuck_jobs = db.query(ProductionJob).filter(
-            ProductionJob.status.in_(["processing", "submitted"]),
-            ProductionJob.created_at < stuck_cutoff
-        ).all()
+        stuck_jobs = (
+            db.query(ProductionJob)
+            .filter(
+                ProductionJob.status.in_(["processing", "submitted"]),
+                ProductionJob.created_at < stuck_cutoff,
+            )
+            .all()
+        )
 
         # Update stuck projects
         for project in stuck_projects:
@@ -782,12 +1658,15 @@ async def clear_stuck_projects(db: Session = Depends(get_db)):
         return {
             "message": f"Cleared {len(stuck_projects)} stuck projects and {len(stuck_jobs)} stuck jobs",
             "stuck_projects": len(stuck_projects),
-            "stuck_jobs": len(stuck_jobs)
+            "stuck_jobs": len(stuck_jobs),
         }
 
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Error clearing stuck projects: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error clearing stuck projects: {str(e)}"
+        )
+
 
 @app.get("/api/anime/media/video/{filename}")
 async def get_video_file(filename: str):
@@ -795,31 +1674,74 @@ async def get_video_file(filename: str):
     # This would serve actual video files in production
     raise HTTPException(status_code=404, detail="Video file not found")
 
+
 @app.get("/characters")
 async def get_characters():
     """Get available characters"""
     return {
         "characters": [
-            {"id": "warrior", "name": "Young Warrior", "description": "A brave young warrior with sword skills"},
-            {"id": "mage", "name": "Wise Mage", "description": "An experienced spellcaster with ancient knowledge"},
-            {"id": "ninja", "name": "Shadow Ninja", "description": "A stealthy assassin with martial arts expertise"},
-            {"id": "princess", "name": "Royal Princess", "description": "A noble princess with magical abilities"},
-            {"id": "robot", "name": "Battle Robot", "description": "A mechanical warrior from the future"}
+            {
+                "id": "warrior",
+                "name": "Young Warrior",
+                "description": "A brave young warrior with sword skills",
+            },
+            {
+                "id": "mage",
+                "name": "Wise Mage",
+                "description": "An experienced spellcaster with ancient knowledge",
+            },
+            {
+                "id": "ninja",
+                "name": "Shadow Ninja",
+                "description": "A stealthy assassin with martial arts expertise",
+            },
+            {
+                "id": "princess",
+                "name": "Royal Princess",
+                "description": "A noble princess with magical abilities",
+            },
+            {
+                "id": "robot",
+                "name": "Battle Robot",
+                "description": "A mechanical warrior from the future",
+            },
         ]
     }
+
 
 @app.get("/stories")
 async def get_stories():
     """Get available story templates"""
     return {
         "stories": [
-            {"id": "hero_journey", "title": "Hero's Journey", "description": "Classic adventure story arc"},
-            {"id": "rescue_mission", "title": "Rescue Mission", "description": "Save the captured ally"},
-            {"id": "tournament", "title": "Tournament Battle", "description": "Compete in the grand tournament"},
-            {"id": "mystery", "title": "Ancient Mystery", "description": "Uncover the hidden truth"},
-            {"id": "friendship", "title": "Power of Friendship", "description": "Bonds that overcome all obstacles"}
+            {
+                "id": "hero_journey",
+                "title": "Hero's Journey",
+                "description": "Classic adventure story arc",
+            },
+            {
+                "id": "rescue_mission",
+                "title": "Rescue Mission",
+                "description": "Save the captured ally",
+            },
+            {
+                "id": "tournament",
+                "title": "Tournament Battle",
+                "description": "Compete in the grand tournament",
+            },
+            {
+                "id": "mystery",
+                "title": "Ancient Mystery",
+                "description": "Uncover the hidden truth",
+            },
+            {
+                "id": "friendship",
+                "title": "Power of Friendship",
+                "description": "Bonds that overcome all obstacles",
+            },
         ]
     }
+
 
 @app.post("/echo/enhance-prompt")
 async def enhance_prompt_with_echo(request: dict):
@@ -835,23 +1757,27 @@ async def enhance_prompt_with_echo(request: dict):
         "enhancements": [
             "Added dramatic lighting suggestion",
             "Specified high quality anime style",
-            "Enhanced for detailed animation"
-        ]
+            "Enhanced for detailed animation",
+        ],
     }
 
+
 @app.post("/generate/integrated")
-async def generate_with_integrated_pipeline(request: AnimeGenerationRequest, db: Session = Depends(get_db)):
+async def generate_with_integrated_pipeline(
+    request: AnimeGenerationRequest, db: Session = Depends(get_db)
+):
     """Generate anime using the new integrated pipeline with quality controls"""
     if not pipeline:
-        raise HTTPException(status_code=503, detail="Integrated pipeline not available")
+        raise HTTPException(status_code=503,
+                            detail="Integrated pipeline not available")
 
     try:
         # Create production job record
         job = ProductionJob(
             job_type="integrated_generation",
             prompt=request.prompt,
-            parameters=request.json(),
-            status="processing"
+            parameters=request.model_dump_json(),
+            status="processing",
         )
         db.add(job)
         db.commit()
@@ -859,27 +1785,29 @@ async def generate_with_integrated_pipeline(request: AnimeGenerationRequest, db:
 
         # Prepare creative brief
         creative_brief = {
-            'project_name': f'Generation Job {job.id}',
-            'style': request.style,
-            'type': request.type,
-            'quality_requirements': 'high'
+            "project_name": f"Generation Job {job.id}",
+            "style": request.style,
+            "type": request.type,
+            "quality_requirements": "high",
         }
 
         # Prepare generation parameters
         generation_params = {
-            'character': request.character,
-            'scene_type': request.scene_type,
-            'duration': request.duration,
-            'style': request.style
+            "character": request.character,
+            "scene_type": request.scene_type,
+            "duration": request.duration,
+            "style": request.style,
         }
 
         # Use integrated pipeline
         result = await pipeline.test_complete_pipeline()
 
-        if result.get('test_result', {}).get('success', False):
+        if result.get("test_result", {}).get("success", False):
             # Update job status
             job.status = "completed"
-            job.quality_score = result.get('test_result', {}).get('quality_score', 0.85)
+            job.quality_score = result.get(
+                "test_result", {}).get(
+                "quality_score", 0.85)
             db.commit()
 
             return {
@@ -888,31 +1816,38 @@ async def generate_with_integrated_pipeline(request: AnimeGenerationRequest, db:
                 "message": "Generation completed with quality controls",
                 "quality_score": job.quality_score,
                 "pipeline_used": "integrated",
-                "components_tested": result.get('components_tested', []),
-                "result": result
+                "components_tested": result.get("components_tested", []),
+                "result": result,
             }
         else:
             # Update job as failed
             job.status = "failed"
             db.commit()
-            raise HTTPException(status_code=500, detail="Generation failed quality controls")
+            raise HTTPException(
+                status_code=500, detail="Generation failed quality controls"
+            )
 
     except Exception as e:
         # Mark job as failed
-        if 'job' in locals():
+        if "job" in locals():
             job.status = "failed"
             db.commit()
-        raise HTTPException(status_code=500, detail=f"Integrated generation failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Integrated generation failed: {str(e)}"
+        )
+
 
 @app.post("/generate/professional")
-async def generate_professional_anime(request: AnimeGenerationRequest, db: Session = Depends(get_db)):
+async def generate_professional_anime(
+    request: AnimeGenerationRequest, db: Session = Depends(get_db)
+):
     """Generate professional anime content"""
     # Create production job record
     job = ProductionJob(
         job_type="professional_generation",
         prompt=request.prompt,
-        parameters=request.json(),
-        status="processing"
+        parameters=request.model_dump_json(),
+        status="processing",
     )
     db.add(job)
     db.commit()
@@ -921,48 +1856,50 @@ async def generate_professional_anime(request: AnimeGenerationRequest, db: Sessi
     enhanced_prompt = request.prompt
     negative_prompt = "low quality, blurry, distorted, ugly, deformed"
 
-    if hasattr(request, 'character') and request.character:
+    if hasattr(request, "character") and request.character:
         # Load character system and get character prompt
         import sys
-        import os
-        sys.path.append('/opt/tower-anime-production')
+
+        sys.path.append("/opt/tower-anime-production")
         from character_system import get_character_prompt
 
         try:
             char_data = get_character_prompt(request.character)
-            if char_data and 'prompt' in char_data:
-                # Use character's full prompt instead of appending to request prompt
-                enhanced_prompt = char_data['prompt']
+            if char_data and "prompt" in char_data:
+                # Use character's full prompt instead of appending to request
+                # prompt
+                enhanced_prompt = char_data["prompt"]
                 if request.prompt and request.prompt.strip():
-                    enhanced_prompt = f"{char_data['prompt']}, {request.prompt}"
-            if char_data and 'negative_prompt' in char_data:
-                negative_prompt += ", " + char_data['negative_prompt']
+                    enhanced_prompt = f"{
+                        char_data['prompt']}, {
+                        request.prompt}"
+            if char_data and "negative_prompt" in char_data:
+                negative_prompt += ", " + char_data["negative_prompt"]
             print(f"Character enhancement successful for {request.character}")
             print(f"Enhanced prompt: {enhanced_prompt[:100]}...")
             print(f"Negative prompt: {negative_prompt}")
         except Exception as e:
             print(f"Character enhancement failed: {e}")
             import traceback
+
             traceback.print_exc()
 
     # Submit to ComfyUI (fixed workflow with character enhancement)
     import time
+
     timestamp = int(time.time())
     workflow = {
         "prompt": {
             "1": {
                 "inputs": {
                     "text": f"masterpiece, best quality, photorealistic, {enhanced_prompt}, cinematic lighting, detailed background, professional photography, 8k uhd, film grain, Canon EOS R3",
-                    "clip": ["4", 1]
+                    "clip": ["4", 1],
                 },
-                "class_type": "CLIPTextEncode"
+                "class_type": "CLIPTextEncode",
             },
             "2": {
-                "inputs": {
-                    "text": negative_prompt,
-                    "clip": ["4", 1]
-                },
-                "class_type": "CLIPTextEncode"
+                "inputs": {"text": negative_prompt, "clip": ["4", 1]},
+                "class_type": "CLIPTextEncode",
             },
             "3": {
                 "inputs": {
@@ -975,38 +1912,31 @@ async def generate_professional_anime(request: AnimeGenerationRequest, db: Sessi
                     "model": ["4", 0],
                     "positive": ["1", 0],
                     "negative": ["2", 0],
-                    "latent_image": ["5", 0]
+                    "latent_image": ["5", 0],
                 },
-                "class_type": "KSampler"
+                "class_type": "KSampler",
             },
             "4": {
                 "inputs": {
                     "ckpt_name": "juggernautXL_v9.safetensors"  # Better for photorealistic anime
                 },
-                "class_type": "CheckpointLoaderSimple"
+                "class_type": "CheckpointLoaderSimple",
             },
             "5": {
-                "inputs": {
-                    "width": 1024,
-                    "height": 1024,
-                    "batch_size": 1
-                },
-                "class_type": "EmptyLatentImage"
+                "inputs": {"width": 1024, "height": 1024, "batch_size": 1},
+                "class_type": "EmptyLatentImage",
             },
             "6": {
-                "inputs": {
-                    "samples": ["3", 0],
-                    "vae": ["4", 2]
-                },
-                "class_type": "VAEDecode"
+                "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
+                "class_type": "VAEDecode",
             },
             "7": {
                 "inputs": {
                     "filename_prefix": f"echo_anime_professional_{timestamp}",
-                    "images": ["6", 0]
+                    "images": ["6", 0],
                 },
-                "class_type": "SaveImage"
-            }
+                "class_type": "SaveImage",
+            },
         }
     }
 
@@ -1020,18 +1950,19 @@ async def generate_professional_anime(request: AnimeGenerationRequest, db: Sessi
             "job_id": job.id,
             "comfyui_job_id": job_id,
             "status": "processing",
-            "message": "Professional anime generation started"
+            "message": "Professional anime generation started",
         }
     except Exception as e:
         job.status = "failed"
         db.commit()
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/generate/personal")
 async def generate_personal_creative(
     request: AnimeGenerationRequest,
     personal: PersonalCreativeRequest = PersonalCreativeRequest(),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Generate personal/creative anime content with enlightenment features"""
     # Combine professional generation with personal context
@@ -1039,11 +1970,13 @@ async def generate_personal_creative(
     if personal.personal_context:
         enhanced_prompt += f", personal context: {personal.personal_context}"
 
+    import json
+
     job = ProductionJob(
         job_type="personal_generation",
         prompt=enhanced_prompt,
-        parameters={**request.dict(), **personal.dict()},
-        status="processing"
+        parameters=json.dumps({**request.dict(), **personal.dict()}),
+        status="processing",
     )
     db.add(job)
     db.commit()
@@ -1052,10 +1985,11 @@ async def generate_personal_creative(
         "job_id": job.id,
         "status": "processing",
         "message": "Personal creative generation started",
-        "enhancement": "Integrating personal context and mood analysis"
+        "enhancement": "Integrating personal context and mood analysis",
     }
 
-@app.get("/jobs/{job_id}")
+
+@app.get("/api/anime/jobs/{job_id}/status")
 async def get_job_status(job_id: int, db: Session = Depends(get_db)):
     """Get production job status"""
     job = db.query(ProductionJob).filter(ProductionJob.id == job_id).first()
@@ -1068,8 +2002,9 @@ async def get_job_status(job_id: int, db: Session = Depends(get_db)):
         "type": job.job_type,
         "output_path": job.output_path,
         "quality_score": job.quality_score,
-        "created_at": job.created_at
+        "created_at": job.created_at,
     }
+
 
 @app.get("/quality/assess/{job_id}")
 async def assess_quality(job_id: int, db: Session = Depends(get_db)):
@@ -1081,14 +2016,17 @@ async def assess_quality(job_id: int, db: Session = Depends(get_db)):
     # Use REAL quality assessment from integrated pipeline
     try:
         from comfyui_quality_integration import ComfyUIQualityIntegration
+
         quality_integration = ComfyUIQualityIntegration()
 
         # Find output files for this job
         if job.output_path and os.path.exists(job.output_path):
-            quality_result = await quality_integration.assess_video_quality(job.output_path)
-            quality_score = quality_result.get('quality_score', 0.0)
-            passes_standards = quality_result.get('passes_standards', False)
-            rejection_reasons = quality_result.get('rejection_reasons', [])
+            quality_result = await quality_integration.assess_video_quality(
+                job.output_path
+            )
+            quality_score = quality_result.get("quality_score", 0.0)
+            passes_standards = quality_result.get("passes_standards", False)
+            rejection_reasons = quality_result.get("rejection_reasons", [])
 
             job.quality_score = quality_score
             db.commit()
@@ -1099,10 +2037,12 @@ async def assess_quality(job_id: int, db: Session = Depends(get_db)):
                 "passes_standards": passes_standards,
                 "rejection_reasons": rejection_reasons,
                 "assessment": f"{'Passed' if passes_standards else 'Failed'} quality standards",
-                "detailed_metrics": quality_result
+                "detailed_metrics": quality_result,
             }
         else:
-            raise HTTPException(status_code=404, detail="Output file not found for quality assessment")
+            raise HTTPException(
+                status_code=404, detail="Output file not found for quality assessment"
+            )
 
     except Exception as e:
         logger.error(f"Real quality assessment failed: {e}")
@@ -1115,8 +2055,9 @@ async def assess_quality(job_id: int, db: Session = Depends(get_db)):
             "job_id": job_id,
             "quality_score": quality_score,
             "assessment": f"Quality assessment failed: {str(e)}",
-            "error": str(e)
+            "error": str(e),
         }
+
 
 @app.get("/personal/analysis")
 async def get_personal_analysis():
@@ -1125,21 +2066,23 @@ async def get_personal_analysis():
         "creative_insights": [
             "Your recent generations show preference for dynamic action scenes",
             "Mood-based generation shows 73% higher satisfaction when aligned with biometrics",
-            "Personal context integration increases creative output quality by 41%"
+            "Personal context integration increases creative output quality by 41%",
         ],
         "recommendations": [
             "Try experimenting with softer color palettes during evening sessions",
-            "Consider incorporating nature themes when stress levels are elevated"
+            "Consider incorporating nature themes when stress levels are elevated",
         ],
         "learning_progress": {
             "style_consistency": 0.78,
             "personal_alignment": 0.84,
-            "technical_quality": 0.91
-        }
+            "technical_quality": 0.91,
+        },
     }
+
 
 # Tables already exist in tower_consolidated database
 Base.metadata.create_all(bind=engine)
+
 
 # Static files and Git UI routes
 @app.get("/git", response_class=HTMLResponse)
@@ -1167,8 +2110,9 @@ async def git_control_interface():
                 </body>
             </html>
             """,
-            status_code=200
+            status_code=200,
         )
+
 
 # Git Control API Endpoints
 @app.post("/api/anime/git/commit")
@@ -1176,66 +2120,68 @@ async def commit_scene(commit_data: dict):
     """Commit current scene as new version"""
     try:
         # Import git branching functionality
-        sys.path.append('/opt/tower-anime-production')
+        sys.path.append("/opt/tower-anime-production")
         from git_branching import GitBranchingSystem
 
         git_system = GitBranchingSystem()
         commit_hash = git_system.commit_scene(
-            scene_data=commit_data.get('sceneData', {}),
-            message=commit_data.get('message', 'Update scene'),
-            branch=commit_data.get('branch', 'main')
+            scene_data=commit_data.get("sceneData", {}),
+            message=commit_data.get("message", "Update scene"),
+            branch=commit_data.get("branch", "main"),
         )
 
         return {
             "status": "success",
             "commitHash": commit_hash,
             "message": f"Scene committed to {commit_data.get('branch', 'main')}",
-            "estimatedCost": commit_data.get('estimatedCost', 0)
+            "estimatedCost": commit_data.get("estimatedCost", 0),
         }
     except Exception as e:
         logger.error(f"Commit failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/api/anime/git/branch")
 async def create_branch(branch_data: dict):
     """Create new creative branch"""
     try:
-        sys.path.append('/opt/tower-anime-production')
+        sys.path.append("/opt/tower-anime-production")
         from git_branching import GitBranchingSystem
 
         git_system = GitBranchingSystem()
         branch_hash = git_system.create_branch(
-            name=branch_data.get('name'),
-            description=branch_data.get('description', ''),
-            base_branch=branch_data.get('baseBranch', 'main')
+            name=branch_data.get("name"),
+            description=branch_data.get("description", ""),
+            base_branch=branch_data.get("baseBranch", "main"),
         )
 
         return {
             "status": "success",
-            "branch": branch_data.get('name'),
+            "branch": branch_data.get("name"),
             "hash": branch_hash,
-            "message": f"Branch '{branch_data.get('name')}' created"
+            "message": f"Branch '{branch_data.get('name')}' created",
         }
     except Exception as e:
         logger.error(f"Branch creation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.get("/api/anime/git/status")
 async def git_status():
     """Get current git status for project"""
     try:
-        sys.path.append('/opt/tower-anime-production')
+        sys.path.append("/opt/tower-anime-production")
         from git_branching import GitBranchingSystem
 
         git_system = GitBranchingSystem()
         status = git_system.get_status()
 
         return {
-            "currentBranch": status.get('current_branch', 'main'),
-            "hasChanges": status.get('has_changes', False),
-            "branches": status.get('branches', []),
-            "commits": status.get('recent_commits', []),
-            "lastCommit": status.get('last_commit', {})
+            "currentBranch": status.get("current_branch", "main"),
+            "hasChanges": status.get("has_changes", False),
+            "branches": status.get("branches", []),
+            "commits": status.get("recent_commits", []),
+            "lastCommit": status.get("last_commit", {}),
         }
     except Exception as e:
         logger.error(f"Git status failed: {e}")
@@ -1244,8 +2190,9 @@ async def git_status():
             "hasChanges": False,
             "branches": [{"name": "main", "description": "Main storyline"}],
             "commits": [],
-            "lastCommit": {}
+            "lastCommit": {},
         }
+
 
 @app.get("/api/anime/budget/daily")
 async def get_daily_budget():
@@ -1254,28 +2201,32 @@ async def get_daily_budget():
         "limit": 150.00,
         "used": 23.45,  # Would track actual usage
         "remaining": 126.55,
-        "autoApprovalThreshold": 5.00
+        "autoApprovalThreshold": 5.00,
     }
 
+
 # === GIT STORYLINE CONTROL ENDPOINTS ===
+
 
 class GitBranchRequest(BaseModel):
     project_id: int
     new_branch_name: str
-    from_branch: str = 'main'
-    storyline_goal: str = ''
-    author: str = 'director'
+    from_branch: str = "main"
+    storyline_goal: str = ""
+    author: str = "director"
+
 
 class StorylineMarkersRequest(BaseModel):
     project_id: int
     scenes: List[dict]
+
 
 @app.post("/api/anime/git/branches")
 async def create_git_branch(request: GitBranchRequest):
     """Create a new git branch with Echo Brain's storyline guidance"""
     try:
         # Add to sys.path for git_branching import
-        sys.path.append('/opt/tower-anime-production')
+        sys.path.append("/opt/tower-anime-production")
         from git_branching import echo_guided_branch_creation
 
         result = await echo_guided_branch_creation(
@@ -1283,7 +2234,7 @@ async def create_git_branch(request: GitBranchRequest):
             base_branch=request.from_branch,
             new_branch_name=request.new_branch_name,
             storyline_goal=request.storyline_goal,
-            author=request.author
+            author=request.author,
         )
 
         return {
@@ -1291,18 +2242,21 @@ async def create_git_branch(request: GitBranchRequest):
             "branch_name": request.new_branch_name,
             "echo_guidance": result.get("echo_guidance", {}),
             "created_at": result.get("created_at"),
-            "base_analysis": result.get("base_analysis", {})
+            "base_analysis": result.get("base_analysis", {}),
         }
 
     except Exception as e:
         logger.error(f"Git branch creation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Git branch creation failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Git branch creation failed: {str(e)}"
+        )
+
 
 @app.get("/api/anime/git/branches/{project_id}")
 async def get_project_branches(project_id: int):
     """Get all git branches for a project"""
     try:
-        sys.path.append('/opt/tower-anime-production')
+        sys.path.append("/opt/tower-anime-production")
         from git_branching import list_branches
 
         branches = list_branches(project_id)
@@ -1310,13 +2264,18 @@ async def get_project_branches(project_id: int):
 
     except Exception as e:
         logger.error(f"Get branches failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Get branches failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Get branches failed: {
+                str(e)}",
+        )
+
 
 @app.post("/api/anime/storyline/analyze/{project_id}")
-async def analyze_storyline(project_id: int, branch_name: str = 'main'):
+async def analyze_storyline(project_id: int, branch_name: str = "main"):
     """Get Echo Brain's analysis of storyline progression"""
     try:
-        sys.path.append('/opt/tower-anime-production')
+        sys.path.append("/opt/tower-anime-production")
         from git_branching import echo_analyze_storyline
 
         analysis = await echo_analyze_storyline(project_id, branch_name)
@@ -1324,53 +2283,70 @@ async def analyze_storyline(project_id: int, branch_name: str = 'main'):
 
     except Exception as e:
         logger.error(f"Storyline analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Storyline analysis failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Storyline analysis failed: {str(e)}"
+        )
+
 
 @app.post("/api/anime/storyline/markers")
 async def create_storyline_markers(request: StorylineMarkersRequest):
     """Create comprehensive editing markers for video production"""
     try:
-        sys.path.append('/opt/tower-anime-production')
+        sys.path.append("/opt/tower-anime-production")
         from echo_integration import EchoIntegration
 
         echo = EchoIntegration()
-        markers = await echo.create_storyline_markers(request.project_id, request.scenes)
+        markers = await echo.create_storyline_markers(
+            request.project_id, request.scenes
+        )
 
         return {
             "success": True,
             "markers": markers,
             "total_scenes": len(request.scenes),
-            "created_at": markers.get("created_at")
+            "created_at": markers.get("created_at"),
         }
 
     except Exception as e:
         logger.error(f"Storyline markers creation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Storyline markers failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Storyline markers failed: {str(e)}"
+        )
+
 
 @app.get("/api/anime/git/status/{project_id}")
 async def get_git_status(project_id: int):
     """Get comprehensive git status for a project including Echo analysis"""
     try:
-        sys.path.append('/opt/tower-anime-production')
-        from git_branching import list_branches, get_commit_history, echo_analyze_storyline
+        sys.path.append("/opt/tower-anime-production")
+        from git_branching import (
+            list_branches,
+            get_commit_history,
+            echo_analyze_storyline,
+        )
 
         # Get all branches
         branches = list_branches(project_id)
 
         # Get commit history for main branch
         try:
-            main_commits = get_commit_history(project_id, 'main')
-        except:
+            main_commits = get_commit_history(project_id, "main")
+        except BaseException:
             main_commits = []
 
         # Get latest Echo analysis (skip if no commits)
         if main_commits:
             try:
-                latest_analysis = await echo_analyze_storyline(project_id, 'main')
-            except:
-                latest_analysis = {"analysis": "No analysis available", "recommendations": []}
+                latest_analysis = await echo_analyze_storyline(project_id, "main")
+            except BaseException:
+                latest_analysis = {
+                    "analysis": "No analysis available",
+                    "recommendations": [],
+                }
         else:
-            latest_analysis = {"analysis": "No commits found", "recommendations": []}
+            latest_analysis = {
+                "analysis": "No commits found",
+                "recommendations": []}
 
         return {
             "project_id": project_id,
@@ -1378,12 +2354,17 @@ async def get_git_status(project_id: int):
             "main_branch_commits": len(main_commits),
             "latest_commits": main_commits[:5] if main_commits else [],
             "echo_analysis": latest_analysis,
-            "status_checked_at": datetime.now().isoformat()
+            "status_checked_at": datetime.now().isoformat(),
         }
 
     except Exception as e:
         logger.error(f"Git status check failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Git status failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Git status failed: {
+                str(e)}",
+        )
+
 
 # Model and Quality Selection Endpoints
 @app.get("/api/anime/models")
@@ -1402,54 +2383,59 @@ async def get_available_models():
             "description": "High quality anime model - 2GB, excellent detail",
             "quality": "ultra",
             "recommended": True,
-            "file_size": "2.1GB"
+            "file_size": "2.1GB",
         },
         "counterfeit_v3.safetensors": {
             "display_name": "Counterfeit V3",
             "description": "Versatile anime model - 4.2GB, balanced style",
             "quality": "high",
             "recommended": True,
-            "file_size": "4.2GB"
+            "file_size": "4.2GB",
         },
         "Counterfeit-V2.5.safetensors": {
             "display_name": "Counterfeit V2.5",
             "description": "Previous version - 4.2GB, stable generation",
             "quality": "high",
             "recommended": False,
-            "file_size": "4.2GB"
+            "file_size": "4.2GB",
         },
         "ProtoGen_X5.8.safetensors": {
             "display_name": "ProtoGen X5.8",
             "description": "Photorealistic model - 6.7GB, highly detailed",
             "quality": "ultra",
             "recommended": False,
-            "file_size": "6.7GB"
+            "file_size": "6.7GB",
         },
         "juggernautXL_v9.safetensors": {
             "display_name": "Juggernaut XL v9",
             "description": "SDXL model - 6.9GB, high resolution capable",
             "quality": "ultra",
             "recommended": False,
-            "file_size": "6.9GB"
-        }
+            "file_size": "6.9GB",
+        },
     }
 
     # Scan actual files
     try:
-        for file_path in glob.glob(os.path.join(checkpoints_dir, "*.safetensors")):
+        for file_path in glob.glob(os.path.join(
+                checkpoints_dir, "*.safetensors")):
             filename = os.path.basename(file_path)
-            if filename in model_info and os.path.getsize(file_path) > 1000000:  # Skip empty files
+            if (
+                filename in model_info and os.path.getsize(file_path) > 1000000
+            ):  # Skip empty files
                 info = model_info[filename]
-                models.append({
-                    "name": filename,
-                    "display_name": info["display_name"],
-                    "description": info["description"],
-                    "type": "checkpoint",
-                    "quality": info["quality"],
-                    "recommended": info["recommended"],
-                    "file_size": info["file_size"],
-                    "path": file_path
-                })
+                models.append(
+                    {
+                        "name": filename,
+                        "display_name": info["display_name"],
+                        "description": info["description"],
+                        "type": "checkpoint",
+                        "quality": info["quality"],
+                        "recommended": info["recommended"],
+                        "file_size": info["file_size"],
+                        "path": file_path,
+                    }
+                )
     except Exception as e:
         logger.error(f"Error scanning models: {e}")
         # Fallback to hardcoded list if filesystem scan fails
@@ -1459,11 +2445,12 @@ async def get_available_models():
                 "display_name": "AbyssOrangeMix 3 A1B",
                 "description": "Fallback: High quality anime model",
                 "quality": "ultra",
-                "recommended": True
+                "recommended": True,
             }
         ]
 
     return models
+
 
 @app.get("/api/anime/quality-presets")
 async def get_quality_presets():
@@ -1483,10 +2470,10 @@ async def get_quality_presets():
                 "batch_size": 12,  # Reduced for higher quality per frame
                 "sampler": "dpmpp_2m",
                 "scheduler": "karras",
-                "denoise": 1.0
+                "denoise": 1.0,
             },
             "recommended": False,
-            "quality_focus": "maximum_detail"
+            "quality_focus": "maximum_detail",
         },
         {
             "name": "current_workflow",
@@ -1500,10 +2487,10 @@ async def get_quality_presets():
                 "batch_size": 24,
                 "sampler": "dpmpp_2m",
                 "scheduler": "karras",
-                "denoise": 1.0
+                "denoise": 1.0,
             },
             "recommended": True,
-            "quality_focus": "balanced"
+            "quality_focus": "balanced",
         },
         {
             "name": "fast_preview",
@@ -1517,13 +2504,14 @@ async def get_quality_presets():
                 "batch_size": 32,
                 "sampler": "dpmpp_2m",
                 "scheduler": "normal",
-                "denoise": 1.0
+                "denoise": 1.0,
             },
             "recommended": False,
-            "quality_focus": "speed"
-        }
+            "quality_focus": "speed",
+        },
     ]
     return presets
+
 
 @app.post("/api/anime/config")
 async def update_configuration(config: dict):
@@ -1535,16 +2523,19 @@ async def update_configuration(config: dict):
 
     try:
         # Update the actual workflow file
-        workflow_path = "/opt/tower-anime-production/workflows/comfyui/anime_30sec_working_workflow.json"
+        workflow_path = (
+            "/opt/tower-anime-production/workflows/comfyui/anime_30sec_standard.json"
+        )
 
         if os.path.exists(workflow_path):
             # Backup original
-            backup_path = f"{workflow_path}.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            backup_path = f"{workflow_path}.backup_{
+                datetime.now().strftime('%Y%m%d_%H%M%S')}"
             shutil.copy2(workflow_path, backup_path)
             result["backup_created"] = backup_path
 
             # Load current workflow
-            with open(workflow_path, 'r') as f:
+            with open(workflow_path, "r") as f:
                 workflow = json.load(f)
 
             # Update model if specified
@@ -1572,42 +2563,53 @@ async def update_configuration(config: dict):
                         workflow["3"]["inputs"]["steps"] = preset_settings["steps"]
                         workflow["3"]["inputs"]["cfg"] = preset_settings["cfg"]
                         if "sampler" in preset_settings:
-                            workflow["3"]["inputs"]["sampler_name"] = preset_settings["sampler"]
+                            workflow["3"]["inputs"]["sampler_name"] = preset_settings[
+                                "sampler"
+                            ]
                         if "scheduler" in preset_settings:
-                            workflow["3"]["inputs"]["scheduler"] = preset_settings["scheduler"]
+                            workflow["3"]["inputs"]["scheduler"] = preset_settings[
+                                "scheduler"
+                            ]
                         result["sampling_updated"] = preset_settings
 
                     # Update latent image size (node 5)
                     if "5" in workflow and "inputs" in workflow["5"]:
                         workflow["5"]["inputs"]["width"] = preset_settings["width"]
                         workflow["5"]["inputs"]["height"] = preset_settings["height"]
-                        workflow["5"]["inputs"]["batch_size"] = preset_settings["batch_size"]
-                        result["resolution_updated"] = f"{preset_settings['width']}x{preset_settings['height']}"
+                        workflow["5"]["inputs"]["batch_size"] = preset_settings[
+                            "batch_size"
+                        ]
+                        result["resolution_updated"] = (
+                            f"{
+                                preset_settings['width']}x{
+                                preset_settings['height']}"
+                        )
 
                     result["quality_changed"] = preset_name
-                    result["files_modified"].append("workflow quality settings")
+                    result["files_modified"].append(
+                        "workflow quality settings")
 
             # Fix VAE issue if requested
             if "fix_vae" in config:
                 # Add dedicated VAE loader node
                 workflow["13"] = {
-                    "inputs": {
-                        "vae_name": "vae-ft-mse-840000-ema-pruned.safetensors"
-                    },
+                    "inputs": {"vae_name": "vae-ft-mse-840000-ema-pruned.safetensors"},
                     "class_type": "VAELoader",
-                    "_meta": {
-                        "title": "Load VAE"
-                    }
+                    "_meta": {"title": "Load VAE"},
                 }
 
-                # Update VAE Decode to use dedicated VAE instead of checkpoint VAE
+                # Update VAE Decode to use dedicated VAE instead of checkpoint
+                # VAE
                 if "6" in workflow and "inputs" in workflow["6"]:
-                    workflow["6"]["inputs"]["vae"] = ["13", 0]  # Use dedicated VAE
-                    result["vae_fixed"] = "Using dedicated VAE instead of checkpoint VAE"
+                    workflow["6"]["inputs"]["vae"] = [
+                        "13", 0]  # Use dedicated VAE
+                    result["vae_fixed"] = (
+                        "Using dedicated VAE instead of checkpoint VAE"
+                    )
                     result["files_modified"].append("VAE configuration")
 
             # Save updated workflow
-            with open(workflow_path, 'w') as f:
+            with open(workflow_path, "w") as f:
                 json.dump(workflow, f, indent=2)
 
             result["workflow_updated"] = workflow_path
@@ -1619,9 +2621,15 @@ async def update_configuration(config: dict):
 
     return result
 
+
 # Mount static files
-app.mount("/static", StaticFiles(directory="/opt/tower-anime-production/static"), name="static")
+app.mount(
+    "/static",
+    StaticFiles(directory="/opt/tower-anime-production/static"),
+    name="static",
+)
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8328)  # Tower Anime Production port

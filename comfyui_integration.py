@@ -21,7 +21,7 @@ class ComfyUIIntegration:
 
     async def load_workflow_template(self, duration: int) -> Dict:
         """Load ComfyUI workflow template based on duration"""
-        workflow_file = f"/opt/tower-anime-production/workflows/comfyui/anime_30sec_working_workflow.json"
+        workflow_file = f"/opt/tower-anime-production/workflows/comfyui/anime_30sec_standard.json"
 
         try:
             with open(workflow_file, 'r') as f:

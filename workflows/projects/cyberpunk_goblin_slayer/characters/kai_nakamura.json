@@ -1,0 +1,40 @@
+{
+  "name": "Kai Nakamura",
+  "gender": "male",
+  "age": 25,
+  "character_type": "protagonist",
+  "appearance": {
+    "hair": "dark black hair with electric neon blue streaks",
+    "eyes": "left eye bright blue natural human eye, right eye cyan cybernetic eye with pink magenta technological glow",
+    "build": "athletic build, sharp angular face",
+    "style": "black tactical military vest with glowing blue circuit patterns",
+    "distinctive_features": "cybernetic circuit patterns on right side of face, mechanical joints visible at jawline, detailed facial features"
+  },
+  "personality": {
+    "core_traits": ["determined", "vengeful", "morally conflicted", "tactical"],
+    "motivations": "seeks revenge for family killed by cyber-goblins",
+    "fears": "becoming as monstrous as the enemies he fights",
+    "speech_pattern": "direct, military-influenced, occasional dark humor"
+  },
+  "background": {
+    "occupation": "goblin slayer and cybernetic warrior",
+    "origin": "Neo-Tokyo, survivor of goblin attack",
+    "family": "family murdered by cyber-goblins",
+    "skills": ["combat tactics", "cybernetic warfare", "goblin hunting", "military strategy"]
+  },
+  "generation_prompts": {
+    "visual_description": "young man, dark black hair with electric neon blue streaks, left eye bright blue natural human eye, right eye cyan cybernetic eye with pink magenta technological glow, sharp angular face, cybernetic circuit patterns on right side of face, mechanical joints visible at jawline, black tactical military vest with glowing blue circuit patterns, detailed facial features, professional lighting",
+    "style_tags": ["photorealistic anime", "hyperrealistic anime", "cyberpunk aesthetic", "futuristic neon lighting", "high detail", "photorealistic rendering", "professional lighting"],
+    "negative_prompts": ["female", "feminine features", "cartoon", "chibi", "simple anime", "flat colors", "2D anime style", "manga style", "teenage", "child"],
+    "comfyui_workflow": "photorealistic_anime_character_v2",
+    "reference_image": "/opt/tower-anime-production/frames/goblin_slayer_cyberpunk/kai_nakamura_canonical_reference.png"
+  },
+  "project_context": {
+    "series": "Cyberpunk Goblin Slayer: Neon Shadows",
+    "role": "main protagonist",
+    "relationships": {
+      "Hiroshi Yamamoto": "mentor and tech specialist"
+    },
+    "story_arc": "revenge quest against cyber-goblins, internal battle between justice and vengeance"
+  }
+}
