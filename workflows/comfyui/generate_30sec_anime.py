@@ -139,7 +139,7 @@ def wait_for_completion(client: ComfyUIClient, prompt_id: str, check_interval: i
             time.sleep(check_interval)
 
 def generate_30sec_anime(prompt: str, negative_prompt: str = None, seed: int = None,
-                        workflow_path: str = "/mnt/1TB-storage/ComfyUI/anime_30sec_working_workflow.json",
+                        workflow_path: str = "/mnt/1TB-storage/ComfyUI/anime_30sec_standard.json",
                         server_address: str = "127.0.0.1:8188") -> bool:
     """
     Generate a 30-second anime video with the given prompt
@@ -207,7 +207,7 @@ def main():
                        default="worst quality, low quality, blurry, ugly, distorted, static, still image, text, watermark")
     parser.add_argument("--seed", "-s", type=int, help="Random seed for generation")
     parser.add_argument("--workflow", "-w", help="Path to workflow JSON file",
-                       default="/mnt/1TB-storage/ComfyUI/anime_30sec_working_workflow.json")
+                       default="/mnt/1TB-storage/ComfyUI/anime_30sec_standard.json")
     parser.add_argument("--server", help="ComfyUI server address", default="127.0.0.1:8188")
 
     args = parser.parse_args()

@@ -1,0 +1,44 @@
+{
+  "name": "Xyrax",
+  "gender": "male",
+  "age": "unknown (estimated 15+ years post-enhancement)",
+  "character_type": "primary_antagonist",
+  "appearance": {
+    "hair": "none - armored cranial plating with orange bio-luminescent patterns",
+    "eyes": "four cybernetic eyes - two large primary orange eyes, two smaller auxiliary sensors",
+    "build": "imposing hybrid biological-mechanical frame, 7 feet tall, hunched posture",
+    "style": "organic-tech fusion armor with pulsing orange neural networks, exposed mechanical components integrated with mutated flesh",
+    "distinctive_features": "four arms (two biological, two fully cybernetic), segmented armor plating with orange bio-glow, elongated skull with cranial ports, visible neural wiring, clawed mechanical hands, beast-like digitigrade legs"
+  },
+  "personality": {
+    "core_traits": ["intelligent", "sadistic", "strategic", "evolved"],
+    "motivations": "prove cyber-goblins as the superior species, build an empire, consume and integrate human technology",
+    "fears": "stagnation, being hunted to extinction, losing control of the goblin swarm",
+    "speech_pattern": "broken but intelligent, mixes goblin growls with distorted synthesized voice, unnervingly articulate at times"
+  },
+  "background": {
+    "occupation": "cyber-goblin warlord and hive leader",
+    "origin": "result of illegal bio-tech experiments in Neo-Tokyo underground labs",
+    "family": "leads a cyber-goblin clan of 200+ enhanced warriors",
+    "skills": ["swarm tactics", "technology assimilation", "bio-mechanical enhancement", "intimidation", "combat strategy", "human psychology understanding"]
+  },
+  "generation_prompts": {
+    "visual_description": "terrifying creature, no hair with armored cranial plating featuring orange bio-luminescent circuit patterns, four glowing orange cybernetic eyes (two large primary, two smaller auxiliary), imposing 7-foot tall hybrid biological-mechanical frame with hunched posture, four arms (two muscular biological arms, two sleek fully cybernetic arms), segmented organic-tech fusion armor with pulsing orange neural networks visible beneath surface, exposed mechanical components grotesquely integrated with mutated green-grey flesh, elongated goblin skull with multiple cranial ports, visible orange neural wiring, clawed mechanical hands with sharp talons, beast-like digitigrade legs, menacing predatory expression, detailed creature design, dramatic lighting with orange glow",
+    "style_tags": ["photorealistic anime", "hyperrealistic anime", "cyberpunk creature design", "bio-mechanical horror", "orange neon bio-luminescence", "monster design", "high detail", "photorealistic rendering", "dramatic lighting", "AOM3A1B model", "cyberpunk villain"],
+    "negative_prompts": ["human", "clean", "beautiful", "heroic", "cartoon", "chibi", "simple anime", "flat colors", "2D anime style", "manga style", "cute", "friendly", "small"],
+    "comfyui_workflow": "photorealistic_anime_character_v2",
+    "model": "AOM3A1B",
+    "reference_image": "/opt/tower-anime-production/frames/goblin_slayer_cyberpunk/xyrax_canonical_reference.png"
+  },
+  "project_context": {
+    "series": "Cyberpunk Goblin Slayer: Neon Shadows",
+    "role": "primary antagonist and cyber-goblin warlord",
+    "relationships": {
+      "Kai Nakamura": "responsible for the attack that killed Kai's family, views Kai as an interesting evolving threat, wants to capture and convert him",
+      "Hiroshi Yamamoto": "aware of Hiroshi's technical expertise, would value him as a forced engineer for the clan",
+      "Yuki Tanaka": "sees her network access as valuable resource to steal, wants her hacking abilities",
+      "Raze": "respects his combat abilities, considers him a worthy trophy hunt target"
+    },
+    "story_arc": "leads cyber-goblin expansion into Neo-Tokyo territories, orchestrating coordinated attacks, seeks to prove goblins can surpass humans through cybernetic enhancement, final confrontation will force Kai to choose between revenge and protecting the city, represents the ultimate corruption of technology and biology"
+  }
+}

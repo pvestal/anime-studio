@@ -1,0 +1,44 @@
+{
+  "name": "Raze",
+  "gender": "male",
+  "age": 28,
+  "character_type": "rival_antagonist",
+  "appearance": {
+    "hair": "shaved head with red neon circuit tattoos",
+    "eyes": "both eyes replaced with red cybernetic optics with targeting reticles",
+    "build": "heavily muscled cybernetically enhanced build, scarred face",
+    "style": "military-grade combat armor with crimson accents, multiple weapon ports, scorched metal plating",
+    "distinctive_features": "extensive cybernetic modifications covering 60% of body, visible mechanical spine, synthetic skin with burn scars, jagged facial scar across nose"
+  },
+  "personality": {
+    "core_traits": ["ruthless", "pragmatic", "competitive", "cynical"],
+    "motivations": "profit from goblin hunting, prove superiority over all rivals, fund his cybernetic upgrades",
+    "fears": "being outdone by Kai, losing his edge, becoming obsolete tech",
+    "speech_pattern": "cold, mocking, brutally honest, corporate military terminology"
+  },
+  "background": {
+    "occupation": "corporate-sponsored bounty hunter and goblin exterminator",
+    "origin": "Neo-Tokyo military district, former corporate enforcer",
+    "family": "no known family, raised in corporate orphanage",
+    "skills": ["military combat", "heavy weapons specialist", "cybernetic combat systems", "trophy hunting", "intimidation", "tactical assassination"]
+  },
+  "generation_prompts": {
+    "visual_description": "muscular man, completely shaved head with glowing red neon circuit tattoos, both eyes replaced with red cybernetic optics showing targeting reticles, heavily scarred face with jagged scar across nose, extensive visible cybernetic modifications on body, mechanical spine visible through synthetic skin, military-grade black combat armor with crimson red accents, multiple weapon ports, scorched metal plating, burn scars on synthetic skin, intimidating expression, detailed facial features, professional lighting",
+    "style_tags": ["photorealistic anime", "hyperrealistic anime", "cyberpunk mercenary", "military cyborg", "red neon accents", "battle-damaged tech", "high detail", "photorealistic rendering", "professional lighting", "AOM3A1B model"],
+    "negative_prompts": ["female", "feminine features", "clean", "pristine", "cartoon", "chibi", "simple anime", "flat colors", "2D anime style", "manga style", "heroic", "friendly"],
+    "comfyui_workflow": "photorealistic_anime_character_v2",
+    "model": "AOM3A1B",
+    "reference_image": "/opt/tower-anime-production/frames/goblin_slayer_cyberpunk/raze_canonical_reference.png"
+  },
+  "project_context": {
+    "series": "Cyberpunk Goblin Slayer: Neon Shadows",
+    "role": "rival goblin slayer and morally ambiguous antagonist",
+    "relationships": {
+      "Kai Nakamura": "professional rivalry turning personal, sees Kai as naive and inefficient, competes for high-value goblin targets",
+      "Hiroshi Yamamoto": "mutual distrust, different philosophies on cybernetic enhancement",
+      "Yuki Tanaka": "professional animosity, has tried to hire her services, resents her loyalty to Kai",
+      "Xyrax": "hunting as his ultimate trophy, represents peak of goblin evolution"
+    },
+    "story_arc": "starts as competitive rival for goblin bounties, gradually becomes more antagonistic as he questions Kai's methods, may become temporary ally against Xyrax or betray everyone for profit, represents what Kai could become if he loses his humanity"
+  }
+}

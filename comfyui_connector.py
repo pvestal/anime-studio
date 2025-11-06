@@ -151,7 +151,7 @@ class WorkflowManager:
         if cache_key in self.workflow_cache:
             return self.workflow_cache[cache_key].copy()
 
-        workflow_file = Path(self.config.workflow_dir) / "anime_30sec_working_workflow.json"
+        workflow_file = Path(self.config.workflow_dir) / "anime_30sec_standard.json"
 
         try:
             if not workflow_file.exists():

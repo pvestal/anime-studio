@@ -1,0 +1,211 @@
+{
+  "project_name": "Tokyo Debt Desire",
+  "genre": "harem comedy, ecchi, slice of life drama",
+  "premise": "A broke perverted man struggling with yakuza debt must navigate living with three curvy women competing for his affection while taking on increasingly absurd odd jobs to survive in modern Tokyo",
+  "visual_style": {
+    "art_style": "photorealistic anime",
+    "aesthetic": "hyperrealistic character designs with anime influence",
+    "color_palette": {
+      "primary": [
+        "warm apartment lighting",
+        "urban Tokyo grays",
+        "warm skin tones"
+      ],
+      "secondary": [
+        "contrast between poverty (muted tones) and luxury (saturated colors)",
+        "financial stress blues",
+        "romantic warm pinks"
+      ],
+      "environmental": [
+        "Tokyo cityscape neons at night",
+        "cramped apartment warm yellows",
+        "debt collector shadows"
+      ]
+    },
+    "cinematography": {
+      "shot_types": [
+        "intimate close-ups for comedy",
+        "wide shots showing cramped apartment",
+        "over-shoulder for tension"
+      ],
+      "camera_angles": [
+        "eye-level for relatability",
+        "low angles for intimidation (yakuza)",
+        "dutch angles for chaos"
+      ],
+      "visual_metaphors": [
+        "empty wallet imagery",
+        "ringing phone dread",
+        "calendar countdowns",
+        "decreasing bank statements"
+      ]
+    },
+    "comfyui_settings": {
+      "model": "juggernautXL_v9.safetensors",
+      "resolution": "1024x1024",
+      "steps": 28,
+      "cfg": 7.5,
+      "sampler": "dpmpp_2m",
+      "scheduler": "karras",
+      "animatediff": {
+        "context_length": 16,
+        "context_overlap": 8,
+        "fps": 24,
+        "frame_count": 120
+      }
+    }
+  },
+  "world_setting": {
+    "location": {
+      "primary": "Small two-bedroom apartment in working-class Tokyo district",
+      "secondary": [
+        "Tokyo streets and alleyways",
+        "cheap restaurants",
+        "pachinko parlors",
+        "convenience stores",
+        "yakuza fronts"
+      ],
+      "atmosphere": "cramped urban living, financial stress contrasted with moments of absurd comedy"
+    },
+    "time_period": "modern day (2025)",
+    "socioeconomic": "working poor, debt culture, yakuza underground economy",
+    "cultural_elements": [
+      "Japanese debt shame",
+      "yakuza loan shark operations",
+      "odd job culture",
+      "harem anime tropes subverted by poverty"
+    ]
+  },
+  "narrative_guidelines": {
+    "tone": {
+      "primary": "comedic with sexual tension",
+      "secondary": "underlying financial desperation and anxiety",
+      "balance": "70% comedy, 20% ecchi fan service, 10% dramatic tension"
+    },
+    "themes": [
+      "survival and desperation",
+      "debt and financial anxiety",
+      "sexual comedy and harem dynamics",
+      "relationship competition",
+      "male wish fulfillment undermined by poverty",
+      "absurd jobs as escape from reality"
+    ],
+    "narrative_structure": {
+      "episode_format": "episodic with serialized debt countdown",
+      "story_beats": [
+        "debt crisis setup",
+        "absurd job opportunity",
+        "roommate competition escalates",
+        "comedic failure",
+        "small progress or setback",
+        "cliffhanger"
+      ],
+      "pacing": "fast-paced comedy with moments of introspection"
+    },
+    "story_arcs": [
+      {
+        "arc_name": "The Yakuza Debt",
+        "description": "Takeshi owes 5 million yen, must pay monthly installments or face consequences",
+        "episodes": "ongoing serialized threat"
+      },
+      {
+        "arc_name": "Roommate Competition",
+        "description": "Yuki, Mei, and Rina escalate their pursuit of Takeshi while he tries to exploit the situation",
+        "episodes": "builds throughout series"
+      },
+      {
+        "arc_name": "Odd Jobs Gone Wrong",
+        "description": "Each episode features increasingly absurd jobs that complicate Takeshi's life",
+        "episodes": "episodic format"
+      },
+      {
+        "arc_name": "Perverted Opportunities",
+        "description": "Takeshi's attempts to exploit living with attractive women backfire comedically",
+        "episodes": "recurring gag structure"
+      }
+    ]
+  },
+  "characters_summary": {
+    "total_count": 4,
+    "protagonist": {
+      "name": "Takeshi Sato",
+      "role": "broke perverted protagonist",
+      "archetype": "desperate loser with hidden heart of gold"
+    },
+    "supporting_cast": [
+      {
+        "name": "Yuki Tanaka",
+        "role": "aggressive jealous pursuer",
+        "archetype": "tsundere with violent tendencies"
+      },
+      {
+        "name": "Mei Kobayashi",
+        "role": "gentle seductress",
+        "archetype": "nurturing temptress"
+      },
+      {
+        "name": "Rina Suzuki",
+        "role": "playful teaser",
+        "archetype": "mischievous flirt"
+      }
+    ],
+    "antagonists": [
+      {
+        "name": "Yakuza Loan Sharks",
+        "role": "debt collectors",
+        "threat_level": "serious underlying menace"
+      }
+    ]
+  },
+  "visual_direction": {
+    "character_design": "photorealistic anime style, detailed facial features, realistic body proportions with anime eyes",
+    "environment_design": "realistic Tokyo locations with anime lighting and composition",
+    "fan_service_guidelines": {
+      "clothing": "revealing but not explicit, tight-fitting outfits, strategic camera angles",
+      "situations": "comedic accidental exposure, bath scenes, wardrobe malfunctions",
+      "boundaries": "suggestive but not pornographic, comedy-focused ecchi"
+    },
+    "comedy_visual_language": {
+      "exaggeration": "shocked expressions, sweat drops, speed lines",
+      "visual_gags": "nosebleeds, steam from embarrassment, hearts and flowers",
+      "slapstick": "physical comedy reactions, getting hit by objects"
+    }
+  },
+  "content_rating": {
+    "target_audience": "mature (18+)",
+    "content_warnings": [
+      "sexual comedy",
+      "partial nudity",
+      "debt-related anxiety",
+      "slapstick violence"
+    ],
+    "rating": "TV-MA / 17+"
+  },
+  "production_notes": {
+    "episode_length": "5 seconds per scene (120 frames @ 24fps)",
+    "series_format": "episodic with serialized elements",
+    "target_platform": "Jellyfin AI_Generated library",
+    "technical_requirements": {
+      "gpu": "NVIDIA RTX 3060 (12GB VRAM)",
+      "generation_time": "8-9 minutes per 5-second scene",
+      "output_location": "/mnt/1TB-storage/ComfyUI/output/",
+      "jellyfin_library": "/mnt/10TB2/Anime/AI_Generated/Tokyo_Debt_Desire/"
+    }
+  },
+  "reference_materials": {
+    "influences": [
+      "Rent-A-Girlfriend (financial struggle)",
+      "Love Hina (harem comedy)",
+      "Golden Boy (perverted protagonist)",
+      "Hinamatsuri (absurd odd jobs)"
+    ],
+    "visual_references": [
+      "photorealistic anime rendering",
+      "Tokyo apartment photography",
+      "harem comedy framing and composition"
+    ]
+  },
+  "version": "1.0",
+  "created": "2025-11-04",
+  "last_updated": "2025-11-04"
+}

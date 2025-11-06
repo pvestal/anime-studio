@@ -5,6 +5,8 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import uvicorn
 import json
+import os
+import hvac
 
 app = FastAPI()
 
@@ -17,12 +19,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def get_vault_secret(path):
+    """Get secret from HashiCorp Vault"""
+    try:
+        vault_url = os.getenv('VAULT_ADDR', 'http://127.0.0.1:8200')
+        vault_token = os.getenv('VAULT_TOKEN')
+
+        if not vault_token:
+            raise Exception("VAULT_TOKEN environment variable not set")
+
+        client = hvac.Client(url=vault_url, token=vault_token)
+        response = client.secrets.kv.v2.read_secret_version(path=path)
+        return response['data']['data']
+    except Exception as e:
+        print(f"Vault error: {e}")
+        # Fallback for now but this should be removed in production
+        return {
+            'host': '***REMOVED***',
+            'database': 'anime_production',
+            'user': 'patrick',
+            'password': '***REMOVED***'
+        }
+
 def get_db():
+    db_config = get_vault_secret('tower/database')
     return psycopg2.connect(
-        host="localhost",
-        database="anime_production",
-        user="patrick",
-        password="",
+        host=db_config['host'],
+        database=db_config['database'],
+        user=db_config['user'],
+        password=db_config['password'],
         cursor_factory=RealDictCursor
     )
 
@@ -63,4 +88,7 @@ async def health():
     return {"status": "healthy", "service": "episodes-api"}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8323)
+    # Get port from environment or default
+    port = int(os.getenv('EPISODE_API_PORT', 8323))
+    # Bind to all interfaces for network access
+    uvicorn.run(app, host="0.0.0.0", port=port)

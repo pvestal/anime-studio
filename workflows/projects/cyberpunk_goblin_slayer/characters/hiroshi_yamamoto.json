@@ -1,0 +1,39 @@
+{
+  "name": "Hiroshi Yamamoto",
+  "gender": "male",
+  "age": 45,
+  "character_type": "mentor",
+  "appearance": {
+    "hair": "graying black hair with cybernetic implants",
+    "eyes": "brown eyes with data-stream HUD overlay",
+    "build": "stocky build, weathered face",
+    "style": "worn tech jacket with multiple data ports",
+    "distinctive_features": "neural interface at temple, robotic left arm, tech scars"
+  },
+  "personality": {
+    "core_traits": ["wise", "protective", "experienced", "cautious"],
+    "motivations": "guide Kai away from his path of vengeance",
+    "fears": "losing another student to the cybernetic corruption",
+    "speech_pattern": "measured, technical, paternal"
+  },
+  "background": {
+    "occupation": "former corporate tech specialist turned underground mentor",
+    "origin": "Neo-Tokyo corporate district, exiled after whistleblowing",
+    "family": "lost family to corporate warfare",
+    "skills": ["cybernetic engineering", "data analysis", "tactical planning", "tech modification"]
+  },
+  "generation_prompts": {
+    "visual_description": "middle-aged man, graying black hair with cybernetic implants at temples, brown eyes with subtle HUD data overlay, stocky weathered build, worn dark tech jacket with multiple data ports, robotic left arm with exposed tech, neural interface cables at temple, tech scars on face, wise expression, professional lighting",
+    "style_tags": ["photorealistic anime", "hyperrealistic anime", "cyberpunk mentor", "weathered tech specialist", "high detail", "photorealistic rendering", "professional lighting"],
+    "negative_prompts": ["young", "clean", "pristine", "cartoon", "chibi", "simple anime", "flat colors", "2D anime style", "manga style"],
+    "comfyui_workflow": "photorealistic_anime_character_v2"
+  },
+  "project_context": {
+    "series": "Cyberpunk Goblin Slayer: Neon Shadows",
+    "role": "mentor and tech specialist",
+    "relationships": {
+      "Kai Nakamura": "student and protégé - trying to guide away from vengeance"
+    },
+    "story_arc": "provides technical support while trying to prevent Kai from becoming consumed by revenge"
+  }
+}
