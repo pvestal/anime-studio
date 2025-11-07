@@ -63,8 +63,8 @@ def generate_2sec_animation():
         "5": {
             "inputs": {
                 "batch_size": 24,  # 1 second at 24fps
-                "width": 512,
-                "height": 512
+                "width": 1024,
+                "height": 1024
             },
             "class_type": "EmptyLatentImage",
             "_meta": {"title": "Empty Latent"}
