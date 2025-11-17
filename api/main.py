@@ -91,6 +91,7 @@ class ProductionJob(Base):
     status = Column(String, default="pending")
     output_path = Column(String)
     quality_score = Column(Float)
+    comfyui_job_id = Column(String, index=True)  # Store ComfyUI prompt_id for proper tracking
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -497,6 +498,32 @@ async def generate_with_fixed_workflow(
         )
 
 
+async def check_comfyui_output(comfyui_job_id: str) -> Optional[str]:
+    """Check if ComfyUI job has completed and return output file path"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{COMFYUI_URL}/history/{comfyui_job_id}") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    job_data = data.get(comfyui_job_id)
+                    if job_data and 'outputs' in job_data:
+                        # Extract output file path
+                        outputs = job_data.get('outputs', {})
+                        for node_id, output in outputs.items():
+                            if 'videos' in output and output['videos']:
+                                filename = output['videos'][0]['filename']
+                                full_path = f"/mnt/1TB-storage/ComfyUI/output/{filename}"
+                                if os.path.exists(full_path):
+                                    return full_path
+                            elif 'images' in output and output['images']:
+                                filename = output['images'][0]['filename']
+                                full_path = f"/mnt/1TB-storage/ComfyUI/output/{filename}"
+                                if os.path.exists(full_path):
+                                    return full_path
+    except Exception as e:
+        logger.error(f"Error checking ComfyUI output: {e}")
+    return None
+
 async def get_real_comfyui_progress(request_id: str) -> float:
     """Get REAL progress from ComfyUI queue system"""
     try:
@@ -865,9 +892,11 @@ async def generate_anime_video(
             parameters=request.model_dump_json(),
             status="processing",
             output_path=result.get("output_path") if result else None,
+            comfyui_job_id=result.get("job_id") if result else None,
         )
         db.add(job)
         db.commit()
+        db.refresh(job)
 
         return {
             "job_id": job.id,
@@ -1316,8 +1345,7 @@ async def generate_video_frontend_compat(
 async def get_generation_status(
         request_id: str, db: Session = Depends(get_db)):
     """Get generation status by request ID with REAL ComfyUI monitoring and fast generation support"""
-    # Try to find the job in database first (supports both ID and request_id
-    # lookup)
+    # Try to find the job in database first (supports both ID and ComfyUI job ID lookup)
     job = None
 
     logger.info(f"Status check for request_id: {request_id}")
@@ -1327,29 +1355,44 @@ async def get_generation_status(
         job_id = int(request_id)
         job = db.query(ProductionJob).filter(
             ProductionJob.id == job_id).first()
-        logger.info(f"Found job by ID: {job.id if job else 'None'}")
+        logger.info(f"Found job by database ID: {job.id if job else 'None'}")
     except ValueError:
-        # Try as string in parameters (for ComfyUI job IDs)
-        jobs_with_id = (
-            db.query(ProductionJob)
-            .filter(ProductionJob.parameters.contains(request_id))
-            .all()
-        )
-        if jobs_with_id:
-            job = jobs_with_id[0]  # Take the first match
-            logger.info(f"Found job by parameters search: {job.id}")
+        # Try as ComfyUI job ID (prompt_id)
+        job = db.query(ProductionJob).filter(
+            ProductionJob.comfyui_job_id == request_id).first()
+        if job:
+            logger.info(f"Found job by ComfyUI job ID: {job.id}")
+        else:
+            # Fallback: try as string in parameters (legacy support)
+            jobs_with_id = (
+                db.query(ProductionJob)
+                .filter(ProductionJob.parameters.contains(request_id))
+                .all()
+            )
+            if jobs_with_id:
+                job = jobs_with_id[0]  # Take the first match
+                logger.info(f"Found job by parameters search: {job.id}")
 
     if job:
         # Handle fast generation jobs with segment tracking
         if job.job_type == "fast_video_generation":
             return await check_fast_generation_status(job, db)
 
-        # Get real ComfyUI progress
-        comfyui_progress = await get_real_comfyui_progress(request_id)
+        # Get real ComfyUI progress using the ComfyUI job ID
+        comfyui_job_id = job.comfyui_job_id or request_id
+        comfyui_progress = await get_real_comfyui_progress(comfyui_job_id)
 
         # Update job status based on ComfyUI progress
         if comfyui_progress >= 1.0 and job.status == "processing":
-            job.status = "completed"
+            # Check if output file exists and update path
+            actual_output = await check_comfyui_output(comfyui_job_id)
+            if actual_output:
+                job.status = "completed"
+                job.output_path = actual_output
+                logger.info(f"Job {job.id} completed: {actual_output}")
+            else:
+                job.status = "processing"  # Still generating
+                logger.info(f"Job {job.id} still processing (no output found yet)")
             db.commit()
 
         # Handle regular generation jobs
@@ -1986,6 +2029,27 @@ async def generate_personal_creative(
         "status": "processing",
         "message": "Personal creative generation started",
         "enhancement": "Integrating personal context and mood analysis",
+    }
+
+
+@app.get("/api/anime/jobs/{job_id}")
+async def get_job(job_id: int, db: Session = Depends(get_db)):
+    """Get production job details - Main endpoint for frontend"""
+    job = db.query(ProductionJob).filter(ProductionJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {
+        "id": job.id,
+        "status": job.status,
+        "type": job.job_type,
+        "prompt": job.prompt,
+        "parameters": job.parameters,
+        "output_path": job.output_path,
+        "quality_score": job.quality_score,
+        "comfyui_job_id": job.comfyui_job_id,
+        "created_at": job.created_at,
+        "project_id": job.project_id,
     }
 
 
