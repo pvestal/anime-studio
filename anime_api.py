@@ -5,30 +5,29 @@ Location: /opt/tower-anime-production/
 Port: 8320
 """
 
-from fastapi import File, UploadFile
-import requests
-from pathlib import Path
-from git_branching import tag_commit as git_tag_commit
-from git_branching import revert_to_commit as git_revert_to_commit
-from git_branching import merge_branches as git_merge_branches
-from git_branching import list_branches as git_list_branches
-from git_branching import get_commit_history as git_get_commit_history
-from git_branching import get_commit_details as git_get_commit_details
-from git_branching import create_commit as git_create_commit
-from git_branching import create_branch as git_create_branch
-from git_branching import compare_branches as git_compare_branches
 import json
 import logging
 import os
 import shutil
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
 import psycopg2
+import requests
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from git_branching import compare_branches as git_compare_branches
+from git_branching import create_branch as git_create_branch
+from git_branching import create_commit as git_create_commit
+from git_branching import get_commit_details as git_get_commit_details
+from git_branching import get_commit_history as git_get_commit_history
+from git_branching import list_branches as git_list_branches
+from git_branching import merge_branches as git_merge_branches
+from git_branching import revert_to_commit as git_revert_to_commit
+from git_branching import tag_commit as git_tag_commit
 from project_bible_api import (CharacterDefinition, ProjectBibleAPI,
                                ProjectBibleCreate, ProjectBibleUpdate)
 from psycopg2 import pool
