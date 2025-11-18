@@ -8,39 +8,42 @@ Purpose: Real-time generation monitoring, failure detection, retry logic, and qu
 import asyncio
 import json
 import logging
-import psycopg2
-from psycopg2.extras import RealDictCursor
-import httpx
 import os
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import cv2
+import httpx
 import numpy as np
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler('/opt/tower-anime-production/logs/production_monitor.log'),
-        logging.StreamHandler()
-    ]
+        logging.FileHandler(
+            "/opt/tower-anime-production/logs/production_monitor.log"),
+        logging.StreamHandler(),
+    ],
 )
 logger = logging.getLogger(__name__)
+
 
 class ProductionMonitor:
     """Production-grade monitoring system for anime generation"""
 
     def __init__(self):
         self.db_config = {
-            'host': '***REMOVED***',
-            'database': 'anime_production',
-            'user': 'patrick',
-            'password': '***REMOVED***',
-            'port': 5432,
-            'options': '-c search_path=anime_api,public'
+            "host": "***REMOVED***",
+            "database": "anime_production",
+            "user": "patrick",
+            "password": "***REMOVED***",
+            "port": 5432,
+            "options": "-c search_path=anime_api,public",
         }
         self.comfyui_url = "http://***REMOVED***:8188"
         self.echo_url = "https://***REMOVED***/api/echo"
@@ -61,7 +64,8 @@ class ProductionMonitor:
                 if response.status_code == 200:
                     return response.json()
                 else:
-                    logger.error(f"ComfyUI queue check failed: {response.status_code}")
+                    logger.error(
+                        f"ComfyUI queue check failed: {response.status_code}")
                     return {"error": f"HTTP {response.status_code}"}
         except Exception as e:
             logger.error(f"Failed to check ComfyUI queue: {e}")
@@ -72,13 +76,15 @@ class ProductionMonitor:
         try:
             with self.get_db_connection() as conn:
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT id, name, description, status, created_at, updated_at,
                            metadata, generation_start_time, retry_count
                     FROM projects
                     WHERE status = 'generating'
                     ORDER BY created_at DESC
-                """)
+                """
+                )
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Failed to get generating projects: {e}")
@@ -86,14 +92,15 @@ class ProductionMonitor:
 
     async def check_generation_timeout(self, project: Dict[str, Any]) -> bool:
         """Check if generation has timed out"""
-        if not project.get('generation_start_time'):
+        if not project.get("generation_start_time"):
             # If no start time, use created_at
-            start_time = project['created_at']
+            start_time = project["created_at"]
         else:
-            start_time = project['generation_start_time']
+            start_time = project["generation_start_time"]
 
         if isinstance(start_time, str):
-            start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            start_time = datetime.fromisoformat(
+                start_time.replace("Z", "+00:00"))
 
         elapsed = datetime.now() - start_time.replace(tzinfo=None)
         return elapsed.total_seconds() > self.max_generation_time
@@ -161,7 +168,7 @@ class ProductionMonitor:
                 "frame_count": frame_count,
                 "fps": fps,
                 "file_path": str(latest_file),
-                "issues": issues
+                "issues": issues,
             }
 
         except Exception as e:
@@ -171,27 +178,32 @@ class ProductionMonitor:
     async def retry_failed_generation(self, project: Dict[str, Any]) -> bool:
         """Retry failed generation with exponential backoff"""
         try:
-            retry_count = project.get('retry_count', 0)
+            retry_count = project.get("retry_count", 0)
             if retry_count >= self.retry_attempts:
                 logger.warning(f"Project {project['id']} exceeded max retries")
-                await self.mark_project_failed(project['id'])
+                await self.mark_project_failed(project["id"])
                 return False
 
             # Increment retry count
             with self.get_db_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
+                cursor.execute(
+                    """
                     UPDATE projects
                     SET retry_count = %s,
                         generation_start_time = %s,
                         updated_at = %s
                     WHERE id = %s
-                """, (retry_count + 1, datetime.now(), datetime.now(), project['id']))
+                """,
+                    (retry_count + 1, datetime.now(),
+                     datetime.now(), project["id"]),
+                )
                 conn.commit()
 
             # Wait with exponential backoff
-            wait_time = (2 ** retry_count) * 60  # 1, 2, 4 minutes
-            logger.info(f"Retrying project {project['id']} after {wait_time}s wait")
+            wait_time = (2**retry_count) * 60  # 1, 2, 4 minutes
+            logger.info(
+                f"Retrying project {project['id']} after {wait_time}s wait")
             await asyncio.sleep(wait_time)
 
             # Trigger retry via Echo Brain
@@ -209,21 +221,21 @@ class ProductionMonitor:
                 "query": f"Retry anime generation for project {project['id']}: {project['name']}. Previous attempt failed or timed out. Use autonomous system to restart generation with quality validation.",
                 "conversation_id": f"monitor_retry_{project['id']}",
                 "metadata": {
-                    "project_id": project['id'],
-                    "retry_count": project.get('retry_count', 0) + 1,
-                    "original_description": project.get('description', ''),
-                    "trigger": "production_monitor"
-                }
+                    "project_id": project["id"],
+                    "retry_count": project.get("retry_count", 0) + 1,
+                    "original_description": project.get("description", ""),
+                    "trigger": "production_monitor",
+                },
             }
 
             async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
                 response = await client.post(
-                    f"{self.echo_url}/query",
-                    json=retry_request
+                    f"{self.echo_url}/query", json=retry_request
                 )
 
                 if response.status_code == 200:
-                    logger.info(f"Echo retry triggered for project {project['id']}")
+                    logger.info(
+                        f"Echo retry triggered for project {project['id']}")
                     return True
                 else:
                     logger.error(f"Echo retry failed: {response.status_code}")
@@ -233,12 +245,15 @@ class ProductionMonitor:
             logger.error(f"Failed to trigger Echo retry: {e}")
             return False
 
-    async def mark_project_completed(self, project_id: int, output_info: Dict[str, Any]):
+    async def mark_project_completed(
+        self, project_id: int, output_info: Dict[str, Any]
+    ):
         """Mark project as completed with output information"""
         try:
             with self.get_db_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
+                cursor.execute(
+                    """
                     UPDATE projects
                     SET status = 'completed',
                         updated_at = %s,
@@ -246,13 +261,15 @@ class ProductionMonitor:
                         quality_score = %s,
                         completion_metadata = %s
                     WHERE id = %s
-                """, (
-                    datetime.now(),
-                    output_info.get('file_path'),
-                    output_info.get('score'),
-                    json.dumps(output_info),
-                    project_id
-                ))
+                """,
+                    (
+                        datetime.now(),
+                        output_info.get("file_path"),
+                        output_info.get("score"),
+                        json.dumps(output_info),
+                        project_id,
+                    ),
+                )
                 conn.commit()
                 logger.info(f"Project {project_id} marked as completed")
 
@@ -267,13 +284,16 @@ class ProductionMonitor:
         try:
             with self.get_db_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
+                cursor.execute(
+                    """
                     UPDATE projects
                     SET status = 'failed',
                         updated_at = %s,
                         failure_reason = %s
                     WHERE id = %s
-                """, (datetime.now(), "Max retries exceeded", project_id))
+                """,
+                    (datetime.now(), "Max retries exceeded", project_id),
+                )
                 conn.commit()
                 logger.warning(f"Project {project_id} marked as failed")
 
@@ -283,7 +303,9 @@ class ProductionMonitor:
         except Exception as e:
             logger.error(f"Failed to mark project {project_id} as failed: {e}")
 
-    async def notify_echo_completion(self, project_id: int, output_info: Dict[str, Any]):
+    async def notify_echo_completion(
+        self, project_id: int, output_info: Dict[str, Any]
+    ):
         """Notify Echo Brain of successful completion"""
         try:
             notification = {
@@ -292,8 +314,8 @@ class ProductionMonitor:
                 "metadata": {
                     "event": "generation_completed",
                     "project_id": project_id,
-                    "output_info": output_info
-                }
+                    "output_info": output_info,
+                },
             }
 
             async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
@@ -311,8 +333,8 @@ class ProductionMonitor:
                 "metadata": {
                     "event": "generation_failed",
                     "project_id": project_id,
-                    "action_required": "manual_review"
-                }
+                    "action_required": "manual_review",
+                },
             }
 
             async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
@@ -327,12 +349,14 @@ class ProductionMonitor:
 
         # Get all generating projects
         generating_projects = await self.get_generating_projects()
-        logger.info(f"Found {len(generating_projects)} projects in generating status")
+        logger.info(
+            f"Found {len(generating_projects)} projects in generating status")
 
         for project in generating_projects:
             try:
-                project_id = project['id']
-                logger.info(f"Monitoring project {project_id}: {project['name']}")
+                project_id = project["id"]
+                logger.info(
+                    f"Monitoring project {project_id}: {project['name']}")
 
                 # Check for timeout
                 if await self.check_generation_timeout(project):
@@ -343,23 +367,31 @@ class ProductionMonitor:
                 # Check if output exists and validate quality
                 quality_result = await self.validate_output_quality(project_id)
 
-                if quality_result['valid']:
-                    logger.info(f"Project {project_id} completed with quality score {quality_result['score']}")
+                if quality_result["valid"]:
+                    logger.info(
+                        f"Project {project_id} completed with quality score {quality_result['score']}"
+                    )
                     await self.mark_project_completed(project_id, quality_result)
-                elif 'file_path' in quality_result:
+                elif "file_path" in quality_result:
                     # Output exists but low quality - retry
-                    logger.warning(f"Project {project_id} low quality: {quality_result['issues']}")
+                    logger.warning(
+                        f"Project {project_id} low quality: {quality_result['issues']}"
+                    )
                     await self.retry_failed_generation(project)
                 else:
                     # No output yet - check if still generating
                     queue_status = await self.check_comfyui_queue()
-                    if not queue_status.get('queue_running') and not queue_status.get('queue_pending'):
+                    if not queue_status.get("queue_running") and not queue_status.get(
+                        "queue_pending"
+                    ):
                         # Nothing in queue but project still generating - likely failed
                         logger.warning(f"Project {project_id} appears stalled")
                         await self.retry_failed_generation(project)
 
             except Exception as e:
-                logger.error(f"Error monitoring project {project.get('id', 'unknown')}: {e}")
+                logger.error(
+                    f"Error monitoring project {project.get('id', 'unknown')}: {e}"
+                )
 
     async def run_continuous_monitoring(self, interval: int = 60):
         """Run continuous monitoring every interval seconds"""
@@ -376,6 +408,7 @@ class ProductionMonitor:
                 logger.error(f"Monitoring cycle error: {e}")
                 await asyncio.sleep(interval)
 
+
 async def main():
     """Main entry point"""
     monitor = ProductionMonitor()
@@ -391,12 +424,14 @@ async def main():
                 ("output_path", "TEXT"),
                 ("quality_score", "FLOAT"),
                 ("completion_metadata", "TEXT"),
-                ("failure_reason", "TEXT")
+                ("failure_reason", "TEXT"),
             ]
 
             for column_name, column_def in columns_to_add:
                 try:
-                    cursor.execute(f"ALTER TABLE projects ADD COLUMN {column_name} {column_def}")
+                    cursor.execute(
+                        f"ALTER TABLE projects ADD COLUMN {column_name} {column_def}"
+                    )
                     logger.info(f"Added column {column_name}")
                 except psycopg2.errors.DuplicateColumn:
                     pass  # Column already exists
@@ -409,6 +444,7 @@ async def main():
 
     # Start monitoring
     await monitor.run_continuous_monitoring()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

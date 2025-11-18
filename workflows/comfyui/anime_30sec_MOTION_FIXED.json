@@ -1,0 +1,197 @@
+{
+  "1": {
+    "inputs": {
+      "text": "masterpiece, best quality, 1girl, anime style, beautiful detailed eyes, flowing hair, magical girl transformation, sparkles, dynamic movement, running, dancing, jumping, hair flowing in wind, dramatic pose changes, action sequence, colorful background, high resolution, detailed animation",
+      "clip": ["4", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "2": {
+    "inputs": {
+      "text": "worst quality, low quality, blurry, ugly, distorted, static, still image, text, watermark, no movement, frozen, static pose",
+      "clip": ["4", 1]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "seed": 42,
+      "steps": 28,
+      "cfg": 7.5,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 1.0,
+      "model": ["12", 0],
+      "positive": ["1", 0],
+      "negative": ["2", 0],
+      "latent_image": ["5", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler - Higher Steps for Animation Quality"
+    }
+  },
+  "4": {
+    "inputs": {
+      "ckpt_name": "counterfeit_v3.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "5": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 120
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image (1024x1024, 120 frames for 5 seconds @ 24fps)"
+    }
+  },
+  "6": {
+    "inputs": {
+      "samples": ["3", 0],
+      "vae": ["13", 0]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "7": {
+    "inputs": {
+      "images": ["6", 0],
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "animatediff_5sec_WITH_MOTION",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 12,
+      "save_metadata": true,
+      "pingpong": false,
+      "save_output": true
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine - 5 Second Base Video WITH MOTION"
+    }
+  },
+  "8": {
+    "inputs": {
+      "ckpt_name": "rife47.pth",
+      "frames": ["6", 0],
+      "clear_cache_after_n_frames": 10,
+      "multiplier": 6,
+      "fast_mode": false,
+      "ensemble": false,
+      "scale_factor": 1.0
+    },
+    "class_type": "RIFE VFI",
+    "_meta": {
+      "title": "RIFE VFI - 6x Interpolation (120->720 frames)"
+    }
+  },
+  "9": {
+    "inputs": {
+      "images": ["8", 0],
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "anime_30sec_MOTION_FINAL",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 18,
+      "save_metadata": true,
+      "pingpong": false,
+      "save_output": true
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine - 30 Second Final Video WITH MOTION"
+    }
+  },
+  "10": {
+    "inputs": {
+      "model_name": "mm-Stabilized_high.pth"
+    },
+    "class_type": "ADE_LoadAnimateDiffModel",
+    "_meta": {
+      "title": "Load AnimateDiff Model"
+    }
+  },
+  "11": {
+    "inputs": {
+      "motion_model": ["10", 0],
+      "scale_multival": ["15", 0],
+      "effect_multival": ["16", 0]
+    },
+    "class_type": "ADE_ApplyAnimateDiffModelSimple",
+    "_meta": {
+      "title": "Apply AnimateDiff Model (Gen2 with Motion Scaling)"
+    }
+  },
+  "12": {
+    "inputs": {
+      "model": ["4", 0],
+      "beta_schedule": "autoselect",
+      "m_models": ["11", 0],
+      "context_options": ["14", 0]
+    },
+    "class_type": "ADE_UseEvolvedSampling",
+    "_meta": {
+      "title": "Use Evolved Sampling with Context"
+    }
+  },
+  "13": {
+    "inputs": {
+      "vae_name": "vae-ft-mse-840000-ema-pruned.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "14": {
+    "inputs": {
+      "context_length": 24,
+      "context_stride": 1,
+      "context_overlap": 4,
+      "context_schedule": "uniform",
+      "closed_loop": true,
+      "fuse_method": "pyramid",
+      "use_on_equal_length": false,
+      "start_percent": 0.0,
+      "guarantee_steps": 1
+    },
+    "class_type": "ADE_LoopedUniformContextOptions",
+    "_meta": {
+      "title": "FIXED Context Options - 24 frames (model maximum)"
+    }
+  },
+  "15": {
+    "inputs": {
+      "float_val": 1.8
+    },
+    "class_type": "ADE_MultivalDynamic",
+    "_meta": {
+      "title": "Motion Scale - 1.8x (HIGH MOTION)"
+    }
+  },
+  "16": {
+    "inputs": {
+      "float_val": 1.0
+    },
+    "class_type": "ADE_MultivalDynamic",
+    "_meta": {
+      "title": "Effect Scale - 1.0x (Normal Effects)"
+    }
+  }
+}
