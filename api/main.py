@@ -64,24 +64,32 @@ app.add_middleware(
 
 # Database Models
 class AnimeProject(Base):
-    __tablename__ = "anime_projects"
+    __tablename__ = "projects"
+    __table_args__ = {'schema': 'anime_api'}
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(
         String, index=True
     )  # Changed from title to name to match existing table
     description = Column(Text)
-    status = Column(String, default="draft")
-    settings = Column(JSONB)  # JSON settings (matches existing JSONB column)
+    status = Column(String, default="active")
+    project_metadata = Column("metadata", JSONB)  # JSON metadata (was settings), renamed to avoid SQLAlchemy conflict
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(
         DateTime,
         default=datetime.utcnow,
         onupdate=datetime.utcnow)
+    retry_count = Column(Integer, default=0)
+    generation_start_time = Column(DateTime)
+    output_path = Column(Text)
+    quality_score = Column(Float)
+    completion_metadata = Column(Text)
+    failure_reason = Column(Text)
 
 
 class ProductionJob(Base):
     __tablename__ = "production_jobs"
+    __table_args__ = {'schema': 'anime_api'}
 
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer)
@@ -93,11 +101,23 @@ class ProductionJob(Base):
     quality_score = Column(Float)
     comfyui_job_id = Column(String, index=True)  # Store ComfyUI prompt_id for proper tracking
     created_at = Column(DateTime, default=datetime.utcnow)
+    # New performance tracking columns
+    generation_type = Column(String(20), default='auto')
+    generation_start_time = Column(DateTime)
+    generation_end_time = Column(DateTime)
+    processing_time_seconds = Column(Float)
+    gpu_utilization_percent = Column(Float)
+    vram_usage_mb = Column(Integer)
+    pipeline_type = Column(String(20), default='unknown')
+    frame_count = Column(Integer)
+    resolution = Column(String(20))
+    performance_score = Column(Float)
 
 
 # Bible Database Models
 class ProjectBible(Base):
     __tablename__ = "project_bibles"
+    __table_args__ = {'schema': 'anime_api'}
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, index=True)  # FK to AnimeProject
     title = Column(String(200), nullable=False)
@@ -111,6 +131,7 @@ class ProjectBible(Base):
 
 class BibleCharacter(Base):
     __tablename__ = "bible_characters"
+    __table_args__ = {'schema': 'anime_api'}
     id = Column(Integer, primary_key=True, index=True)
     bible_id = Column(Integer, index=True)  # FK to ProjectBible
     name = Column(String(100), nullable=False)
@@ -136,7 +157,7 @@ class AnimeProjectResponse(AnimeProjectBase):
     id: int
     status: str
     created_at: datetime
-    settings: Optional[dict] = None
+    project_metadata: Optional[dict] = None
 
     class Config:
         from_attributes = True
@@ -2031,6 +2052,61 @@ async def generate_personal_creative(
         "enhancement": "Integrating personal context and mood analysis",
     }
 
+
+@app.get("/api/anime/jobs")
+async def get_all_jobs(
+    db: Session = Depends(get_db),
+    status: Optional[str] = None,
+    pipeline_type: Optional[str] = None,
+    project_id: Optional[int] = None,
+    limit: int = 100,
+    offset: int = 0
+):
+    """Get all production jobs with filtering and pagination"""
+    query = db.query(ProductionJob)
+
+    if status:
+        query = query.filter(ProductionJob.status == status)
+    if pipeline_type:
+        query = query.filter(ProductionJob.pipeline_type == pipeline_type)
+    if project_id:
+        query = query.filter(ProductionJob.project_id == project_id)
+
+    total = query.count()
+    jobs = query.order_by(ProductionJob.created_at.desc()).limit(limit).offset(offset).all()
+
+    # Get pipeline statistics
+    from sqlalchemy import func
+    stats = db.query(
+        ProductionJob.pipeline_type,
+        func.count(ProductionJob.id).label('count'),
+        func.avg(ProductionJob.processing_time_seconds).label('avg_time')
+    ).group_by(ProductionJob.pipeline_type).all()
+
+    pipeline_stats = {
+        stat.pipeline_type or 'unknown': {
+            'count': stat.count,
+            'avg_time': float(stat.avg_time) if stat.avg_time else 0
+        } for stat in stats
+    }
+
+    return {
+        "total": total,
+        "jobs": [
+            {
+                "id": job.id,
+                "project_id": job.project_id,
+                "status": job.status,
+                "pipeline_type": job.pipeline_type,
+                "processing_time_seconds": job.processing_time_seconds,
+                "performance_score": job.performance_score,
+                "created_at": job.created_at,
+                "output_path": job.output_path,
+                "comfyui_job_id": job.comfyui_job_id
+            } for job in jobs
+        ],
+        "pipeline_stats": pipeline_stats
+    }
 
 @app.get("/api/anime/jobs/{job_id}")
 async def get_job(job_id: int, db: Session = Depends(get_db)):
