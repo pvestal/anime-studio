@@ -1,0 +1,110 @@
+{
+  "summary": {
+    "total_tests": 14,
+    "passed": 9,
+    "failed": 5,
+    "success_rate": 64.28571428571429,
+    "duration_seconds": 0.073098,
+    "test_time": "2025-11-19T04:02:37.464906"
+  },
+  "results": [
+    {
+      "test": "Production Jobs Table",
+      "success": true,
+      "message": "New fields present: ['character_id', 'seed', 'workflow_snapshot']",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.479077"
+    },
+    {
+      "test": "Character Versions Table",
+      "success": true,
+      "message": "Table exists",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.479543"
+    },
+    {
+      "test": "Character Versions Fields",
+      "success": true,
+      "message": "All key fields present in 17 total fields",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.480419"
+    },
+    {
+      "test": "Kai Nakamura Character",
+      "success": true,
+      "message": "Found character: ID=3, Name='Kai Nakamura'",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.480666"
+    },
+    {
+      "test": "Template Directory",
+      "success": true,
+      "message": "Directory exists: /mnt/1TB-storage/ComfyUI/workflows/patrick_characters",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.480729"
+    },
+    {
+      "test": "Template Directory Permissions",
+      "success": true,
+      "message": "Directory is writable",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.480735"
+    },
+    {
+      "test": "Existing Templates",
+      "success": true,
+      "message": "Found 0 templates: []",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.480764"
+    },
+    {
+      "test": "Deterministic Seed",
+      "success": true,
+      "message": "Same inputs produce same seed: 4967015150658112459",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.532792"
+    },
+    {
+      "test": "Seed Variation",
+      "success": true,
+      "message": "Different inputs produce different seeds: 4967015150658112459 vs 2343181409998506118",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.532798"
+    },
+    {
+      "test": "API Health Check",
+      "success": false,
+      "message": "Service returned 404",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.534607"
+    },
+    {
+      "test": "New Consistency Endpoints",
+      "success": false,
+      "message": "New endpoints not available: 404",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.535588"
+    },
+    {
+      "test": "Canonical Seed Retrieval",
+      "success": false,
+      "message": "Failed with status 404: {\"detail\":\"Not Found\"}",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.536385"
+    },
+    {
+      "test": "Character Version Creation",
+      "success": false,
+      "message": "Failed with status 404: {\"detail\":\"Not Found\"}",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.537224"
+    },
+    {
+      "test": "Consistent Generation",
+      "success": false,
+      "message": "Failed with status 404: {\"detail\":\"Not Found\"}",
+      "details": null,
+      "timestamp": "2025-11-19T04:02:37.537964"
+    }
+  ]
+}

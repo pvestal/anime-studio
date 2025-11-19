@@ -10,17 +10,17 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
-
-from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
 
 class AmbiguityType(Enum):
     """Types of ambiguities that can occur in user requests"""
+
     CONTENT_TYPE_UNCLEAR = "content_type_unclear"  # Image vs video vs audio
     SCOPE_AMBIGUOUS = "scope_ambiguous"  # Character vs scene vs episode
     STYLE_CONFLICTING = "style_conflicting"  # Multiple style indicators
@@ -29,12 +29,15 @@ class AmbiguityType(Enum):
     QUALITY_VAGUE = "quality_vague"  # Quality requirements unclear
     URGENCY_UNCLEAR = "urgency_unclear"  # Timeline requirements unclear
     TECHNICAL_INCOMPLETE = "technical_incomplete"  # Missing technical specs
-    CONTRADICTORY_REQUIREMENTS = "contradictory_requirements"  # Conflicting requirements
+    CONTRADICTORY_REQUIREMENTS = (
+        "contradictory_requirements"  # Conflicting requirements
+    )
     INSUFFICIENT_DETAIL = "insufficient_detail"  # Too vague overall
 
 
 class ResolutionStrategy(Enum):
     """Strategies for resolving ambiguities"""
+
     USER_CLARIFICATION = "user_clarification"  # Ask user directly
     INTELLIGENT_DEFAULT = "intelligent_default"  # Use smart defaults
     CONTEXT_INFERENCE = "context_inference"  # Infer from context
@@ -47,6 +50,7 @@ class ResolutionStrategy(Enum):
 @dataclass
 class AmbiguityDetection:
     """Detected ambiguity in user request"""
+
     ambiguity_type: AmbiguityType
     confidence: float  # Confidence that this is an ambiguity (0.0-1.0)
     description: str
@@ -60,11 +64,12 @@ class AmbiguityDetection:
 @dataclass
 class ResolutionAction:
     """Action to resolve an ambiguity"""
+
     strategy: ResolutionStrategy
     action_type: str  # "question", "suggestion", "default", "inference"
     priority: int  # 1-10, lower is higher priority
     timeout_seconds: int  # How long to wait for user response
-    fallback_action: Optional['ResolutionAction'] = None
+    fallback_action: Optional["ResolutionAction"] = None
 
     # Question-based resolution
     question: Optional[str] = None
@@ -88,6 +93,7 @@ class ResolutionAction:
 @dataclass
 class ResolutionResult:
     """Result of ambiguity resolution"""
+
     ambiguity_type: AmbiguityType
     resolution_strategy: ResolutionStrategy
     resolved_value: Any
@@ -112,111 +118,103 @@ class AmbiguityDetector:
                     "pattern": r"\b(image|picture)\b.*\b(video|animation|movie)\b",
                     "evidence": "Both image and video indicators present",
                     "severity": "high",
-                    "blocking": True
+                    "blocking": True,
                 },
                 {
                     "pattern": r"\b(create|make|generate)\b(?!.*\b(image|video|animation)\b)",
                     "evidence": "Generic creation request without content type",
                     "severity": "medium",
-                    "blocking": False
-                }
+                    "blocking": False,
+                },
             ],
-
             AmbiguityType.SCOPE_AMBIGUOUS: [
                 {
                     "pattern": r"\b(character|person)\b.*\b(scene|environment|background)\b",
                     "evidence": "Both character and scene elements mentioned",
                     "severity": "medium",
-                    "blocking": False
+                    "blocking": False,
                 },
                 {
                     "pattern": r"\b(full|complete|entire)\b.*\b(episode|series|movie)\b",
                     "evidence": "Full episode request may be too complex",
                     "severity": "high",
-                    "blocking": True
-                }
+                    "blocking": True,
+                },
             ],
-
             AmbiguityType.CHARACTER_UNDEFINED: [
                 {
                     "pattern": r"\b(character|person|girl|boy|man|woman)\b(?!.*\b[A-Z][a-z]+\b)",
                     "evidence": "Character mentioned without specific name or clear description",
                     "severity": "medium",
-                    "blocking": False
+                    "blocking": False,
                 },
                 {
                     "pattern": r"\bnamed?\s+(\w+)\b.*\bbut\b",
                     "evidence": "Character name mentioned with contradictory information",
                     "severity": "medium",
-                    "blocking": False
-                }
+                    "blocking": False,
+                },
             ],
-
             AmbiguityType.DURATION_MISSING: [
                 {
                     "pattern": r"\b(video|animation|scene|sequence)\b(?!.*\d+\s*(second|minute|sec|min)\b)",
                     "evidence": "Video request without duration specification",
                     "severity": "medium",
-                    "blocking": False
+                    "blocking": False,
                 },
                 {
                     "pattern": r"\blong\b|\bshort\b(?!\s+\d+)",
                     "evidence": "Relative duration without specific time",
                     "severity": "low",
-                    "blocking": False
-                }
+                    "blocking": False,
+                },
             ],
-
             AmbiguityType.STYLE_CONFLICTING: [
                 {
                     "pattern": r"\b(realistic|photorealistic)\b.*\b(cartoon|anime)\b",
                     "evidence": "Conflicting style requirements (realistic and cartoon)",
                     "severity": "high",
-                    "blocking": True
+                    "blocking": True,
                 },
                 {
                     "pattern": r"\b(2d|flat)\b.*\b(3d|dimensional)\b",
                     "evidence": "Conflicting dimensionality requirements",
                     "severity": "high",
-                    "blocking": True
-                }
+                    "blocking": True,
+                },
             ],
-
             AmbiguityType.QUALITY_VAGUE: [
                 {
                     "pattern": r"\b(good|nice|beautiful|amazing)\b(?!\s+(quality|resolution))",
                     "evidence": "Subjective quality descriptors without technical specification",
                     "severity": "low",
-                    "blocking": False
+                    "blocking": False,
                 }
             ],
-
             AmbiguityType.URGENCY_UNCLEAR: [
                 {
                     "pattern": r"\b(soon|later|sometime|eventually)\b",
                     "evidence": "Vague timing requirements",
                     "severity": "low",
-                    "blocking": False
+                    "blocking": False,
                 }
             ],
-
             AmbiguityType.INSUFFICIENT_DETAIL: [
                 {
                     "pattern": r"^.{1,20}$",  # Very short requests
                     "evidence": "Request is very brief and may lack detail",
                     "severity": "medium",
-                    "blocking": False
+                    "blocking": False,
                 }
             ],
-
             AmbiguityType.CONTRADICTORY_REQUIREMENTS: [
                 {
                     "pattern": r"\b(fast|quick|immediate)\b.*\b(high|maximum|best)\s+quality\b",
                     "evidence": "Fast delivery requested with high quality (may be contradictory)",
                     "severity": "medium",
-                    "blocking": False
+                    "blocking": False,
                 }
-            ]
+            ],
         }
 
     def _initialize_context_patterns(self) -> Dict[str, List[str]]:
@@ -224,23 +222,25 @@ class AmbiguityDetector:
         return {
             "anime_context": [
                 r"\b(anime|manga|japanese|otaku|kawaii|senpai|chan|kun)\b",
-                r"\b(studio ghibli|dragon ball|naruto|one piece|attack on titan)\b"
+                r"\b(studio ghibli|dragon ball|naruto|one piece|attack on titan)\b",
             ],
             "artistic_context": [
                 r"\b(art|artistic|painting|drawing|sketch|digital art)\b",
-                r"\b(style of|inspired by|in the style)\b"
+                r"\b(style of|inspired by|in the style)\b",
             ],
             "technical_context": [
                 r"\b(4k|8k|hd|resolution|dpi|pixels|render|gpu)\b",
-                r"\b(blender|maya|photoshop|after effects)\b"
+                r"\b(blender|maya|photoshop|after effects)\b",
             ],
             "commercial_context": [
                 r"\b(commercial|business|marketing|advertisement|brand)\b",
-                r"\b(client|customer|deadline|budget)\b"
-            ]
+                r"\b(client|customer|deadline|budget)\b",
+            ],
         }
 
-    def detect_ambiguities(self, user_prompt: str, classification_result: Dict[str, Any] = None) -> List[AmbiguityDetection]:
+    def detect_ambiguities(
+        self, user_prompt: str, classification_result: Dict[str, Any] = None
+    ) -> List[AmbiguityDetection]:
         """Detect ambiguities in user prompt and classification"""
         ambiguities = []
 
@@ -272,23 +272,30 @@ class AmbiguityDetector:
                 pattern = rule["pattern"]
                 if re.search(pattern, user_prompt, re.IGNORECASE):
                     # Calculate confidence based on pattern match strength
-                    confidence = self._calculate_pattern_confidence(pattern, user_prompt)
+                    confidence = self._calculate_pattern_confidence(
+                        pattern, user_prompt
+                    )
 
                     ambiguity = AmbiguityDetection(
                         ambiguity_type=ambiguity_type,
                         confidence=confidence,
                         description=rule["evidence"],
-                        affected_fields=self._get_affected_fields(ambiguity_type),
+                        affected_fields=self._get_affected_fields(
+                            ambiguity_type),
                         evidence=[f"Pattern match: {pattern}"],
                         severity=rule["severity"],
                         blocking=rule["blocking"],
-                        context_clues=self._extract_context_clues(user_prompt, ambiguity_type)
+                        context_clues=self._extract_context_clues(
+                            user_prompt, ambiguity_type
+                        ),
                     )
                     ambiguities.append(ambiguity)
 
         return ambiguities
 
-    def _detect_classification_ambiguities(self, classification: Dict[str, Any], user_prompt: str) -> List[AmbiguityDetection]:
+    def _detect_classification_ambiguities(
+        self, classification: Dict[str, Any], user_prompt: str
+    ) -> List[AmbiguityDetection]:
         """Detect ambiguities in classification results"""
         ambiguities = []
 
@@ -303,30 +310,34 @@ class AmbiguityDetector:
                 evidence=["Low confidence score from classification engine"],
                 severity="medium" if confidence < 0.5 else "low",
                 blocking=confidence < 0.4,
-                context_clues={"confidence_score": confidence}
+                context_clues={"confidence_score": confidence},
             )
             ambiguities.append(ambiguity)
 
         # Missing required fields
         required_fields = {
             "character_names": AmbiguityType.CHARACTER_UNDEFINED,
-            "duration_seconds": AmbiguityType.DURATION_MISSING
+            "duration_seconds": AmbiguityType.DURATION_MISSING,
         }
 
         for field, ambiguity_type in required_fields.items():
-            if (classification.get("content_type") == "video" and
-                field == "duration_seconds" and
-                not classification.get(field)):
+            if (
+                classification.get("content_type") == "video"
+                and field == "duration_seconds"
+                and not classification.get(field)
+            ):
 
                 ambiguity = AmbiguityDetection(
                     ambiguity_type=ambiguity_type,
                     confidence=0.8,
                     description=f"Required field '{field}' is missing for video generation",
                     affected_fields=[field],
-                    evidence=[f"Content type is video but {field} is not specified"],
+                    evidence=[
+                        f"Content type is video but {field} is not specified"],
                     severity="medium",
                     blocking=False,
-                    context_clues={"content_type": classification.get("content_type")}
+                    context_clues={
+                        "content_type": classification.get("content_type")},
                 )
                 ambiguities.append(ambiguity)
 
@@ -346,7 +357,8 @@ class AmbiguityDetector:
             context_scores[context_type] = score
 
         # If multiple strong contexts exist, it may indicate ambiguity
-        strong_contexts = [ctx for ctx, score in context_scores.items() if score >= 2]
+        strong_contexts = [ctx for ctx,
+                           score in context_scores.items() if score >= 2]
         if len(strong_contexts) > 1:
             ambiguity = AmbiguityDetection(
                 ambiguity_type=AmbiguityType.SCOPE_AMBIGUOUS,
@@ -356,7 +368,7 @@ class AmbiguityDetector:
                 evidence=[f"Strong indicators for: {strong_contexts}"],
                 severity="low",
                 blocking=False,
-                context_clues={"context_scores": context_scores}
+                context_clues={"context_scores": context_scores},
             )
             ambiguities.append(ambiguity)
 
@@ -386,34 +398,46 @@ class AmbiguityDetector:
             AmbiguityType.QUALITY_VAGUE: ["quality_level", "complexity_level"],
             AmbiguityType.URGENCY_UNCLEAR: ["urgency_level"],
             AmbiguityType.TECHNICAL_INCOMPLETE: ["resolution", "output_format"],
-            AmbiguityType.CONTRADICTORY_REQUIREMENTS: ["urgency_level", "quality_level"],
-            AmbiguityType.INSUFFICIENT_DETAIL: ["overall_classification"]
+            AmbiguityType.CONTRADICTORY_REQUIREMENTS: [
+                "urgency_level",
+                "quality_level",
+            ],
+            AmbiguityType.INSUFFICIENT_DETAIL: ["overall_classification"],
         }
         return field_mapping.get(ambiguity_type, ["general"])
 
-    def _extract_context_clues(self, text: str, ambiguity_type: AmbiguityType) -> Dict[str, Any]:
+    def _extract_context_clues(
+        self, text: str, ambiguity_type: AmbiguityType
+    ) -> Dict[str, Any]:
         """Extract context clues for ambiguity resolution"""
         clues = {}
 
         # Extract mentioned elements
         if "character" in text.lower():
-            names = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b', text)
+            names = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", text)
             clues["potential_names"] = names
 
         # Extract timing indicators
-        time_matches = re.findall(r'(\d+)\s*(second|minute|hour|sec|min)', text, re.IGNORECASE)
+        time_matches = re.findall(
+            r"(\d+)\s*(second|minute|hour|sec|min)", text, re.IGNORECASE
+        )
         if time_matches:
             clues["time_indicators"] = time_matches
 
         # Extract quality indicators
-        quality_words = re.findall(r'\b(high|low|good|bad|best|worst|amazing|terrible|quality|hd|4k|8k)\b',
-                                 text, re.IGNORECASE)
+        quality_words = re.findall(
+            r"\b(high|low|good|bad|best|worst|amazing|terrible|quality|hd|4k|8k)\b",
+            text,
+            re.IGNORECASE,
+        )
         if quality_words:
             clues["quality_indicators"] = quality_words
 
         return clues
 
-    def _deduplicate_ambiguities(self, ambiguities: List[AmbiguityDetection]) -> List[AmbiguityDetection]:
+    def _deduplicate_ambiguities(
+        self, ambiguities: List[AmbiguityDetection]
+    ) -> List[AmbiguityDetection]:
         """Remove duplicate ambiguities"""
         seen = set()
         unique = []
@@ -436,7 +460,9 @@ class AmbiguityResolver:
         self.resolution_strategies = self._initialize_resolution_strategies()
         self.resolution_cache = {}
 
-    def _initialize_resolution_strategies(self) -> Dict[AmbiguityType, List[ResolutionAction]]:
+    def _initialize_resolution_strategies(
+        self,
+    ) -> Dict[AmbiguityType, List[ResolutionAction]]:
         """Initialize resolution strategies for each ambiguity type"""
         return {
             AmbiguityType.CONTENT_TYPE_UNCLEAR: [
@@ -446,8 +472,12 @@ class AmbiguityResolver:
                     priority=1,
                     timeout_seconds=30,
                     question="What type of content would you like to create?",
-                    options=["Image (still picture)", "Video (animated sequence)", "Both (image and video)"],
-                    default_answer="Image (still picture)"
+                    options=[
+                        "Image (still picture)",
+                        "Video (animated sequence)",
+                        "Both (image and video)",
+                    ],
+                    default_answer="Image (still picture)",
                 ),
                 ResolutionAction(
                     strategy=ResolutionStrategy.INTELLIGENT_DEFAULT,
@@ -455,10 +485,9 @@ class AmbiguityResolver:
                     priority=5,
                     timeout_seconds=0,
                     default_value="image",
-                    confidence_threshold=0.6
-                )
+                    confidence_threshold=0.6,
+                ),
             ],
-
             AmbiguityType.CHARACTER_UNDEFINED: [
                 ResolutionAction(
                     strategy=ResolutionStrategy.USER_CLARIFICATION,
@@ -466,18 +495,17 @@ class AmbiguityResolver:
                     priority=2,
                     timeout_seconds=45,
                     question="What would you like to name this character?",
-                    validation_pattern=r'^[A-Za-z\s]{2,30}$',
-                    default_answer="Unnamed Character"
+                    validation_pattern=r"^[A-Za-z\s]{2,30}$",
+                    default_answer="Unnamed Character",
                 ),
                 ResolutionAction(
                     strategy=ResolutionStrategy.INTELLIGENT_DEFAULT,
                     action_type="default",
                     priority=6,
                     timeout_seconds=0,
-                    default_value="Unnamed Character"
-                )
+                    default_value="Unnamed Character",
+                ),
             ],
-
             AmbiguityType.DURATION_MISSING: [
                 ResolutionAction(
                     strategy=ResolutionStrategy.USER_CLARIFICATION,
@@ -485,8 +513,9 @@ class AmbiguityResolver:
                     priority=2,
                     timeout_seconds=30,
                     question="How long should the video be?",
-                    options=["5 seconds", "15 seconds", "30 seconds", "1 minute"],
-                    default_answer="15 seconds"
+                    options=["5 seconds", "15 seconds",
+                             "30 seconds", "1 minute"],
+                    default_answer="15 seconds",
                 ),
                 ResolutionAction(
                     strategy=ResolutionStrategy.CONTEXT_INFERENCE,
@@ -496,18 +525,17 @@ class AmbiguityResolver:
                     inference_rules=[
                         "action scene -> 15 seconds",
                         "dialogue scene -> 30 seconds",
-                        "character intro -> 10 seconds"
-                    ]
+                        "character intro -> 10 seconds",
+                    ],
                 ),
                 ResolutionAction(
                     strategy=ResolutionStrategy.INTELLIGENT_DEFAULT,
                     action_type="default",
                     priority=7,
                     timeout_seconds=0,
-                    default_value=15
-                )
+                    default_value=15,
+                ),
             ],
-
             AmbiguityType.STYLE_CONFLICTING: [
                 ResolutionAction(
                     strategy=ResolutionStrategy.USER_CLARIFICATION,
@@ -515,11 +543,15 @@ class AmbiguityResolver:
                     priority=1,
                     timeout_seconds=30,
                     question="Which visual style would you prefer?",
-                    options=["Photorealistic Anime", "Traditional 2D Anime", "Western Cartoon", "Artistic/Experimental"],
-                    default_answer="Traditional 2D Anime"
+                    options=[
+                        "Photorealistic Anime",
+                        "Traditional 2D Anime",
+                        "Western Cartoon",
+                        "Artistic/Experimental",
+                    ],
+                    default_answer="Traditional 2D Anime",
                 )
             ],
-
             AmbiguityType.SCOPE_AMBIGUOUS: [
                 ResolutionAction(
                     strategy=ResolutionStrategy.TEMPLATE_SUGGESTION,
@@ -529,8 +561,8 @@ class AmbiguityResolver:
                     suggested_templates=[
                         {"name": "Character Profile", "scope": "character_profile"},
                         {"name": "Character in Scene", "scope": "character_scene"},
-                        {"name": "Environment Only", "scope": "environment"}
-                    ]
+                        {"name": "Environment Only", "scope": "environment"},
+                    ],
                 ),
                 ResolutionAction(
                     strategy=ResolutionStrategy.USER_CLARIFICATION,
@@ -538,11 +570,15 @@ class AmbiguityResolver:
                     priority=3,
                     timeout_seconds=45,
                     question="What's the main focus of your request?",
-                    options=["Character design/profile", "Character in a scene", "Background/environment", "Action sequence"],
-                    default_answer="Character in a scene"
-                )
+                    options=[
+                        "Character design/profile",
+                        "Character in a scene",
+                        "Background/environment",
+                        "Action sequence",
+                    ],
+                    default_answer="Character in a scene",
+                ),
             ],
-
             AmbiguityType.QUALITY_VAGUE: [
                 ResolutionAction(
                     strategy=ResolutionStrategy.INTELLIGENT_DEFAULT,
@@ -550,10 +586,9 @@ class AmbiguityResolver:
                     priority=5,
                     timeout_seconds=0,
                     default_value="high",
-                    confidence_threshold=0.8
+                    confidence_threshold=0.8,
                 )
             ],
-
             AmbiguityType.INSUFFICIENT_DETAIL: [
                 ResolutionAction(
                     strategy=ResolutionStrategy.PROGRESSIVE_REFINEMENT,
@@ -561,23 +596,28 @@ class AmbiguityResolver:
                     priority=3,
                     timeout_seconds=120,
                     question="Could you provide more details about what you'd like to create?",
-                    metadata={"follow_up_questions": [
-                        "What should the main character look like?",
-                        "What style are you aiming for?",
-                        "Any specific mood or atmosphere?"
-                    ]}
+                    metadata={
+                        "follow_up_questions": [
+                            "What should the main character look like?",
+                            "What style are you aiming for?",
+                            "Any specific mood or atmosphere?",
+                        ]
+                    },
                 )
-            ]
+            ],
         }
 
-    async def resolve_ambiguities(self, ambiguities: List[AmbiguityDetection],
-                                context: Dict[str, Any] = None) -> List[ResolutionResult]:
+    async def resolve_ambiguities(
+        self, ambiguities: List[AmbiguityDetection], context: Dict[str, Any] = None
+    ) -> List[ResolutionResult]:
         """Resolve multiple ambiguities using appropriate strategies"""
         results = []
 
         # Sort ambiguities by priority (blocking first, then by severity)
-        sorted_ambiguities = sorted(ambiguities,
-                                  key=lambda x: (not x.blocking, x.severity, -x.confidence))
+        sorted_ambiguities = sorted(
+            ambiguities, key=lambda x: (
+                not x.blocking, x.severity, -x.confidence)
+        )
 
         for ambiguity in sorted_ambiguities:
             try:
@@ -586,31 +626,41 @@ class AmbiguityResolver:
 
                 # Update context with resolved value for subsequent resolutions
                 if result.resolved_value is not None and context:
-                    field_name = ambiguity.affected_fields[0] if ambiguity.affected_fields else 'general'
+                    field_name = (
+                        ambiguity.affected_fields[0]
+                        if ambiguity.affected_fields
+                        else "general"
+                    )
                     context[field_name] = result.resolved_value
 
             except Exception as e:
-                logger.error(f"Failed to resolve ambiguity {ambiguity.ambiguity_type}: {e}")
+                logger.error(
+                    f"Failed to resolve ambiguity {ambiguity.ambiguity_type}: {e}"
+                )
                 # Create failed resolution result
-                results.append(ResolutionResult(
-                    ambiguity_type=ambiguity.ambiguity_type,
-                    resolution_strategy=ResolutionStrategy.FALLBACK_WORKFLOW,
-                    resolved_value=None,
-                    confidence=0.0,
-                    user_interaction_required=False,
-                    resolution_time_seconds=0.0,
-                    metadata={"error": str(e)}
-                ))
+                results.append(
+                    ResolutionResult(
+                        ambiguity_type=ambiguity.ambiguity_type,
+                        resolution_strategy=ResolutionStrategy.FALLBACK_WORKFLOW,
+                        resolved_value=None,
+                        confidence=0.0,
+                        user_interaction_required=False,
+                        resolution_time_seconds=0.0,
+                        metadata={"error": str(e)},
+                    )
+                )
 
         return results
 
-    async def _resolve_single_ambiguity(self, ambiguity: AmbiguityDetection,
-                                      context: Dict[str, Any]) -> ResolutionResult:
+    async def _resolve_single_ambiguity(
+        self, ambiguity: AmbiguityDetection, context: Dict[str, Any]
+    ) -> ResolutionResult:
         """Resolve a single ambiguity"""
         start_time = time.time()
 
         # Get resolution strategies for this ambiguity type
-        strategies = self.resolution_strategies.get(ambiguity.ambiguity_type, [])
+        strategies = self.resolution_strategies.get(
+            ambiguity.ambiguity_type, [])
 
         if not strategies:
             # No specific strategies, use fallback
@@ -619,43 +669,62 @@ class AmbiguityResolver:
         # Try strategies in priority order
         for strategy in sorted(strategies, key=lambda x: x.priority):
             try:
-                result = await self._execute_resolution_strategy(strategy, ambiguity, context)
+                result = await self._execute_resolution_strategy(
+                    strategy, ambiguity, context
+                )
                 if result:
                     result.resolution_time_seconds = time.time() - start_time
                     return result
             except Exception as e:
-                logger.warning(f"Resolution strategy {strategy.strategy} failed: {e}")
+                logger.warning(
+                    f"Resolution strategy {strategy.strategy} failed: {e}")
                 continue
 
         # All strategies failed, create fallback
         return self._create_fallback_resolution(ambiguity, start_time)
 
-    async def _execute_resolution_strategy(self, strategy: ResolutionAction,
-                                         ambiguity: AmbiguityDetection,
-                                         context: Dict[str, Any]) -> Optional[ResolutionResult]:
+    async def _execute_resolution_strategy(
+        self,
+        strategy: ResolutionAction,
+        ambiguity: AmbiguityDetection,
+        context: Dict[str, Any],
+    ) -> Optional[ResolutionResult]:
         """Execute a specific resolution strategy"""
 
         if strategy.strategy == ResolutionStrategy.USER_CLARIFICATION:
-            return await self._resolve_via_user_clarification(strategy, ambiguity, context)
+            return await self._resolve_via_user_clarification(
+                strategy, ambiguity, context
+            )
 
         elif strategy.strategy == ResolutionStrategy.INTELLIGENT_DEFAULT:
-            return await self._resolve_via_intelligent_default(strategy, ambiguity, context)
+            return await self._resolve_via_intelligent_default(
+                strategy, ambiguity, context
+            )
 
         elif strategy.strategy == ResolutionStrategy.CONTEXT_INFERENCE:
-            return await self._resolve_via_context_inference(strategy, ambiguity, context)
+            return await self._resolve_via_context_inference(
+                strategy, ambiguity, context
+            )
 
         elif strategy.strategy == ResolutionStrategy.TEMPLATE_SUGGESTION:
-            return await self._resolve_via_template_suggestion(strategy, ambiguity, context)
+            return await self._resolve_via_template_suggestion(
+                strategy, ambiguity, context
+            )
 
         elif strategy.strategy == ResolutionStrategy.PROGRESSIVE_REFINEMENT:
-            return await self._resolve_via_progressive_refinement(strategy, ambiguity, context)
+            return await self._resolve_via_progressive_refinement(
+                strategy, ambiguity, context
+            )
 
         else:
             return None
 
-    async def _resolve_via_user_clarification(self, strategy: ResolutionAction,
-                                            ambiguity: AmbiguityDetection,
-                                            context: Dict[str, Any]) -> ResolutionResult:
+    async def _resolve_via_user_clarification(
+        self,
+        strategy: ResolutionAction,
+        ambiguity: AmbiguityDetection,
+        context: Dict[str, Any],
+    ) -> ResolutionResult:
         """Resolve via user clarification (returns structure for frontend handling)"""
         # This creates a structure that the frontend can use to prompt the user
         clarification_data = {
@@ -665,7 +734,7 @@ class AmbiguityResolver:
             "validation_pattern": strategy.validation_pattern,
             "timeout_seconds": strategy.timeout_seconds,
             "priority": "high" if ambiguity.blocking else "medium",
-            "explanation": f"This helps resolve: {ambiguity.description}"
+            "explanation": f"This helps resolve: {ambiguity.description}",
         }
 
         return ResolutionResult(
@@ -677,13 +746,16 @@ class AmbiguityResolver:
             resolution_time_seconds=0.0,
             metadata={
                 "clarification_data": clarification_data,
-                "requires_user_input": True
-            }
+                "requires_user_input": True,
+            },
         )
 
-    async def _resolve_via_intelligent_default(self, strategy: ResolutionAction,
-                                             ambiguity: AmbiguityDetection,
-                                             context: Dict[str, Any]) -> ResolutionResult:
+    async def _resolve_via_intelligent_default(
+        self,
+        strategy: ResolutionAction,
+        ambiguity: AmbiguityDetection,
+        context: Dict[str, Any],
+    ) -> ResolutionResult:
         """Resolve using intelligent defaults"""
         # Use context and user history to determine smart default
         smart_default = await self._calculate_smart_default(
@@ -702,15 +774,18 @@ class AmbiguityResolver:
                 resolution_time_seconds=0.0,
                 metadata={
                     "default_reason": "Based on user history and context patterns",
-                    "confidence_threshold": strategy.confidence_threshold
-                }
+                    "confidence_threshold": strategy.confidence_threshold,
+                },
             )
 
         return None  # Confidence too low for default
 
-    async def _resolve_via_context_inference(self, strategy: ResolutionAction,
-                                           ambiguity: AmbiguityDetection,
-                                           context: Dict[str, Any]) -> ResolutionResult:
+    async def _resolve_via_context_inference(
+        self,
+        strategy: ResolutionAction,
+        ambiguity: AmbiguityDetection,
+        context: Dict[str, Any],
+    ) -> ResolutionResult:
         """Resolve via context inference using rules"""
         if not strategy.inference_rules:
             return None
@@ -729,21 +804,25 @@ class AmbiguityResolver:
                         resolution_time_seconds=0.0,
                         metadata={
                             "inference_rule": rule,
-                            "matched_condition": condition
-                        }
+                            "matched_condition": condition,
+                        },
                     )
 
         return None
 
-    async def _resolve_via_template_suggestion(self, strategy: ResolutionAction,
-                                             ambiguity: AmbiguityDetection,
-                                             context: Dict[str, Any]) -> ResolutionResult:
+    async def _resolve_via_template_suggestion(
+        self,
+        strategy: ResolutionAction,
+        ambiguity: AmbiguityDetection,
+        context: Dict[str, Any],
+    ) -> ResolutionResult:
         """Resolve by suggesting relevant templates"""
         if not strategy.suggested_templates:
             return None
 
         # Find best matching template based on context
-        best_template = self._find_best_template(strategy.suggested_templates, context)
+        best_template = self._find_best_template(
+            strategy.suggested_templates, context)
 
         if best_template:
             return ResolutionResult(
@@ -755,21 +834,25 @@ class AmbiguityResolver:
                 resolution_time_seconds=0.0,
                 metadata={
                     "suggested_templates": strategy.suggested_templates,
-                    "best_match": best_template
-                }
+                    "best_match": best_template,
+                },
             )
 
         return None
 
-    async def _resolve_via_progressive_refinement(self, strategy: ResolutionAction,
-                                                ambiguity: AmbiguityDetection,
-                                                context: Dict[str, Any]) -> ResolutionResult:
+    async def _resolve_via_progressive_refinement(
+        self,
+        strategy: ResolutionAction,
+        ambiguity: AmbiguityDetection,
+        context: Dict[str, Any],
+    ) -> ResolutionResult:
         """Resolve via progressive refinement (multi-step clarification)"""
         # Create a progressive refinement plan
         refinement_plan = {
             "initial_question": strategy.question,
             "follow_up_questions": strategy.metadata.get("follow_up_questions", []),
-            "expected_iterations": len(strategy.metadata.get("follow_up_questions", [])) + 1
+            "expected_iterations": len(strategy.metadata.get("follow_up_questions", []))
+            + 1,
         }
 
         return ResolutionResult(
@@ -779,14 +862,13 @@ class AmbiguityResolver:
             confidence=0.85,
             user_interaction_required=True,
             resolution_time_seconds=0.0,
-            metadata={
-                "refinement_plan": refinement_plan,
-                "progressive_approach": True
-            }
+            metadata={"refinement_plan": refinement_plan,
+                      "progressive_approach": True},
         )
 
-    async def _calculate_smart_default(self, ambiguity: AmbiguityDetection,
-                                     base_default: Any, context: Dict[str, Any]) -> Any:
+    async def _calculate_smart_default(
+        self, ambiguity: AmbiguityDetection, base_default: Any, context: Dict[str, Any]
+    ) -> Any:
         """Calculate smart default based on context and user history"""
         # TODO: Implement user preference learning
         # For now, use simple context-based logic
@@ -812,8 +894,9 @@ class AmbiguityResolver:
 
         return base_default
 
-    def _calculate_default_confidence(self, ambiguity: AmbiguityDetection,
-                                    context: Dict[str, Any]) -> float:
+    def _calculate_default_confidence(
+        self, ambiguity: AmbiguityDetection, context: Dict[str, Any]
+    ) -> float:
         """Calculate confidence in using default resolution"""
         base_confidence = 0.6
 
@@ -822,19 +905,22 @@ class AmbiguityResolver:
         confidence_boost = min(0.3, context_indicators * 0.05)
 
         # Adjust based on ambiguity severity
-        severity_penalty = {
-            "low": 0.0,
-            "medium": -0.1,
-            "high": -0.2
-        }.get(ambiguity.severity, 0.0)
+        severity_penalty = {"low": 0.0, "medium": -0.1, "high": -0.2}.get(
+            ambiguity.severity, 0.0
+        )
 
         # Adjust based on user preference history (placeholder)
         # TODO: Implement actual user preference lookup
         preference_boost = 0.1  # Assume we have some user history
 
-        return min(0.95, base_confidence + confidence_boost + severity_penalty + preference_boost)
+        return min(
+            0.95,
+            base_confidence + confidence_boost + severity_penalty + preference_boost,
+        )
 
-    def _check_inference_condition(self, condition: str, context: Dict[str, Any]) -> bool:
+    def _check_inference_condition(
+        self, condition: str, context: Dict[str, Any]
+    ) -> bool:
         """Check if inference condition is met"""
         condition_lower = condition.lower()
 
@@ -848,8 +934,9 @@ class AmbiguityResolver:
 
         return False
 
-    def _find_best_template(self, templates: List[Dict[str, Any]],
-                           context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _find_best_template(
+        self, templates: List[Dict[str, Any]], context: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """Find best matching template based on context"""
         if not templates:
             return None
@@ -873,8 +960,9 @@ class AmbiguityResolver:
 
         return best_template or templates[0]  # Return first if no clear winner
 
-    def _create_fallback_resolution(self, ambiguity: AmbiguityDetection,
-                                   start_time: float) -> ResolutionResult:
+    def _create_fallback_resolution(
+        self, ambiguity: AmbiguityDetection, start_time: float
+    ) -> ResolutionResult:
         """Create fallback resolution when all strategies fail"""
         fallback_defaults = {
             AmbiguityType.CONTENT_TYPE_UNCLEAR: "image",
@@ -882,10 +970,11 @@ class AmbiguityResolver:
             AmbiguityType.DURATION_MISSING: 15,
             AmbiguityType.STYLE_CONFLICTING: "traditional_anime",
             AmbiguityType.QUALITY_VAGUE: "standard",
-            AmbiguityType.SCOPE_AMBIGUOUS: "character_scene"
+            AmbiguityType.SCOPE_AMBIGUOUS: "character_scene",
         }
 
-        fallback_value = fallback_defaults.get(ambiguity.ambiguity_type, "default")
+        fallback_value = fallback_defaults.get(
+            ambiguity.ambiguity_type, "default")
 
         return ResolutionResult(
             ambiguity_type=ambiguity.ambiguity_type,
@@ -896,8 +985,8 @@ class AmbiguityResolver:
             resolution_time_seconds=time.time() - start_time,
             metadata={
                 "fallback_reason": "All resolution strategies failed",
-                "fallback_value": fallback_value
-            }
+                "fallback_value": fallback_value,
+            },
         )
 
 
@@ -908,12 +997,18 @@ class AmbiguityResolutionOrchestrator:
         self.detector = AmbiguityDetector()
         self.resolver = AmbiguityResolver(db_manager, echo_integration)
 
-    async def process_request(self, user_prompt: str, classification_result: Dict[str, Any],
-                            context: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def process_request(
+        self,
+        user_prompt: str,
+        classification_result: Dict[str, Any],
+        context: Dict[str, Any] = None,
+    ) -> Dict[str, Any]:
         """Process request for ambiguities and generate resolution plan"""
 
         # Detect ambiguities
-        ambiguities = self.detector.detect_ambiguities(user_prompt, classification_result)
+        ambiguities = self.detector.detect_ambiguities(
+            user_prompt, classification_result
+        )
 
         if not ambiguities:
             return {
@@ -921,7 +1016,7 @@ class AmbiguityResolutionOrchestrator:
                 "ambiguities": [],
                 "resolutions": [],
                 "requires_user_interaction": False,
-                "confidence": classification_result.get("confidence_score", 1.0)
+                "confidence": classification_result.get("confidence_score", 1.0),
             }
 
         # Resolve ambiguities
@@ -929,7 +1024,8 @@ class AmbiguityResolutionOrchestrator:
         resolutions = await self.resolver.resolve_ambiguities(ambiguities, context)
 
         # Determine if user interaction is required
-        requires_interaction = any(r.user_interaction_required for r in resolutions)
+        requires_interaction = any(
+            r.user_interaction_required for r in resolutions)
 
         # Calculate overall confidence after resolution
         resolved_confidence = self._calculate_overall_confidence(resolutions)
@@ -943,7 +1039,7 @@ class AmbiguityResolutionOrchestrator:
                     "severity": amb.severity,
                     "blocking": amb.blocking,
                     "confidence": amb.confidence,
-                    "affected_fields": amb.affected_fields
+                    "affected_fields": amb.affected_fields,
                 }
                 for amb in ambiguities
             ],
@@ -954,16 +1050,18 @@ class AmbiguityResolutionOrchestrator:
                     "resolved_value": res.resolved_value,
                     "confidence": res.confidence,
                     "requires_user_input": res.user_interaction_required,
-                    "metadata": res.metadata
+                    "metadata": res.metadata,
                 }
                 for res in resolutions
             ],
             "requires_user_interaction": requires_interaction,
             "confidence": resolved_confidence,
-            "blocking_issues": [amb for amb in ambiguities if amb.blocking]
+            "blocking_issues": [amb for amb in ambiguities if amb.blocking],
         }
 
-    def _calculate_overall_confidence(self, resolutions: List[ResolutionResult]) -> float:
+    def _calculate_overall_confidence(
+        self, resolutions: List[ResolutionResult]
+    ) -> float:
         """Calculate overall confidence after resolution"""
         if not resolutions:
             return 1.0
@@ -1003,35 +1101,36 @@ async def test_ambiguity_system():
     test_cases = [
         {
             "prompt": "Create a video",  # Missing duration, scope unclear
-            "classification": {"content_type": "video", "confidence_score": 0.4}
+            "classification": {"content_type": "video", "confidence_score": 0.4},
         },
         {
             "prompt": "Make a realistic anime cartoon character",  # Style conflict
-            "classification": {"content_type": "image", "confidence_score": 0.6}
+            "classification": {"content_type": "image", "confidence_score": 0.6},
         },
         {
             "prompt": "Character with blue hair",  # Character name missing
-            "classification": {"content_type": "image", "confidence_score": 0.7}
-        }
+            "classification": {"content_type": "image", "confidence_score": 0.7},
+        },
     ]
 
     for i, test in enumerate(test_cases):
         print(f"\n--- Test Case {i+1}: {test['prompt']} ---")
 
-        result = await system.process_request(
-            test["prompt"],
-            test["classification"]
-        )
+        result = await system.process_request(test["prompt"], test["classification"])
 
         print(f"Has ambiguities: {result['has_ambiguities']}")
         print(f"Requires interaction: {result['requires_user_interaction']}")
         print(f"Overall confidence: {result['confidence']:.2f}")
 
         for ambiguity in result.get("ambiguities", []):
-            print(f"  - {ambiguity['type']}: {ambiguity['description']} ({ambiguity['severity']})")
+            print(
+                f"  - {ambiguity['type']}: {ambiguity['description']} ({ambiguity['severity']})"
+            )
 
         for resolution in result.get("resolutions", []):
-            print(f"  → {resolution['strategy']}: {resolution['resolved_value']} (conf: {resolution['confidence']:.2f})")
+            print(
+                f"  → {resolution['strategy']}: {resolution['resolved_value']} (conf: {resolution['confidence']:.2f})"
+            )
 
 
 if __name__ == "__main__":
