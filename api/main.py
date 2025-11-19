@@ -2762,6 +2762,206 @@ async def update_configuration(config: dict):
     return result
 
 
+@app.post("/api/anime/generate/image")
+async def generate_anime_image(
+    request: dict,
+    db: Session = Depends(get_db)
+):
+    """Generate a single anime IMAGE - NOT VIDEO! Target: <30 seconds"""
+    import time
+    import json
+
+    prompt = request.get("prompt", "anime character")
+    style = request.get("style", "anime")
+    quality = request.get("quality", "medium")
+
+    # Image quality settings (NOT VIDEO!)
+    quality_presets = {
+        "low": {"width": 384, "height": 384, "steps": 10},
+        "medium": {"width": 512, "height": 512, "steps": 20},
+        "high": {"width": 768, "height": 768, "steps": 30}
+    }
+
+    settings = quality_presets.get(quality, quality_presets["medium"])
+    seed = int(time.time())
+
+    # Create job record
+    job = ProductionJob(
+        job_type="image_generation",
+        prompt=prompt,
+        parameters=json.dumps(request),
+        status="processing",
+        pipeline_type="image",  # IMPORTANT: Mark as image not video!
+        generation_start_time=datetime.utcnow()
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    # SIMPLE IMAGE WORKFLOW - NO ANIMATION!
+    workflow = {
+        "1": {
+            "inputs": {"ckpt_name": "AOM3A1B.safetensors"},
+            "class_type": "CheckpointLoaderSimple"
+        },
+        "2": {
+            "inputs": {
+                "text": f"{prompt}, {style} style, high quality",
+                "clip": ["1", 1]
+            },
+            "class_type": "CLIPTextEncode"
+        },
+        "3": {
+            "inputs": {
+                "text": "worst quality, low quality, blurry",
+                "clip": ["1", 1]
+            },
+            "class_type": "CLIPTextEncode"
+        },
+        "4": {
+            "inputs": {
+                "width": settings["width"],
+                "height": settings["height"],
+                "batch_size": 1  # Single image!
+            },
+            "class_type": "EmptyLatentImage"
+        },
+        "5": {
+            "inputs": {
+                "seed": seed,
+                "steps": settings["steps"],
+                "cfg": 7.0,
+                "sampler_name": "euler_a",
+                "scheduler": "normal",
+                "denoise": 1.0,
+                "model": ["1", 0],
+                "positive": ["2", 0],
+                "negative": ["3", 0],
+                "latent_image": ["4", 0]
+            },
+            "class_type": "KSampler"
+        },
+        "6": {
+            "inputs": {
+                "samples": ["5", 0],
+                "vae": ["1", 2]
+            },
+            "class_type": "VAEDecode"
+        },
+        "7": {
+            "inputs": {
+                "filename_prefix": f"anime_image_{job.id}_{seed}",
+                "images": ["6", 0]
+            },
+            "class_type": "SaveImage"
+        }
+    }
+
+    try:
+        # Submit to ComfyUI
+        async with aiohttp.ClientSession() as session:
+            payload = {
+                "prompt": workflow,
+                "client_id": f"anime_image_{job.id}"
+            }
+
+            async with session.post(f"{COMFYUI_URL}/prompt", json=payload) as response:
+                result = await response.json()
+                prompt_id = result.get("prompt_id")
+
+                # Update job with ComfyUI ID
+                job.comfyui_job_id = prompt_id
+                db.commit()
+
+                return {
+                    "success": True,
+                    "job_id": job.id,
+                    "prompt_id": prompt_id,
+                    "status": "processing",
+                    "message": f"IMAGE generation started ({settings['width']}x{settings['height']}, {settings['steps']} steps)",
+                    "estimated_time": f"{settings['steps'] * 1.5} seconds",
+                    "pipeline": "image",
+                    "type": "IMAGE NOT VIDEO"
+                }
+
+    except Exception as e:
+        job.status = "failed"
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
+
+
+@app.get("/api/anime/images")
+async def list_generated_images(
+    db: Session = Depends(get_db),
+    limit: int = 50
+):
+    """List all generated images with their paths"""
+    jobs = db.query(ProductionJob).filter(
+        ProductionJob.pipeline_type == "image",
+        ProductionJob.status == "completed"
+    ).order_by(ProductionJob.id.desc()).limit(limit).all()
+
+    return {
+        "total": len(jobs),
+        "images": [
+            {
+                "job_id": job.id,
+                "prompt": job.prompt,
+                "output_path": job.output_path,
+                "created_at": job.created_at,
+                "quality_score": job.quality_score
+            } for job in jobs
+        ]
+    }
+
+
+@app.get("/api/anime/images/{job_id}/status")
+async def check_image_status(job_id: int, db: Session = Depends(get_db)):
+    """Check status of image generation job"""
+    job = db.query(ProductionJob).filter(
+        ProductionJob.id == job_id,
+        ProductionJob.pipeline_type == "image"
+    ).first()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Image job not found")
+
+    # Check ComfyUI for actual status
+    if job.comfyui_job_id and job.status == "processing":
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{COMFYUI_URL}/history/{job.comfyui_job_id}") as response:
+                if response.status == 200:
+                    history = await response.json()
+                    if job.comfyui_job_id in history:
+                        status = history[job.comfyui_job_id].get("status", {})
+                        if status.get("status_str") == "success":
+                            # Find output file
+                            outputs = history[job.comfyui_job_id].get("outputs", {})
+                            for node_id, node_output in outputs.items():
+                                if "images" in node_output:
+                                    for img in node_output["images"]:
+                                        filename = img.get("filename")
+                                        job.output_path = f"/mnt/1TB-storage/ComfyUI/output/{filename}"
+                                        job.status = "completed"
+                                        job.generation_end_time = datetime.utcnow()
+
+                                        # Calculate processing time
+                                        if job.generation_start_time:
+                                            delta = job.generation_end_time - job.generation_start_time
+                                            job.processing_time_seconds = delta.total_seconds()
+
+                                        db.commit()
+                                        break
+
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "output_path": job.output_path,
+        "processing_time": job.processing_time_seconds,
+        "pipeline": "image"
+    }
+
+
 # Mount static files
 app.mount(
     "/static",
