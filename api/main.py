@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Float
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Float, BigInteger
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import sessionmaker, Session
@@ -20,6 +20,23 @@ import aiohttp
 import sys
 import logging
 from datetime import datetime, timedelta
+
+# Character Consistency System imports
+try:
+    from character_consistency_patch import (
+        EnhancedGenerationRequest,
+        CharacterVersionCreate,
+        CharacterVersionResponse,
+        seed_manager,
+        consistency_engine,
+        update_production_job_with_consistency_data
+    )
+    from character_consistency_endpoints import router as consistency_router
+    CONSISTENCY_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Character consistency system not available: {e}")
+    CONSISTENCY_AVAILABLE = False
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -60,6 +77,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include character consistency router
+if CONSISTENCY_AVAILABLE:
+    app.include_router(consistency_router)
+
 
 
 # Database Models
@@ -112,6 +134,11 @@ class ProductionJob(Base):
     frame_count = Column(Integer)
     resolution = Column(String(20))
     performance_score = Column(Float)
+
+    # Enhanced ProductionJob model fields for character consistency
+    seed = Column(BigInteger)
+    character_id = Column(Integer)
+    workflow_snapshot = Column(JSONB)
 
 
 # Bible Database Models
@@ -245,7 +272,7 @@ def get_db():
 
 
 # Integration Services
-COMFYUI_URL = "http://localhost:8188"
+# COMFYUI_URL = "http://localhost:8188"  # FIXED: Use IP address from line 44
 ECHO_SERVICE_URL = "http://192.168.50.135:8309"
 
 # Initialize integrated pipeline

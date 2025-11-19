@@ -1,0 +1,117 @@
+{
+  "summary": {
+    "total_tests": 15,
+    "passed": 14,
+    "failed": 1,
+    "success_rate": 93.33333333333333,
+    "duration_seconds": 0.078714,
+    "test_time": "2025-11-19T04:15:54.875434"
+  },
+  "results": [
+    {
+      "test": "Production Jobs Table",
+      "success": true,
+      "message": "New fields present: ['character_id', 'seed', 'workflow_snapshot']",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.888926"
+    },
+    {
+      "test": "Character Versions Table",
+      "success": true,
+      "message": "Table exists",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.889413"
+    },
+    {
+      "test": "Character Versions Fields",
+      "success": true,
+      "message": "All key fields present in 17 total fields",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.890332"
+    },
+    {
+      "test": "Kai Nakamura Character",
+      "success": true,
+      "message": "Found character: ID=3, Name='Kai Nakamura'",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.890541"
+    },
+    {
+      "test": "Template Directory",
+      "success": true,
+      "message": "Directory exists: /mnt/1TB-storage/ComfyUI/workflows/patrick_characters",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.890601"
+    },
+    {
+      "test": "Template Directory Permissions",
+      "success": true,
+      "message": "Directory is writable",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.890608"
+    },
+    {
+      "test": "Existing Templates",
+      "success": true,
+      "message": "Found 0 templates: []",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.890629"
+    },
+    {
+      "test": "Deterministic Seed",
+      "success": true,
+      "message": "Same inputs produce same seed: 4967015150658112459",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.932842"
+    },
+    {
+      "test": "Seed Variation",
+      "success": true,
+      "message": "Different inputs produce different seeds: 4967015150658112459 vs 2343181409998506118",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.932847"
+    },
+    {
+      "test": "API Health Check",
+      "success": false,
+      "message": "Service returned 404",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.934528"
+    },
+    {
+      "test": "New Consistency Endpoints",
+      "success": true,
+      "message": "Workflow templates endpoint available",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.935518"
+    },
+    {
+      "test": "Canonical Seed Retrieval",
+      "success": true,
+      "message": "Retrieved canonical seed: 54321",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.937313"
+    },
+    {
+      "test": "Character Version Creation",
+      "success": true,
+      "message": "Created version ID 6 with seed 12345",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.943349"
+    },
+    {
+      "test": "Consistent Generation",
+      "success": true,
+      "message": "Started job 8 with seed 54321",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.952420"
+    },
+    {
+      "test": "Job Consistency Info",
+      "success": true,
+      "message": "Retrieved consistency info for job 8",
+      "details": null,
+      "timestamp": "2025-11-19T04:15:54.954065"
+    }
+  ]
+}
