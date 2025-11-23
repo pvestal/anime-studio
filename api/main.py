@@ -541,9 +541,28 @@ async def generate_with_fixed_workflow(
         }
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Fixed workflow generation failed: {str(e)}"
-        )
+        logger.error(f"Workflow generation error: {e}")
+        # Return error result instead of raising exception
+        return {
+            "status": "error",
+            "error": str(e),
+            "job_id": None,
+            "message": "Failed to submit workflow to ComfyUI"
+        }
+
+
+async def check_comfyui_availability() -> bool:
+    """Check if ComfyUI is running and accessible"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{COMFYUI_URL}/queue",
+                timeout=aiohttp.ClientTimeout(total=2)
+            ) as response:
+                return response.status == 200
+    except Exception as e:
+        logger.error(f"ComfyUI not available: {e}")
+        return False
 
 
 async def check_comfyui_output(comfyui_job_id: str) -> Optional[str]:
@@ -924,9 +943,28 @@ async def test_generate_with_quality(quality: str = "low", duration: int = 2):
 async def generate_anime_video(
     request: AnimeGenerationRequest, db: Session = Depends(get_db)
 ):
-    """Direct anime video generation endpoint - FIXED WORKFLOW"""
+    """Direct anime video generation endpoint - FIXED WORKFLOW with error recovery"""
     try:
-        # Generate using FIXED workflow (no more broken Echo workflow)
+        # First check if ComfyUI is accessible
+        comfyui_available = await check_comfyui_availability()
+        if not comfyui_available:
+            # Create job with pending status
+            job = ProductionJob(
+                job_type="video_generation",
+                prompt=request.prompt,
+                parameters=request.model_dump_json(),
+                status="failed",
+            )
+            db.add(job)
+            db.commit()
+            return {
+                "job_id": job.id,
+                "status": "failed",
+                "error": "ComfyUI service is not available",
+                "message": "Please check if ComfyUI is running on port 8188"
+            }
+
+        # Generate using FIXED workflow
         result = await generate_with_fixed_workflow(
             prompt=request.prompt,
             character=request.character,
@@ -934,13 +972,35 @@ async def generate_anime_video(
             duration=request.duration,
         )
 
+        # Check if generation was successful
+        if result.get("status") == "error":
+            # Create failed job
+            job = ProductionJob(
+                job_type="video_generation",
+                prompt=request.prompt,
+                parameters=request.model_dump_json(),
+                status="failed",
+            )
+            db.add(job)
+            db.commit()
+            db.refresh(job)
+
+            return {
+                "job_id": job.id,
+                "status": "failed",
+                "error": result.get("error"),
+                "message": result.get("message", "Generation failed")
+            }
+
+        # Create successful job
         job = ProductionJob(
             job_type="video_generation",
             prompt=request.prompt,
             parameters=request.model_dump_json(),
             status="processing",
-            output_path=result.get("output_path") if result else None,
-            comfyui_job_id=result.get("job_id") if result else None,
+            output_path=result.get("output_path"),
+            comfyui_job_id=result.get("job_id"),
+            generation_start_time=datetime.utcnow()
         )
         db.add(job)
         db.commit()
@@ -956,6 +1016,7 @@ async def generate_anime_video(
             "message": "High-quality video generation started with fixed workflow",
         }
     except Exception as e:
+        logger.error(f"Unexpected error in generate_anime_video: {e}")
         job = ProductionJob(
             job_type="video_generation",
             prompt=request.prompt,
@@ -964,11 +1025,12 @@ async def generate_anime_video(
         )
         db.add(job)
         db.commit()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Generation failed: {
-                str(e)}",
-        )
+        return {
+            "job_id": job.id if job else None,
+            "status": "failed",
+            "error": str(e),
+            "message": "Unexpected error during generation"
+        }
 
 
 @app.post("/api/anime/generate-fast")
@@ -2156,12 +2218,49 @@ async def get_job(job_id: int, db: Session = Depends(get_db)):
     }
 
 
+def check_and_update_job_timeout(job: ProductionJob, db: Session, timeout_minutes: int = 5):
+    """Check if a job has timed out and update its status"""
+    if job.status in ["completed", "failed", "timeout"]:
+        return  # Job already finished
+
+    # Check if job has been running too long
+    time_since_creation = datetime.utcnow() - job.created_at
+    if time_since_creation > timedelta(minutes=timeout_minutes):
+        logger.warning(f"Job {job.id} timed out after {time_since_creation.total_seconds()/60:.1f} minutes")
+        job.status = "timeout"
+        db.commit()
+
+        # Try to kill any associated ComfyUI job
+        if job.comfyui_job_id:
+            try:
+                import aiohttp
+                import asyncio
+                async def interrupt_comfyui():
+                    async with aiohttp.ClientSession() as session:
+                        # Interrupt the ComfyUI queue
+                        async with session.post(
+                            "http://localhost:8188/interrupt",
+                            timeout=aiohttp.ClientTimeout(total=5)
+                        ) as resp:
+                            if resp.status == 200:
+                                logger.info(f"Interrupted ComfyUI job {job.comfyui_job_id}")
+                asyncio.create_task(interrupt_comfyui())
+            except Exception as e:
+                logger.error(f"Failed to interrupt ComfyUI job: {e}")
+
+
 @app.get("/api/anime/jobs/{job_id}/status")
 async def get_job_status(job_id: int, db: Session = Depends(get_db)):
     """Get production job status"""
     job = db.query(ProductionJob).filter(ProductionJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    # Check for timeout before returning status
+    check_and_update_job_timeout(job, db)
+
+    # Calculate time elapsed
+    time_elapsed = datetime.utcnow() - job.created_at
 
     return {
         "id": job.id,
@@ -2170,6 +2269,132 @@ async def get_job_status(job_id: int, db: Session = Depends(get_db)):
         "output_path": job.output_path,
         "quality_score": job.quality_score,
         "created_at": job.created_at,
+        "time_elapsed_seconds": int(time_elapsed.total_seconds()),
+        "timeout_warning": job.status == "timeout" or (job.status == "processing" and time_elapsed > timedelta(minutes=4))
+    }
+
+
+@app.post("/api/anime/jobs/check-timeouts")
+async def check_all_timeouts(db: Session = Depends(get_db)):
+    """Check all processing jobs for timeouts"""
+    # Get all processing jobs
+    processing_jobs = db.query(ProductionJob).filter(
+        ProductionJob.status.in_(["processing", "pending"])
+    ).all()
+
+    timed_out_jobs = []
+    for job in processing_jobs:
+        old_status = job.status
+        check_and_update_job_timeout(job, db)
+        if job.status == "timeout" and old_status != "timeout":
+            timed_out_jobs.append(job.id)
+
+    return {
+        "checked_jobs": len(processing_jobs),
+        "timed_out_jobs": timed_out_jobs,
+        "message": f"Marked {len(timed_out_jobs)} jobs as timed out"
+    }
+
+
+@app.get("/api/anime/jobs/{job_id}/progress")
+async def get_job_progress(job_id: int, db: Session = Depends(get_db)):
+    """Get real-time job progress from ComfyUI"""
+    job = db.query(ProductionJob).filter(ProductionJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Check for timeout first
+    check_and_update_job_timeout(job, db)
+
+    # If job is not processing, return current status
+    if job.status != "processing":
+        return {
+            "job_id": job.id,
+            "status": job.status,
+            "progress": 1.0 if job.status == "completed" else 0.0,
+            "message": f"Job {job.status}"
+        }
+
+    # Check ComfyUI for real progress
+    if job.comfyui_job_id:
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Check queue for running/pending status
+                async with session.get(
+                    f"{COMFYUI_URL}/queue",
+                    timeout=aiohttp.ClientTimeout(total=2)
+                ) as response:
+                    if response.status == 200:
+                        queue_data = await response.json()
+
+                        # Check if in running queue
+                        running = queue_data.get("queue_running", [])
+                        for idx, running_job in enumerate(running):
+                            if running_job and running_job[1] == job.comfyui_job_id:
+                                return {
+                                    "job_id": job.id,
+                                    "status": "processing",
+                                    "progress": 0.5,
+                                    "message": "Currently generating in ComfyUI",
+                                    "queue_position": 0
+                                }
+
+                        # Check if in pending queue
+                        pending = queue_data.get("queue_pending", [])
+                        for idx, pending_job in enumerate(pending):
+                            if pending_job and pending_job[1] == job.comfyui_job_id:
+                                return {
+                                    "job_id": job.id,
+                                    "status": "processing",
+                                    "progress": 0.1,
+                                    "message": f"Queued at position {idx + 1}",
+                                    "queue_position": idx + 1
+                                }
+
+                # Check history for completion
+                async with session.get(
+                    f"{COMFYUI_URL}/history/{job.comfyui_job_id}",
+                    timeout=aiohttp.ClientTimeout(total=2)
+                ) as response:
+                    if response.status == 200:
+                        history_data = await response.json()
+                        if job.comfyui_job_id in history_data:
+                            # Job completed, update status and check for output
+                            job_result = history_data[job.comfyui_job_id]
+
+                            # Look for output files
+                            output_path = await check_comfyui_output(job.comfyui_job_id)
+                            if output_path:
+                                job.status = "completed"
+                                job.output_path = output_path
+                                job.generation_end_time = datetime.utcnow()
+                                if job.generation_start_time:
+                                    job.processing_time_seconds = (
+                                        job.generation_end_time - job.generation_start_time
+                                    ).total_seconds()
+                            else:
+                                job.status = "failed"
+
+                            db.commit()
+
+                            return {
+                                "job_id": job.id,
+                                "status": job.status,
+                                "progress": 1.0 if job.status == "completed" else 0.0,
+                                "output_path": job.output_path,
+                                "message": "Generation completed" if job.status == "completed" else "Generation failed - no output found"
+                            }
+
+        except Exception as e:
+            logger.error(f"Error checking job progress: {e}")
+
+    # Job not found in ComfyUI - might have been lost
+    return {
+        "job_id": job.id,
+        "status": "unknown",
+        "progress": 0.0,
+        "message": "Job not found in ComfyUI queue or history",
+        "error": "Job may have been interrupted or ComfyUI restarted"
     }
 
 
@@ -2995,6 +3220,49 @@ app.mount(
     StaticFiles(directory="/opt/tower-anime-production/static"),
     name="static",
 )
+
+
+import asyncio
+from contextlib import asynccontextmanager
+
+
+async def periodic_timeout_checker():
+    """Background task to check for timed out jobs every 60 seconds"""
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every minute
+
+            # Get a database session
+            db = next(get_db())
+            try:
+                processing_jobs = db.query(ProductionJob).filter(
+                    ProductionJob.status.in_(["processing", "pending"])
+                ).all()
+
+                timed_out_count = 0
+                for job in processing_jobs:
+                    old_status = job.status
+                    check_and_update_job_timeout(job, db)
+                    if job.status == "timeout" and old_status != "timeout":
+                        timed_out_count += 1
+                        logger.info(f"Job {job.id} marked as timed out")
+
+                if timed_out_count > 0:
+                    logger.info(f"Timeout checker: Marked {timed_out_count} jobs as timed out")
+            finally:
+                db.close()
+
+        except Exception as e:
+            logger.error(f"Error in timeout checker: {e}")
+
+
+# Start background timeout checker
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks on app startup"""
+    logger.info("Starting anime production API with timeout monitoring")
+    asyncio.create_task(periodic_timeout_checker())
+
 
 if __name__ == "__main__":
     import uvicorn
