@@ -1,0 +1,57 @@
+{
+  "timestamp": "2025-11-25T02:57:54.039635",
+  "summary": {
+    "total": 9,
+    "passed": 1,
+    "failed": 8,
+    "crashed": 0,
+    "success_rate": 11.11111111111111
+  },
+  "results": [
+    {
+      "test": "ComfyUI Connectivity",
+      "status": "FAIL",
+      "error": "'ComfyUIConnector' object has no attribute '_make_request'"
+    },
+    {
+      "test": "Workflow Generation",
+      "status": "FAIL",
+      "error": "'WorkflowGenerator' object has no attribute 'create_image_workflow'"
+    },
+    {
+      "test": "Job Submission & Tracking",
+      "status": "FAIL",
+      "error": "JobManager.create_job() missing 1 required positional argument: 'prompt'"
+    },
+    {
+      "test": "Concurrent Jobs",
+      "status": "FAIL",
+      "error": "JobManager.create_job() missing 1 required positional argument: 'prompt'"
+    },
+    {
+      "test": "Error Handling",
+      "status": "PASS",
+      "error": null
+    },
+    {
+      "test": "Output Retrieval",
+      "status": "FAIL",
+      "error": "'WorkflowGenerator' object has no attribute 'create_image_workflow'"
+    },
+    {
+      "test": "Job Persistence",
+      "status": "FAIL",
+      "error": "JobManager.create_job() missing 1 required positional argument: 'prompt'"
+    },
+    {
+      "test": "API Job Status",
+      "status": "FAIL",
+      "error": "Status 404"
+    },
+    {
+      "test": "Stress Test",
+      "status": "FAIL",
+      "error": "Only 0/10 submitted"
+    }
+  ]
+}
