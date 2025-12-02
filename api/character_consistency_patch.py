@@ -88,7 +88,7 @@ class SeedManager:
 
         result = db_session.execute(
             text("""
-                SELECT seed FROM anime_api.character_versions
+                SELECT seed FROM character_versions
                 WHERE character_id = :character_id AND is_canonical = TRUE
                 ORDER BY created_at DESC LIMIT 1
             """),
@@ -126,7 +126,7 @@ class CharacterConsistencyEngine:
         from sqlalchemy import text
         versions = db_session.execute(
             text("""
-                SELECT * FROM anime_api.character_versions
+                SELECT * FROM character_versions
                 WHERE character_id = :character_id
                 ORDER BY created_at DESC
             """),
@@ -202,14 +202,14 @@ def create_character_version(db_session, version_data: CharacterVersionCreate) -
 
     # Get next version number
     next_version = db_session.execute(
-        text("SELECT anime_api.get_next_character_version(:character_id)"),
+        text("SELECT get_next_character_version(:character_id)"),
         {"character_id": version_data.character_id}
     ).scalar()
 
     # Insert new version
     result = db_session.execute(
         text("""
-            INSERT INTO anime_api.character_versions
+            INSERT INTO character_versions
             (character_id, version_number, seed, appearance_changes, lora_path,
              embedding_path, comfyui_workflow, workflow_template_path,
              generation_parameters, notes, is_canonical)
@@ -247,7 +247,7 @@ def update_production_job_with_consistency_data(db_session, job_id: int,
 
     db_session.execute(
         text("""
-            UPDATE anime_api.production_jobs
+            UPDATE production_jobs
             SET seed = :seed,
                 character_id = :character_id,
                 workflow_snapshot = :workflow_snapshot

@@ -119,9 +119,9 @@ def test_database_integration():
         # Test query to verify tables exist
         test_query = """
         SELECT
-            (SELECT COUNT(*) FROM anime_api.production_jobs WHERE seed IS NOT NULL) as jobs_with_seeds,
-            (SELECT COUNT(*) FROM anime_api.character_versions) as total_versions,
-            (SELECT COUNT(*) FROM anime_api.characters) as total_characters;
+            (SELECT COUNT(*) FROM production_jobs WHERE seed IS NOT NULL) as jobs_with_seeds,
+            (SELECT COUNT(*) FROM character_versions) as total_versions,
+            (SELECT COUNT(*) FROM characters) as total_characters;
         """
 
         print("\n🔍 Testing database integration...")

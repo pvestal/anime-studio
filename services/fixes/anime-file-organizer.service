@@ -1,0 +1,15 @@
+[Unit]
+Description=Anime Production File Organizer
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=patrick
+WorkingDirectory=/opt/tower-anime-production/services/fixes
+Environment="PATH=/usr/bin:/usr/local/bin"
+ExecStart=/usr/bin/python3 /opt/tower-anime-production/services/fixes/file_organizer.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,130 @@
+{
+  "test_summary": {
+    "total_tests": 6,
+    "passed": 3,
+    "failed": 1,
+    "errors": 2,
+    "success_rate": 0.5,
+    "duration_seconds": 0.6527295112609863
+  },
+  "test_results": {
+    "database_schema": {
+      "status": "pass",
+      "columns_found": 41,
+      "tables_found": 3
+    },
+    "sample_data_creation": {
+      "status": "error",
+      "error": "invalid input syntax for type integer: \"test_job_0_1764041890\"\nLINE 8:                             VALUES ('test_job_0_1764041890',...\n                                            ^\n"
+    },
+    "ml_prediction": {
+      "status": "pass",
+      "training_results": {
+        "image_random_forest": {
+          "error": "Insufficient training data for image: 1 samples"
+        },
+        "image_linear_regression": {
+          "error": "Insufficient training data for image: 1 samples"
+        },
+        "video_random_forest": {
+          "error": "Insufficient training data for video: 1 samples"
+        },
+        "video_linear_regression": {
+          "error": "Insufficient training data for video: 1 samples"
+        }
+      },
+      "prediction_results": [
+        {
+          "job_params": {
+            "pipeline_type": "image",
+            "resolution": "512x512",
+            "steps": 20,
+            "frame_count": 1,
+            "job_type": "character"
+          },
+          "predicted_time": 30.0,
+          "confidence": 0.3,
+          "model_used": "fallback"
+        },
+        {
+          "job_params": {
+            "pipeline_type": "video",
+            "resolution": "768x768",
+            "steps": 30,
+            "frame_count": 60,
+            "job_type": "scene"
+          },
+          "predicted_time": 1012.5,
+          "confidence": 0.3,
+          "model_used": "fallback"
+        }
+      ]
+    },
+    "performance_analyzer": {
+      "status": "pass",
+      "bottlenecks_found": 0,
+      "trends_analyzed": 0,
+      "opportunities_identified": 0,
+      "report_sections": [
+        "report_generated",
+        "analysis_period_days",
+        "overall_statistics",
+        "bottlenecks",
+        "trends",
+        "optimization_opportunities",
+        "summary"
+      ]
+    },
+    "performance_middleware": {
+      "status": "error",
+      "error": "No module named 'psutil'"
+    },
+    "api_endpoints": {
+      "status": "fail",
+      "successful_endpoints": 0,
+      "total_endpoints": 5,
+      "details": [
+        {
+          "endpoint": "http://localhost:8328/api/anime/performance/estimate-time",
+          "method": "POST",
+          "status_code": 404,
+          "success": false,
+          "response_size": 22
+        },
+        {
+          "endpoint": "http://localhost:8328/api/anime/performance/trends?days_back=7",
+          "method": "GET",
+          "status_code": 404,
+          "success": false,
+          "response_size": 22
+        },
+        {
+          "endpoint": "http://localhost:8328/api/anime/performance/alerts",
+          "method": "GET",
+          "status_code": 404,
+          "success": false,
+          "response_size": 22
+        },
+        {
+          "endpoint": "http://localhost:8328/api/anime/performance/weekly-report",
+          "method": "GET",
+          "status_code": 404,
+          "success": false,
+          "response_size": 22
+        },
+        {
+          "endpoint": "http://localhost:8328/api/anime/performance/model-status",
+          "method": "GET",
+          "status_code": 404,
+          "success": false,
+          "response_size": 22
+        }
+      ]
+    }
+  },
+  "overall_status": "FAIL",
+  "recommendations": [
+    "Start the anime production API server to test endpoints",
+    "Check performance middleware initialization and dependencies"
+  ]
+}

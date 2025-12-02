@@ -54,11 +54,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Import and include Redis router
+try:
+    from redis_api_endpoints import redis_router
+    app.include_router(redis_router, tags=["Redis Queue"])
+    logger.info("Redis router integrated successfully")
+except ImportError as e:
+    logger.warning(f"Redis router not available: {e}")
+except Exception as e:
+    logger.error(f"Failed to integrate Redis router: {e}")
+
 # Database configuration
 DB_CONFIG = {
-    "host": "localhost",
+    "host": "192.168.50.135",
     "database": "anime_production",
     "user": "patrick",
+    "password": "tower_echo_brain_secret_key_2025",
     "port": 5432,
     "options": "-c search_path=anime_api,public",
 }
@@ -1192,7 +1203,7 @@ async def generate_from_command(project_id: int, request: Dict[str, Any]):
             f"Triggering generation via anime service: {generation_params}")
         async with httpx.AsyncClient() as client:
             gen_response = await client.post(
-                f"http://127.0.0.1:8328/api/generate",
+                f"http://127.0.0.1:8328/api/anime/generate-redis",
                 json=generation_params,
                 timeout=60.0,
             )
@@ -1331,7 +1342,7 @@ async def startup_event():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8321)
+    uvicorn.run(app, host="127.0.0.1", port=8328)
 
 
 # ============================================================================

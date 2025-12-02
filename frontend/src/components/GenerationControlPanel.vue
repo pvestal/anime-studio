@@ -12,6 +12,31 @@
       </div>
     </div>
 
+    <!-- Explicit Generation Type Selection -->
+    <div class="control-section generation-type-section">
+      <label class="control-label">Generation Type</label>
+      <div class="type-selector">
+        <div class="type-options">
+          <div @click="selectedGenerationType = 'image'"
+               :class="['type-option', { 'selected': selectedGenerationType === 'image' }]">
+            <i class="pi pi-image type-icon"></i>
+            <span class="type-label">Generate Image</span>
+            <span class="type-description">Single frame artwork</span>
+          </div>
+          <div @click="selectedGenerationType = 'video'"
+               :class="['type-option', { 'selected': selectedGenerationType === 'video' }]">
+            <i class="pi pi-video type-icon"></i>
+            <span class="type-label">Generate Video</span>
+            <span class="type-description">Animated sequence</span>
+          </div>
+        </div>
+      </div>
+      <div v-if="!selectedGenerationType" class="selection-warning">
+        <i class="pi pi-exclamation-triangle"></i>
+        <span>Please select generation type before proceeding</span>
+      </div>
+    </div>
+
     <!-- Quality Presets -->
     <div class="control-section">
       <label class="control-label">Quality Preset</label>
@@ -96,13 +121,48 @@
         </button>
       </div>
 
-      <div class="setting-row">
+      <div class="setting-row" v-if="selectedGenerationType === 'image'">
         <label class="setting-label">Batch Size:</label>
         <select v-model="settings.batchSize" class="setting-select">
           <option value="1">1 image</option>
           <option value="2">2 images</option>
           <option value="4">4 images</option>
         </select>
+      </div>
+
+      <!-- Video-specific settings -->
+      <div v-if="selectedGenerationType === 'video'" class="video-settings">
+        <div class="setting-row">
+          <label class="setting-label">Duration:</label>
+          <select v-model="settings.videoDuration" class="setting-select">
+            <option value="2">2 seconds</option>
+            <option value="5">5 seconds</option>
+            <option value="10">10 seconds</option>
+            <option value="30">30 seconds</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <label class="setting-label">Frame Rate:</label>
+          <select v-model="settings.frameRate" class="setting-select">
+            <option value="8">8 FPS (Smooth)</option>
+            <option value="12">12 FPS (Standard)</option>
+            <option value="24">24 FPS (Cinematic)</option>
+          </select>
+        </div>
+
+        <div class="setting-row">
+          <label class="setting-label">Motion Strength:</label>
+          <input
+            type="range"
+            v-model="settings.motionStrength"
+            min="0.1"
+            max="1.0"
+            step="0.1"
+            class="setting-slider"
+          />
+          <span class="setting-value">{{ settings.motionStrength }}</span>
+        </div>
       </div>
     </div>
 
@@ -179,6 +239,7 @@ export default {
     const selectedModel = ref('')
     const showAdvanced = ref(false)
     const generating = ref(false)
+    const selectedGenerationType = ref('')
 
     // VRAM tracking
     const vramUsed = ref(0)
@@ -193,7 +254,11 @@ export default {
       batchSize: 1,
       sampler: 'euler_a',
       scheduler: 'normal',
-      denoiseStrength: 0.75
+      denoiseStrength: 0.75,
+      // Video-specific settings
+      videoDuration: 5,
+      frameRate: 12,
+      motionStrength: 0.7
     })
 
     // Computed properties
@@ -208,7 +273,7 @@ export default {
     })
 
     const canGenerate = computed(() => {
-      return selectedModel.value && !generating.value && vramUsage.value < 95
+      return selectedModel.value && !generating.value && vramUsage.value < 95 && selectedGenerationType.value
     })
 
     // Methods
@@ -277,6 +342,7 @@ export default {
       if (!canGenerate.value) return
 
       const generationConfig = {
+        type: selectedGenerationType.value,
         model: selectedModel.value,
         preset: selectedPreset.value,
         settings: { ...settings }
@@ -326,6 +392,7 @@ export default {
       availableModels,
       selectedPreset,
       selectedModel,
+      selectedGenerationType,
       showAdvanced,
       generating,
       vramUsed,
@@ -613,5 +680,116 @@ export default {
 
 .action-button.secondary:hover {
   background: #333;
+}
+
+/* Generation Type Selection */
+.generation-type-section {
+  background: #0f0f0f;
+  border: 2px solid #333;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.type-selector {
+  margin-bottom: 1rem;
+}
+
+.type-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.type-option {
+  background: #1a1a1a;
+  border: 2px solid #333;
+  border-radius: 8px;
+  padding: 1.5rem 1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+}
+
+.type-option:hover {
+  border-color: #3b82f6;
+  transform: translateY(-2px);
+}
+
+.type-option.selected {
+  background: #1e2a4a;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.type-option.selected::before {
+  content: '✓';
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: #3b82f6;
+  color: white;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: bold;
+}
+
+.type-icon {
+  font-size: 2rem;
+  color: #3b82f6;
+  margin-bottom: 0.75rem;
+}
+
+.type-label {
+  font-weight: 600;
+  color: #e0e0e0;
+  margin-bottom: 0.25rem;
+  font-size: 1rem;
+}
+
+.type-description {
+  font-size: 0.85rem;
+  color: #999;
+}
+
+.selection-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #4a2d2d;
+  border: 1px solid #ef4444;
+  border-radius: 4px;
+  color: #fca5a5;
+  font-size: 0.9rem;
+}
+
+.selection-warning i {
+  color: #ef4444;
+}
+
+/* Video Settings */
+.video-settings {
+  background: #0a0a0a;
+  border-radius: 6px;
+  padding: 1rem;
+  margin-top: 0.5rem;
+  border: 1px solid #1e40af;
+}
+
+.video-settings .setting-row {
+  margin-bottom: 1rem;
+}
+
+.video-settings .setting-row:last-child {
+  margin-bottom: 0;
 }
 </style>

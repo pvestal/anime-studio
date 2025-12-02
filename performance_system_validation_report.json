@@ -1,0 +1,112 @@
+{
+  "test_execution": {
+    "timestamp": "2025-11-25T03:41:18.680909",
+    "duration_seconds": 0.7325212955474854,
+    "total_tests": 6,
+    "passed": 6,
+    "failed": 0,
+    "errors": 0,
+    "success_rate": 1.0
+  },
+  "system_capabilities": {
+    "database_schema_enhanced": true,
+    "ml_prediction_available": true,
+    "performance_analysis_working": true,
+    "api_models_valid": true,
+    "system_integration_functional": true
+  },
+  "detailed_results": {
+    "database_enhancements": {
+      "status": "pass",
+      "new_tables_created": 3,
+      "new_columns_added": 3,
+      "ml_view_accessible": true,
+      "tables_found": [
+        "performance_alerts",
+        "performance_prediction_models",
+        "performance_trends"
+      ],
+      "columns_found": [
+        "success_rate",
+        "complexity_score",
+        "job_type"
+      ]
+    },
+    "ml_prediction_accuracy": {
+      "status": "pass",
+      "successful_predictions": 4,
+      "reasonable_predictions": 4,
+      "total_scenarios": 4,
+      "prediction_details": [
+        {
+          "scenario": "Simple Image",
+          "predicted_time": 30.0,
+          "confidence": 0.3,
+          "method": "heuristic",
+          "reasonable": true
+        },
+        {
+          "scenario": "High Resolution Image",
+          "predicted_time": 180.0,
+          "confidence": 0.3,
+          "method": "heuristic",
+          "reasonable": true
+        },
+        {
+          "scenario": "Short Video",
+          "predicted_time": 120.0,
+          "confidence": 0.3,
+          "method": "heuristic",
+          "reasonable": true
+        },
+        {
+          "scenario": "Long Video",
+          "predicted_time": 1687.5,
+          "confidence": 0.3,
+          "method": "heuristic",
+          "reasonable": true
+        }
+      ]
+    },
+    "performance_analysis": {
+      "status": "pass",
+      "bottlenecks_identified": 0,
+      "trends_detected": 0,
+      "optimization_opportunities": 0,
+      "comprehensive_report_generated": true,
+      "analysis_capabilities": {
+        "bottleneck_types": [],
+        "trend_metrics": [],
+        "opportunity_areas": []
+      }
+    },
+    "api_models_validation": {
+      "status": "pass",
+      "valid_request_created": true,
+      "valid_metrics_created": true,
+      "validation_tests": [
+        "pipeline_type_validation_passed"
+      ]
+    },
+    "system_integration": {
+      "status": "pass",
+      "prediction_generated": true,
+      "bottlenecks_analyzed": 0,
+      "trends_analyzed": 0,
+      "workflow_completed": true,
+      "predicted_time": 30.0
+    },
+    "performance_thresholds": {
+      "status": "pass",
+      "alerts_configured": true,
+      "thresholds_reasonable": true,
+      "alert_count": 4
+    }
+  },
+  "overall_status": "OPERATIONAL",
+  "readiness_assessment": {
+    "production_ready": true,
+    "core_functionality_working": true,
+    "critical_issues": false
+  }
+}

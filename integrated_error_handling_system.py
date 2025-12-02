@@ -45,7 +45,7 @@ class SystemConfig:
     log_level: str = "INFO"
 
     # Database settings
-    database_host: str = "192.168.50.135"
+    database_host: str = "localhost"
     database_name: str = "anime_production"
     database_user: str = "patrick"
     database_password: str = "tower_echo_brain_secret_key_2025"

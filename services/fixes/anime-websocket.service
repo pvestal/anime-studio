@@ -1,0 +1,15 @@
+[Unit]
+Description=Anime Production WebSocket Progress Server
+After=network.target redis.service
+
+[Service]
+Type=simple
+User=patrick
+WorkingDirectory=/opt/tower-anime-production/services/fixes
+Environment="PATH=/usr/bin:/usr/local/bin"
+ExecStart=/usr/bin/python3 /opt/tower-anime-production/services/fixes/websocket_progress.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

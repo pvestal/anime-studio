@@ -279,7 +279,7 @@ class IntegratedQCAnimeGenerator:
 
                 # Call LLaVA via Ollama
                 response = requests.post(
-                    "http://192.168.50.135:11434/api/generate",
+                    "http://localhost:11434/api/generate",
                     json={
                         "model": "llava:13b",
                         "prompt": qc_prompt,
@@ -390,4 +390,4 @@ if __name__ == "__main__":
     print("🎬 Starting Integrated QC Anime Generation Service")
     print("🔍 LLaVA 13B Quality Control: ENABLED")
     print("🎯 Automatic garbage detection and regeneration")
-    uvicorn.run(app, host="0.0.0.0", port=8329)
+    uvicorn.run(app, host="0.0.0.0", port=8330)

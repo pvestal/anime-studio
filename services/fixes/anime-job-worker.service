@@ -1,0 +1,16 @@
+[Unit]
+Description=Anime Production Job Worker
+After=network.target redis.service comfyui.service
+
+[Service]
+Type=simple
+User=patrick
+WorkingDirectory=/opt/tower-anime-production
+Environment="PATH=/opt/tower-anime-production/venv/bin:/usr/bin:/usr/local/bin"
+Environment="PYTHONPATH=/opt/tower-anime-production"
+ExecStart=/opt/tower-anime-production/venv/bin/python3 /opt/tower-anime-production/services/fixes/worker.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

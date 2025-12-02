@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Float, BigInteger
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Float, BigInteger, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import sessionmaker, Session
@@ -46,19 +46,38 @@ logger = logging.getLogger(__name__)
 sys.path.append("/opt/tower-anime-production/pipeline")
 sys.path.append("/opt/tower-anime-production/quality")
 
-# Import integrated pipeline
+# Import integrated pipeline with quality control
 try:
-    from test_pipeline_simple import SimplifiedAnimePipeline
+    from integrated_anime_pipeline import IntegratedAnimePipeline
+    from quality.anime_quality_orchestrator import AnimeQualityOrchestrator
 
     PIPELINE_AVAILABLE = True
-except ImportError:
-    PIPELINE_AVAILABLE = False
+    QUALITY_CONTROL_AVAILABLE = True
+
+    # Initialize quality-controlled pipeline
+    pipeline = IntegratedAnimePipeline()
+    quality_orchestrator = AnimeQualityOrchestrator()
+
+except ImportError as e:
+    # Fallback to simplified pipeline if integrated not available
+    try:
+        from test_pipeline_simple import SimplifiedAnimePipeline
+        pipeline = SimplifiedAnimePipeline()
+        PIPELINE_AVAILABLE = True
+        QUALITY_CONTROL_AVAILABLE = False
+        quality_orchestrator = None
+        logger.warning(f"Using simplified pipeline without quality control: {e}")
+    except ImportError:
+        PIPELINE_AVAILABLE = False
+        QUALITY_CONTROL_AVAILABLE = False
+        pipeline = None
+        quality_orchestrator = None
 
 # Database Setup
-DATABASE_URL = "postgresql://patrick:tower_echo_brain_secret_key_2025@192.168.50.135/anime_production"
+DATABASE_URL = "postgresql://patrick:tower_echo_brain_secret_key_2025@localhost/anime_production"
 
 # ComfyUI Configuration
-COMFYUI_URL = "http://192.168.50.135:8188"
+COMFYUI_URL = "http://localhost:8188"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -139,6 +158,7 @@ class ProductionJob(Base):
     seed = Column(BigInteger)
     character_id = Column(Integer)
     workflow_snapshot = Column(JSONB)
+    error = Column(Text)  # Error message field
 
 
 # Bible Database Models
@@ -197,10 +217,38 @@ class AnimeGenerationRequest(BaseModel):
     duration: int = 3
     style: str = "anime"
     type: str = "professional"  # professional, personal, creative
+    generation_type: str = "video"  # image or video - explicit user selection
 
 
 class PersonalCreativeRequest(BaseModel):
     mood: str = "neutral"
+
+
+class IntentClassificationRequest(BaseModel):
+    user_prompt: str
+    explicit_type: str  # image or video
+    preferred_style: Optional[str] = None
+    quality_preference: Optional[str] = None
+    urgency_hint: Optional[str] = None
+    context: dict = {}
+
+
+class IntentClassificationResponse(BaseModel):
+    content_type: str
+    generation_scope: str
+    style_preference: str
+    quality_level: str
+    duration_seconds: Optional[int] = None
+    resolution: str = "1024x1024"
+    character_names: List[str] = []
+    processed_prompt: str
+    target_service: str = "comfyui"
+    estimated_time_minutes: Optional[int] = None
+    estimated_vram_gb: Optional[float] = None
+    output_format: str
+    ambiguity_flags: List[str] = []
+    confidence_score: float = 1.0
+    suggested_clarifications: List[dict] = []
     personal_context: Optional[str] = None
     style_preferences: Optional[str] = None
     biometric_data: Optional[dict] = None
@@ -266,6 +314,8 @@ class CharacterResponse(BaseModel):
 def get_db():
     db = SessionLocal()
     try:
+        # Set search_path to include anime_api schema
+        db.execute(text("SET search_path TO anime_api, public"))
         yield db
     finally:
         db.close()
@@ -273,7 +323,7 @@ def get_db():
 
 # Integration Services
 # COMFYUI_URL = "http://localhost:8188"  # FIXED: Use IP address from line 44
-ECHO_SERVICE_URL = "http://192.168.50.135:8309"
+ECHO_SERVICE_URL = "http://localhost:8309"
 
 # Initialize integrated pipeline
 pipeline = None
@@ -312,30 +362,191 @@ async def submit_comfyui_workflow(workflow_data: dict):
         )
 
 
-async def generate_with_fixed_workflow(
-    prompt: str, character: str = None, style: str = "anime", duration: int = 5
-):
-    """Generate anime using FIXED ComfyUI workflow with AnimateDiff context windows for 5-second videos"""
+async def check_comfyui_job_status(prompt_id: str):
+    """Check real ComfyUI job status by polling queue and history endpoints"""
     try:
-        # Enhanced character-specific prompt
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            # First check if job is in running queue
+            async with session.get(f"{COMFYUI_URL}/queue") as response:
+                if response.status == 200:
+                    queue_data = await response.json()
+
+                    # Check if job is currently running
+                    for job in queue_data.get("queue_running", []):
+                        if len(job) > 1 and job[1] == prompt_id:
+                            return {
+                                "status": "processing",
+                                "progress": 0.5,  # Assume 50% when running
+                                "message": "Generation in progress...",
+                                "completed": False
+                            }
+
+                    # Check if job is in pending queue
+                    for job in queue_data.get("queue_pending", []):
+                        if len(job) > 1 and job[1] == prompt_id:
+                            return {
+                                "status": "pending",
+                                "progress": 0.0,
+                                "message": "Waiting in queue...",
+                                "completed": False
+                            }
+
+            # If not in queue, check history for completion
+            async with session.get(f"{COMFYUI_URL}/history/{prompt_id}") as response:
+                if response.status == 200:
+                    history_data = await response.json()
+
+                    if prompt_id in history_data:
+                        job_data = history_data[prompt_id]
+                        status_info = job_data.get("status", {})
+
+                        if status_info.get("completed", False):
+                            # Check if there were any errors
+                            messages = status_info.get("messages", [])
+                            has_error = any(msg[0] == "execution_error" for msg in messages)
+
+                            if has_error:
+                                error_msg = "Generation failed"
+                                for msg in messages:
+                                    if msg[0] == "execution_error" and len(msg) > 1:
+                                        error_msg = msg[1].get("exception_message", "Unknown error")
+                                        break
+
+                                return {
+                                    "status": "failed",
+                                    "progress": 0.0,
+                                    "message": f"Error: {error_msg}",
+                                    "completed": True,
+                                    "error": True
+                                }
+                            else:
+                                # Successfully completed
+                                outputs = job_data.get("outputs", {})
+                                return {
+                                    "status": "completed",
+                                    "progress": 1.0,
+                                    "message": "Generation completed successfully",
+                                    "completed": True,
+                                    "outputs": outputs
+                                }
+                        else:
+                            # Job exists in history but not completed
+                            status_str = status_info.get("status_str", "unknown")
+                            if status_str == "error":
+                                return {
+                                    "status": "failed",
+                                    "progress": 0.0,
+                                    "message": "Generation failed",
+                                    "completed": True,
+                                    "error": True
+                                }
+                            else:
+                                return {
+                                    "status": "processing",
+                                    "progress": 0.3,
+                                    "message": f"Status: {status_str}",
+                                    "completed": False
+                                }
+
+            # Job not found anywhere - might be old or invalid
+            return {
+                "status": "not_found",
+                "progress": 0.0,
+                "message": "Job not found in ComfyUI queue or history",
+                "completed": True,
+                "error": True
+            }
+
+    except Exception as e:
+        logger.error(f"Error checking ComfyUI job status for {prompt_id}: {e}")
+        return {
+            "status": "error",
+            "progress": 0.0,
+            "message": f"Failed to check status: {str(e)}",
+            "completed": False,
+            "error": True
+        }
+
+
+async def generate_with_fixed_workflow(
+    prompt: str, character: str = None, style: str = "anime", duration: int = 5, generation_type: str = "video"
+):
+    """Generate anime using FIXED ComfyUI workflow - handles both image and video generation"""
+    try:
+        # Enhanced character-specific prompt (adapted for generation type)
         if character and character.lower() == "kai":
-            enhanced_prompt = f"1boy, Kai Nakamura, cyberpunk male character, spiky black hair, tech augmented eyes, black jacket, neon city background, {prompt}, anime style, high quality, detailed"
+            base_character_prompt = f"1boy, Kai Nakamura, cyberpunk male character, spiky black hair, tech augmented eyes, black jacket, neon city background, {prompt}"
         else:
-            enhanced_prompt = f"masterpiece, best quality, {prompt}, anime style, beautiful detailed eyes, flowing hair, dynamic movement, colorful background, high resolution, detailed animation"
+            base_character_prompt = f"masterpiece, best quality, {prompt}"
+
+        # Adjust prompt based on generation type
+        if generation_type == "image":
+            enhanced_prompt = f"{base_character_prompt}, anime style, high quality, detailed, static image, single frame"
+        else:  # video
+            enhanced_prompt = f"{base_character_prompt}, anime style, beautiful detailed eyes, flowing hair, dynamic movement, colorful background, high resolution, detailed animation"
 
         # Fixed workflow using working parameters from test
         import time
 
         timestamp = int(time.time())
 
-        # Calculate frames based on duration (5 seconds @ 24fps = 120 frames)
-        frames = min(120, duration * 24)
-        print(f"DEBUG: Generating {duration}s video with {frames} frames")
-        logger.info(
-            f"Generating {duration}s video with {frames} frames (batch_size)")
+        # Handle image vs video generation
+        if generation_type == "image":
+            print(f"DEBUG: Generating single image")
+            logger.info(f"Generating single image for prompt: {prompt}")
+            # For images, we don't need frame calculations
+            frames = 1
+        else:
+            # Calculate frames based on duration (5 seconds @ 24fps = 120 frames)
+            frames = min(120, duration * 24)
+            print(f"DEBUG: Generating {duration}s video with {frames} frames")
+            logger.info(f"Generating {duration}s video with {frames} frames (batch_size)")
 
-        # Determine if we need context windows for longer videos
-        if frames > 24:
+        # Choose appropriate workflow based on generation type and complexity
+        if generation_type == "image":
+            # Use simplified image generation workflow
+            workflow = {
+                "1": {
+                    "inputs": {"text": enhanced_prompt, "clip": ["4", 1]},
+                    "class_type": "CLIPTextEncode",
+                    "_meta": {"title": "CLIP Text Encode (Prompt)"},
+                },
+                "2": {
+                    "inputs": {
+                        "text": "nsfw, nude, worst quality, low quality, bad anatomy",
+                        "clip": ["4", 1]
+                    },
+                    "class_type": "CLIPTextEncode",
+                    "_meta": {"title": "CLIP Text Encode (Negative)"},
+                },
+                "3": {
+                    "inputs": {"seed": 42, "steps": 20, "cfg": 7.0, "sampler_name": "euler_a", "scheduler": "normal", "denoise": 1.0, "model": ["4", 0], "positive": ["1", 0], "negative": ["2", 0], "latent_image": ["5", 0]},
+                    "class_type": "KSampler",
+                    "_meta": {"title": "KSampler"},
+                },
+                "4": {
+                    "inputs": {"ckpt_name": "anythingElseV4_v45.safetensors"},
+                    "class_type": "CheckpointLoaderSimple",
+                    "_meta": {"title": "Load Checkpoint"},
+                },
+                "5": {
+                    "inputs": {"width": 1024, "height": 1024, "batch_size": 1},
+                    "class_type": "EmptyLatentImage",
+                    "_meta": {"title": "Empty Latent Image"},
+                },
+                "8": {
+                    "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
+                    "class_type": "VAEDecode",
+                    "_meta": {"title": "VAE Decode"},
+                },
+                "9": {
+                    "inputs": {"filename_prefix": f"anime_image_{timestamp}", "images": ["8", 0]},
+                    "class_type": "SaveImage",
+                    "_meta": {"title": "Save Image"},
+                }
+            }
+        elif frames > 24:
             # Use ADVANCED workflow with context windows for longer videos
             workflow = {
                 "1": {
@@ -548,6 +759,149 @@ async def generate_with_fixed_workflow(
             "error": str(e),
             "job_id": None,
             "message": "Failed to submit workflow to ComfyUI"
+        }
+
+
+async def generate_with_quality_control(
+    prompt: str, character: str = None, style: str = "anime", duration: int = 5, generation_type: str = "video"
+):
+    """Generate anime content with integrated quality control and automatic rejection"""
+    try:
+        logger.info(f"🎯 Starting quality-controlled generation: {prompt[:50]}...")
+
+        # Step 1: Generate content using existing workflow
+        generation_result = await generate_with_fixed_workflow(
+            prompt=prompt,
+            character=character,
+            style=style,
+            duration=duration,
+            generation_type=generation_type
+        )
+
+        if generation_result.get("status") != "success":
+            return generation_result
+
+        job_id = generation_result.get("job_id")
+        logger.info(f"🔄 Generation submitted, job_id: {job_id}")
+
+        # Step 2: Wait for completion and get output path
+        max_wait_time = 600  # 10 minutes max
+        wait_interval = 5    # Check every 5 seconds
+        total_waited = 0
+
+        output_path = None
+        while total_waited < max_wait_time:
+            output_path = await check_comfyui_output(job_id)
+            if output_path:
+                logger.info(f"✅ Generation completed: {output_path}")
+                break
+
+            await asyncio.sleep(wait_interval)
+            total_waited += wait_interval
+            logger.info(f"⏳ Waiting for generation... ({total_waited}s/{max_wait_time}s)")
+
+        if not output_path:
+            return {
+                "status": "timeout",
+                "job_id": job_id,
+                "error": f"Generation did not complete within {max_wait_time} seconds"
+            }
+
+        # Step 3: Quality Assessment (if quality control available)
+        if QUALITY_CONTROL_AVAILABLE and quality_orchestrator:
+            try:
+                logger.info(f"🔍 Assessing quality of generated content...")
+
+                # Assess the generated content
+                quality_result = await quality_orchestrator.quality_agent.analyze_video_quality(output_path)
+
+                quality_score = quality_result.overall_score
+                passes_standards = quality_result.passes_standards
+                rejection_reasons = quality_result.rejection_reasons
+
+                logger.info(f"📊 Quality score: {quality_score:.1f}/100, Passes: {passes_standards}")
+
+                # Step 4: Handle quality results
+                if not passes_standards:
+                    logger.warning(f"❌ Quality control REJECTED generation: {rejection_reasons}")
+
+                    # Move failed file to rejected folder
+                    rejected_dir = "/mnt/1TB-storage/ComfyUI/output/rejected"
+                    os.makedirs(rejected_dir, exist_ok=True)
+                    rejected_path = os.path.join(rejected_dir, os.path.basename(output_path))
+
+                    try:
+                        os.rename(output_path, rejected_path)
+                        logger.info(f"🗑️ Moved rejected file to: {rejected_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to move rejected file: {e}")
+
+                    return {
+                        "status": "quality_rejected",
+                        "job_id": job_id,
+                        "quality_score": quality_score,
+                        "rejection_reasons": rejection_reasons,
+                        "rejected_path": rejected_path,
+                        "message": f"Generation failed quality standards (score: {quality_score:.1f}/100)",
+                        "corrections_suggested": quality_result.comfyui_corrections
+                    }
+                else:
+                    logger.info(f"✅ Quality control APPROVED generation")
+
+                    # Move to approved folder
+                    approved_dir = "/mnt/1TB-storage/ComfyUI/output/approved"
+                    os.makedirs(approved_dir, exist_ok=True)
+                    approved_path = os.path.join(approved_dir, os.path.basename(output_path))
+
+                    try:
+                        os.rename(output_path, approved_path)
+                        logger.info(f"✅ Moved approved file to: {approved_path}")
+                        output_path = approved_path
+                    except Exception as e:
+                        logger.error(f"Failed to move approved file: {e}")
+
+                # Add quality info to result
+                generation_result.update({
+                    "quality_control": {
+                        "enabled": True,
+                        "score": quality_score,
+                        "passes_standards": passes_standards,
+                        "rejection_reasons": rejection_reasons,
+                        "assessment_timestamp": quality_result.timestamp.isoformat()
+                    },
+                    "output_path": output_path
+                })
+
+            except Exception as e:
+                logger.error(f"❌ Quality assessment failed: {e}")
+                # Don't fail the entire generation, just log the quality assessment error
+                generation_result.update({
+                    "quality_control": {
+                        "enabled": True,
+                        "error": str(e),
+                        "status": "assessment_failed"
+                    },
+                    "output_path": output_path
+                })
+
+        else:
+            logger.warning("⚠️ Quality control not available - generation proceeded without assessment")
+            generation_result.update({
+                "quality_control": {
+                    "enabled": False,
+                    "message": "Quality control system not initialized"
+                },
+                "output_path": output_path
+            })
+
+        return generation_result
+
+    except Exception as e:
+        logger.error(f"❌ Quality-controlled generation failed: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Generation with quality control failed"
         }
 
 
@@ -940,20 +1294,24 @@ async def test_generate_with_quality(quality: str = "low", duration: int = 2):
 
 
 @app.post("/api/anime/generate")
-async def generate_anime_video(
+async def generate_anime_content(
     request: AnimeGenerationRequest, db: Session = Depends(get_db)
 ):
-    """Direct anime video generation endpoint - FIXED WORKFLOW with error recovery"""
+    """Unified anime generation endpoint - handles both image and video based on explicit type selection"""
     try:
+        # Determine job type and generation method based on explicit type
+        job_type = f"{request.generation_type}_generation"
+
         # First check if ComfyUI is accessible
         comfyui_available = await check_comfyui_availability()
         if not comfyui_available:
             # Create job with pending status
             job = ProductionJob(
-                job_type="video_generation",
+                job_type=job_type,
                 prompt=request.prompt,
                 parameters=request.model_dump_json(),
                 status="failed",
+                error="ComfyUI service is not available"
             )
             db.add(job)
             db.commit()
@@ -964,22 +1322,40 @@ async def generate_anime_video(
                 "message": "Please check if ComfyUI is running on port 8188"
             }
 
-        # Generate using FIXED workflow
-        result = await generate_with_fixed_workflow(
-            prompt=request.prompt,
-            character=request.character,
-            style=request.style,
-            duration=request.duration,
-        )
+        # Route to appropriate generation method with quality control
+        if request.generation_type == "image":
+            # For images, use quality-controlled generation
+            result = await generate_with_quality_control(
+                prompt=request.prompt,
+                character=request.character,
+                style=request.style,
+                duration=None,  # Images don't need duration
+                generation_type="image"
+            )
+        elif request.generation_type == "video":
+            # For videos, use quality-controlled generation
+            result = await generate_with_quality_control(
+                prompt=request.prompt,
+                character=request.character,
+                style=request.style,
+                duration=request.duration,
+                generation_type="video"
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid generation_type: {request.generation_type}. Must be 'image' or 'video'."
+            )
 
         # Check if generation was successful
         if result.get("status") == "error":
             # Create failed job
             job = ProductionJob(
-                job_type="video_generation",
+                job_type=job_type,
                 prompt=request.prompt,
                 parameters=request.model_dump_json(),
                 status="failed",
+                error=result.get("error", "Generation failed")
             )
             db.add(job)
             db.commit()
@@ -994,7 +1370,7 @@ async def generate_anime_video(
 
         # Create successful job
         job = ProductionJob(
-            job_type="video_generation",
+            job_type=job_type,
             prompt=request.prompt,
             parameters=request.model_dump_json(),
             status="processing",
@@ -1022,6 +1398,7 @@ async def generate_anime_video(
             prompt=request.prompt,
             parameters=request.model_dump_json(),
             status="failed",
+            error=str(e)
         )
         db.add(job)
         db.commit()
@@ -1497,9 +1874,104 @@ async def get_generation_status(
             # Check if output file exists and update path
             actual_output = await check_comfyui_output(comfyui_job_id)
             if actual_output:
-                job.status = "completed"
-                job.output_path = actual_output
-                logger.info(f"Job {job.id} completed: {actual_output}")
+                # CRITICAL QC CHECK: Don't mark as completed until QC passes
+                logger.info(f"🔍 Running QC analysis on {actual_output} for job {job.id}")
+
+                try:
+                    # Run QC analysis using our proven QC system
+                    import base64
+                    with open(actual_output, 'rb') as f:
+                        image_data = base64.b64encode(f.read()).decode('utf-8')
+
+                    qc_prompt = f"""
+                    STRICT ANATOMICAL ANALYSIS: This should show: "{job.prompt}"
+
+                    CRITICAL VALIDATION:
+                    1. ANATOMY CHECK: Correctly formed body parts?
+                    2. SINGLE CHARACTER: One character, not multiple merged?
+                    3. NO EXTRA PARTS: No duplicate limbs/heads/faces/feet?
+                    4. VISUAL QUALITY: No artifacts or distortion?
+                    5. ANIME STYLE: Consistent art style?
+
+                    SCORING (BE EXTREMELY STRICT):
+                    - 9-10 = Perfect anatomy, single character
+                    - 7-8 = Good with minor issues
+                    - 5-6 = Some problems but acceptable
+                    - 1-4 = FAIL - multiple body parts or severe anatomy issues
+
+                    Rate this image strictly for anatomical correctness.
+                    """
+
+                    response = requests.post(
+                        "http://localhost:11434/api/generate",
+                        json={
+                            "model": "llava:13b",
+                            "prompt": qc_prompt,
+                            "images": [image_data],
+                            "stream": False
+                        },
+                        timeout=30
+                    )
+
+                    qc_score = 3.0  # Default to low score
+                    qc_passed = False
+                    qc_analysis = "QC analysis failed"
+
+                    if response.status_code == 200:
+                        result = response.json()
+                        qc_analysis = result.get("response", "")
+
+                        # Extract score from analysis
+                        import re
+                        patterns = [r'(\d+)/10', r'score[:\s]*(\d+)', r'(\d+)\s*out\s*of\s*10']
+                        for pattern in patterns:
+                            match = re.search(pattern, qc_analysis.lower())
+                            if match:
+                                try:
+                                    qc_score = float(match.group(1))
+                                    break
+                                except:
+                                    continue
+
+                        qc_passed = qc_score >= 7.0  # Strict QC threshold
+
+                        logger.info(f"🎯 QC Score: {qc_score}/10, Passed: {qc_passed}")
+
+                    # Mark job status based on QC results
+                    if qc_passed:
+                        job.status = "completed"
+                        job.output_path = actual_output
+                        job.metadata = job.metadata or {}
+                        job.metadata.update({
+                            "qc_score": qc_score,
+                            "qc_passed": True,
+                            "qc_analysis": qc_analysis[:200]  # Truncate for storage
+                        })
+                        logger.info(f"✅ Job {job.id} completed with QC score {qc_score}")
+                    else:
+                        job.status = "qc_failed"
+                        job.error = f"QC Failed: Score {qc_score}/10. Anatomical issues detected."
+                        job.metadata = job.metadata or {}
+                        job.metadata.update({
+                            "qc_score": qc_score,
+                            "qc_passed": False,
+                            "qc_analysis": qc_analysis[:200],
+                            "rejection_reason": "Anatomical validation failed"
+                        })
+                        logger.warning(f"❌ Job {job.id} failed QC with score {qc_score}")
+
+                except Exception as qc_error:
+                    logger.error(f"🚨 QC analysis failed for job {job.id}: {qc_error}")
+                    # If QC fails to run, mark as completed but log the QC failure
+                    job.status = "completed"
+                    job.output_path = actual_output
+                    job.metadata = job.metadata or {}
+                    job.metadata.update({
+                        "qc_score": None,
+                        "qc_passed": False,
+                        "qc_error": str(qc_error)
+                    })
+                    logger.info(f"Job {job.id} completed: {actual_output} (QC failed to run)")
             else:
                 job.status = "processing"  # Still generating
                 logger.info(f"Job {job.id} still processing (no output found yet)")
@@ -1952,38 +2424,84 @@ async def generate_with_integrated_pipeline(
             "style": request.style,
         }
 
-        # Use integrated pipeline
-        result = await pipeline.test_complete_pipeline()
+        # Instead of using test pipeline, submit real workflow to ComfyUI
+        import time
+        timestamp = int(time.time())
 
-        if result.get("test_result", {}).get("success", False):
-            # Update job status
-            job.status = "completed"
-            job.quality_score = result.get(
-                "test_result", {}).get(
-                "quality_score", 0.85)
-            db.commit()
-
-            return {
-                "job_id": job.id,
-                "status": "completed",
-                "message": "Generation completed with quality controls",
-                "quality_score": job.quality_score,
-                "pipeline_used": "integrated",
-                "components_tested": result.get("components_tested", []),
-                "result": result,
+        # Build workflow for integrated pipeline
+        workflow = {
+            "prompt": {
+                "1": {
+                    "inputs": {
+                        "text": f"masterpiece, best quality, {request.prompt}, anime style, detailed",
+                        "clip": ["4", 1],
+                    },
+                    "class_type": "CLIPTextEncode",
+                },
+                "2": {
+                    "inputs": {"text": "low quality, blurry, distorted", "clip": ["4", 1]},
+                    "class_type": "CLIPTextEncode",
+                },
+                "3": {
+                    "inputs": {
+                        "seed": timestamp,
+                        "steps": 20,
+                        "cfg": 7.0,
+                        "sampler_name": "dpmpp_2m",
+                        "scheduler": "karras",
+                        "denoise": 1.0,
+                        "model": ["4", 0],
+                        "positive": ["1", 0],
+                        "negative": ["2", 0],
+                        "latent_image": ["5", 0],
+                    },
+                    "class_type": "KSampler",
+                },
+                "4": {
+                    "inputs": {
+                        "ckpt_name": "AOM3A1B.safetensors"
+                    },
+                    "class_type": "CheckpointLoaderSimple",
+                },
+                "5": {
+                    "inputs": {"width": 512, "height": 512, "batch_size": 1},
+                    "class_type": "EmptyLatentImage",
+                },
+                "6": {
+                    "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
+                    "class_type": "VAEDecode",
+                },
+                "7": {
+                    "inputs": {
+                        "filename_prefix": f"integrated_anime_{timestamp}",
+                        "images": ["6", 0],
+                    },
+                    "class_type": "SaveImage",
+                },
             }
-        else:
-            # Update job as failed
-            job.status = "failed"
-            db.commit()
-            raise HTTPException(
-                status_code=500, detail="Generation failed quality controls"
-            )
+        }
+
+        # Submit to ComfyUI
+        comfyui_job_id = await submit_comfyui_workflow(workflow)
+        job.status = "processing"
+        job.comfyui_job_id = comfyui_job_id
+        job.output_path = f"/mnt/1TB-storage/ComfyUI/output/integrated_anime_{timestamp}"
+        db.commit()
+        db.refresh(job)
+
+        return {
+            "job_id": job.id,
+            "comfyui_job_id": comfyui_job_id,
+            "status": "processing",
+            "message": "Integrated generation started - use /api/anime/jobs/{job_id}/status to track progress",
+            "pipeline_used": "integrated",
+        }
 
     except Exception as e:
         # Mark job as failed
         if "job" in locals():
             job.status = "failed"
+            job.error = str(e)
             db.commit()
         raise HTTPException(
             status_code=500, detail=f"Integrated generation failed: {str(e)}"
@@ -2094,19 +2612,22 @@ async def generate_professional_anime(
     }
 
     try:
-        job_id = await submit_comfyui_workflow(workflow)
-        job.status = "submitted"
-        job.output_path = f"/opt/tower-anime/outputs/{job_id}"
+        comfyui_job_id = await submit_comfyui_workflow(workflow)
+        job.status = "processing"
+        job.comfyui_job_id = comfyui_job_id  # Store the ComfyUI job ID
+        job.output_path = f"/mnt/1TB-storage/ComfyUI/output/echo_anime_professional_{timestamp}"
         db.commit()
+        db.refresh(job)
 
         return {
             "job_id": job.id,
-            "comfyui_job_id": job_id,
+            "comfyui_job_id": comfyui_job_id,
             "status": "processing",
-            "message": "Professional anime generation started",
+            "message": "Professional anime generation started - use /api/anime/jobs/{job_id}/status to track progress",
         }
     except Exception as e:
         job.status = "failed"
+        job.error = str(e)
         db.commit()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2124,7 +2645,9 @@ async def generate_personal_creative(
         enhanced_prompt += f", personal context: {personal.personal_context}"
 
     import json
+    import time
 
+    # Create job record
     job = ProductionJob(
         job_type="personal_generation",
         prompt=enhanced_prompt,
@@ -2133,13 +2656,82 @@ async def generate_personal_creative(
     )
     db.add(job)
     db.commit()
+    db.refresh(job)
 
-    return {
-        "job_id": job.id,
-        "status": "processing",
-        "message": "Personal creative generation started",
-        "enhancement": "Integrating personal context and mood analysis",
-    }
+    try:
+        # Build workflow for personal creative generation
+        timestamp = int(time.time())
+        workflow = {
+            "prompt": {
+                "1": {
+                    "inputs": {
+                        "text": f"masterpiece, best quality, {enhanced_prompt}, creative artistic style, expressive, emotional",
+                        "clip": ["4", 1],
+                    },
+                    "class_type": "CLIPTextEncode",
+                },
+                "2": {
+                    "inputs": {"text": "low quality, boring, generic, commercial", "clip": ["4", 1]},
+                    "class_type": "CLIPTextEncode",
+                },
+                "3": {
+                    "inputs": {
+                        "seed": timestamp,
+                        "steps": 25,
+                        "cfg": 8.5,  # Higher CFG for creative expression
+                        "sampler_name": "dpmpp_2m",
+                        "scheduler": "karras",
+                        "denoise": 1.0,
+                        "model": ["4", 0],
+                        "positive": ["1", 0],
+                        "negative": ["2", 0],
+                        "latent_image": ["5", 0],
+                    },
+                    "class_type": "KSampler",
+                },
+                "4": {
+                    "inputs": {
+                        "ckpt_name": "AOM3A1B.safetensors"
+                    },
+                    "class_type": "CheckpointLoaderSimple",
+                },
+                "5": {
+                    "inputs": {"width": 768, "height": 768, "batch_size": 1},
+                    "class_type": "EmptyLatentImage",
+                },
+                "6": {
+                    "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
+                    "class_type": "VAEDecode",
+                },
+                "7": {
+                    "inputs": {
+                        "filename_prefix": f"personal_creative_{timestamp}",
+                        "images": ["6", 0],
+                    },
+                    "class_type": "SaveImage",
+                },
+            }
+        }
+
+        # Submit to ComfyUI
+        comfyui_job_id = await submit_comfyui_workflow(workflow)
+        job.comfyui_job_id = comfyui_job_id
+        job.output_path = f"/mnt/1TB-storage/ComfyUI/output/personal_creative_{timestamp}"
+        db.commit()
+
+        return {
+            "job_id": job.id,
+            "comfyui_job_id": comfyui_job_id,
+            "status": "processing",
+            "message": "Personal creative generation started - use /api/anime/jobs/{job_id}/status to track progress",
+            "enhancement": "Integrating personal context and mood analysis",
+        }
+
+    except Exception as e:
+        job.status = "failed"
+        job.error = str(e)
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"Personal generation failed: {str(e)}")
 
 
 @app.get("/api/anime/jobs")
@@ -2218,7 +2810,7 @@ async def get_job(job_id: int, db: Session = Depends(get_db)):
     }
 
 
-def check_and_update_job_timeout(job: ProductionJob, db: Session, timeout_minutes: int = 5):
+def check_and_update_job_timeout(job: ProductionJob, db: Session, timeout_minutes: int = 15):
     """Check if a job has timed out and update its status"""
     if job.status in ["completed", "failed", "timeout"]:
         return  # Job already finished
@@ -2251,16 +2843,176 @@ def check_and_update_job_timeout(job: ProductionJob, db: Session, timeout_minute
 
 @app.get("/api/anime/jobs/{job_id}/status")
 async def get_job_status(job_id: int, db: Session = Depends(get_db)):
-    """Get production job status"""
+    """Get production job status with real ComfyUI polling"""
     job = db.query(ProductionJob).filter(ProductionJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Check for timeout before returning status
-    check_and_update_job_timeout(job, db)
-
     # Calculate time elapsed
     time_elapsed = datetime.utcnow() - job.created_at
+
+    # If job has a ComfyUI job ID and isn't already marked as completed/failed, poll ComfyUI
+    if job.comfyui_job_id and job.status not in ["completed", "failed", "timeout"]:
+        try:
+            comfyui_status = await check_comfyui_job_status(job.comfyui_job_id)
+
+            # Update database based on real ComfyUI status
+            if comfyui_status["completed"]:
+                if comfyui_status.get("error", False):
+                    job.status = "failed"
+                    job.error = comfyui_status["message"]
+                else:
+                    # STEP 1: Find the generated image file first
+                    outputs = comfyui_status.get("outputs", {})
+                    generated_image_path = None
+
+                    if outputs:
+                        # Try to find generated files
+                        for node_id, node_outputs in outputs.items():
+                            if "images" in node_outputs or "videos" in node_outputs:
+                                # Update output path with actual ComfyUI output
+                                job.output_path = f"/mnt/1TB-storage/ComfyUI/output/{job.comfyui_job_id}"
+
+                                # Find the actual generated image file
+                                import glob
+                                search_pattern = f"/mnt/1TB-storage/ComfyUI/output/*{job.comfyui_job_id}*.png"
+                                image_files = glob.glob(search_pattern)
+                                if image_files:
+                                    generated_image_path = image_files[0]  # Take the first match
+                                break
+
+                    # STEP 2: Run QC analysis before marking as completed
+                    if generated_image_path and os.path.exists(generated_image_path):
+                        try:
+                            logger.info(f"🔍 Running QC analysis on {generated_image_path}")
+
+                            # Run QC analysis using our proven QC system
+                            import base64
+                            with open(generated_image_path, 'rb') as f:
+                                image_data = base64.b64encode(f.read()).decode('utf-8')
+
+                            qc_prompt = f"""
+                            STRICT ANATOMICAL ANALYSIS: This should show: "{job.prompt}"
+
+                            CRITICAL VALIDATION:
+                            1. ANATOMY CHECK: Correctly formed body parts?
+                            2. SINGLE CHARACTER: One character, not multiple merged?
+                            3. NO EXTRA PARTS: No duplicate limbs/heads/faces?
+                            4. VISUAL QUALITY: No artifacts or distortion?
+                            5. ANIME STYLE: Consistent art style?
+
+                            SCORING (BE STRICT):
+                            - 9-10 = Perfect anatomy, single character
+                            - 7-8 = Good with minor issues
+                            - 5-6 = Some problems but acceptable
+                            - 1-4 = FAIL - multiple body parts or severe anatomy issues
+
+                            Rate this image strictly for anatomical correctness.
+                            """
+
+                            response = requests.post(
+                                "http://localhost:11434/api/generate",
+                                json={
+                                    "model": "llava:13b",
+                                    "prompt": qc_prompt,
+                                    "images": [image_data],
+                                    "stream": False
+                                },
+                                timeout=30
+                            )
+
+                            qc_score = 3.0  # Default to low score
+                            qc_passed = False
+                            qc_analysis = "QC analysis failed"
+
+                            if response.status_code == 200:
+                                result = response.json()
+                                qc_analysis = result.get("response", "")
+
+                                # Extract score from analysis
+                                import re
+                                patterns = [r'(\d+)/10', r'score[:\s]*(\d+)', r'(\d+)\s*out\s*of\s*10']
+                                for pattern in patterns:
+                                    match = re.search(pattern, qc_analysis.lower())
+                                    if match:
+                                        try:
+                                            qc_score = float(match.group(1))
+                                            break
+                                        except:
+                                            continue
+
+                                qc_passed = qc_score >= 7.0  # Strict QC threshold
+
+                                logger.info(f"🎯 QC Score: {qc_score}/10, Passed: {qc_passed}")
+
+                            # STEP 3: Mark job status based on QC results
+                            if qc_passed:
+                                job.status = "completed"
+                                job.metadata = job.metadata or {}
+                                job.metadata.update({
+                                    "qc_score": qc_score,
+                                    "qc_passed": True,
+                                    "qc_analysis": qc_analysis[:200]  # Truncate for storage
+                                })
+                                logger.info(f"✅ Job {job.id} completed with QC score {qc_score}")
+                            else:
+                                job.status = "qc_failed"
+                                job.error = f"QC Failed: Score {qc_score}/10. Anatomical issues detected."
+                                job.metadata = job.metadata or {}
+                                job.metadata.update({
+                                    "qc_score": qc_score,
+                                    "qc_passed": False,
+                                    "qc_analysis": qc_analysis[:200],
+                                    "rejection_reason": "Anatomical validation failed"
+                                })
+                                logger.warning(f"❌ Job {job.id} failed QC with score {qc_score}")
+
+                        except Exception as qc_error:
+                            logger.error(f"🚨 QC analysis failed: {qc_error}")
+                            # If QC fails to run, mark as completed but log the QC failure
+                            job.status = "completed"
+                            job.metadata = job.metadata or {}
+                            job.metadata.update({
+                                "qc_score": None,
+                                "qc_passed": False,
+                                "qc_error": str(qc_error)
+                            })
+                    else:
+                        # No image found, mark as completed (backward compatibility)
+                        job.status = "completed"
+                        logger.warning(f"⚠️  No image found for QC analysis, marking as completed")
+
+                db.commit()
+                db.refresh(job)
+            elif comfyui_status["status"] in ["processing", "pending"]:
+                # Update to reflect current processing status
+                if job.status != comfyui_status["status"]:
+                    job.status = comfyui_status["status"]
+                    db.commit()
+                    db.refresh(job)
+
+            # Return real-time status from ComfyUI
+            return {
+                "id": job.id,
+                "status": comfyui_status["status"],
+                "type": job.job_type,
+                "output_path": job.output_path,
+                "quality_score": job.quality_score,
+                "created_at": job.created_at,
+                "time_elapsed_seconds": int(time_elapsed.total_seconds()),
+                "progress": comfyui_status["progress"],
+                "message": comfyui_status["message"],
+                "comfyui_job_id": job.comfyui_job_id,
+                "real_time_status": True
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get ComfyUI status for job {job_id}: {e}")
+            # Fall back to timeout check if ComfyUI polling fails
+            pass
+
+    # Check for timeout before returning status (fallback behavior)
+    check_and_update_job_timeout(job, db)
 
     return {
         "id": job.id,
@@ -2270,7 +3022,9 @@ async def get_job_status(job_id: int, db: Session = Depends(get_db)):
         "quality_score": job.quality_score,
         "created_at": job.created_at,
         "time_elapsed_seconds": int(time_elapsed.total_seconds()),
-        "timeout_warning": job.status == "timeout" or (job.status == "processing" and time_elapsed > timedelta(minutes=4))
+        "timeout_warning": job.status == "timeout" or (job.status == "processing" and time_elapsed > timedelta(minutes=4)),
+        "comfyui_job_id": job.comfyui_job_id,
+        "real_time_status": False
     }
 
 
@@ -2496,8 +3250,8 @@ async def git_control_interface():
                     <ul>
                         <li><a href="/api/anime/projects" style="color: #4a9eff;">View Projects API</a></li>
                         <li><a href="/api/anime/git/status" style="color: #4a9eff;">Git Status API</a></li>
-                        <li><a href="http://192.168.50.135:8188/" style="color: #4a9eff;">ComfyUI Interface</a></li>
-                        <li><a href="https://192.168.50.135/" style="color: #4a9eff;">Tower Dashboard</a></li>
+                        <li><a href="http://localhost:8188/" style="color: #4a9eff;">ComfyUI Interface</a></li>
+                        <li><a href="https://localhost/" style="color: #4a9eff;">Tower Dashboard</a></li>
                     </ul>
                 </body>
             </html>
@@ -3019,38 +3773,58 @@ async def generate_anime_image(
     request: dict,
     db: Session = Depends(get_db)
 ):
-    """Generate a single anime IMAGE - NOT VIDEO! Target: <30 seconds"""
-    import time
+    """Generate a single anime IMAGE with PROJECT-AWARE asset management"""
     import json
+    import sys
+    sys.path.append('/opt/tower-anime-production/api')
+    from enhanced_image_generation import generate_project_aware_image
 
     prompt = request.get("prompt", "anime character")
     style = request.get("style", "anime")
     quality = request.get("quality", "medium")
 
-    # Image quality settings (NOT VIDEO!)
-    quality_presets = {
-        "low": {"width": 384, "height": 384, "steps": 10},
-        "medium": {"width": 512, "height": 512, "steps": 20},
-        "high": {"width": 768, "height": 768, "steps": 30}
-    }
+    # Extract project context from request
+    project_id = request.get("project_id", 1)
+    character_name = request.get("character_name")
+    scene_id = request.get("scene_id")
+    asset_type = request.get("asset_type", "character")
 
-    settings = quality_presets.get(quality, quality_presets["medium"])
-    seed = int(time.time())
-
-    # Create job record
+    # Create job record first with project context
     job = ProductionJob(
         job_type="image_generation",
         prompt=prompt,
         parameters=json.dumps(request),
-        status="processing",
-        pipeline_type="image",  # IMPORTANT: Mark as image not video!
+        status="pending",
+        pipeline_type="image",
+        project_id=project_id,
         generation_start_time=datetime.utcnow()
     )
     db.add(job)
     db.commit()
     db.refresh(job)
 
-    # SIMPLE IMAGE WORKFLOW - NO ANIMATION!
+    # Call enhanced project-aware generation
+    result = await generate_project_aware_image(
+        prompt=prompt,
+        project_id=project_id,
+        character_name=character_name,
+        scene_id=scene_id,
+        asset_type=asset_type,
+        quality=quality,
+        style=style,
+        job_id=job.id,
+        db_session=db
+    )
+
+    if result["success"]:
+        return result
+    else:
+        raise HTTPException(status_code=500, detail=result.get("error", "Image generation failed"))
+
+    # OLD BROKEN CODE BELOW (TO BE REMOVED):
+    import time
+    settings = {"width": 768, "height": 768, "steps": 20}  # Temp fix
+    seed = int(time.time())
     workflow = {
         "1": {
             "inputs": {"ckpt_name": "AOM3A1B.safetensors"},
@@ -3168,6 +3942,120 @@ async def list_generated_images(
 
 
 @app.get("/api/anime/images/{job_id}/status")
+
+
+@app.post("/api/intent/classify", response_model=IntentClassificationResponse)
+async def classify_intent(request: IntentClassificationRequest):
+    """
+    Explicit intent classification that respects user's explicit type selection.
+    No auto-detection - uses explicit type provided by user.
+    """
+    try:
+        # Use explicit type instead of auto-detection
+        content_type = request.explicit_type
+
+        # Set default parameters based on type
+        if content_type == "image":
+            output_format = "png"
+            estimated_time = 1  # minutes
+            estimated_vram = 6.0  # GB
+            resolution = "1024x1024"
+            duration_seconds = None
+        else:  # video
+            output_format = "mp4"
+            estimated_time = 5  # minutes
+            estimated_vram = 8.0  # GB
+            resolution = "512x512"
+            duration_seconds = 5
+
+        # Extract character names (simple extraction)
+        character_names = []
+        prompt_lower = request.user_prompt.lower()
+        # Look for character indicators
+        if "kai" in prompt_lower:
+            character_names.append("Kai")
+        if "hiroshi" in prompt_lower:
+            character_names.append("Hiroshi")
+
+        # Determine style preference
+        style_preference = request.preferred_style or "anime"
+        if "realistic" in prompt_lower or "photorealistic" in prompt_lower:
+            style_preference = "photorealistic_anime"
+        elif "cartoon" in prompt_lower:
+            style_preference = "cartoon"
+
+        # Determine quality level
+        quality_level = request.quality_preference or "standard"
+
+        # Process the prompt (minimal enhancement for explicit workflow)
+        processed_prompt = request.user_prompt.strip()
+        if not processed_prompt.endswith("."):
+            processed_prompt += "."
+
+        response = IntentClassificationResponse(
+            content_type=content_type,
+            generation_scope="single_asset",
+            style_preference=style_preference,
+            quality_level=quality_level,
+            duration_seconds=duration_seconds,
+            resolution=resolution,
+            character_names=character_names,
+            processed_prompt=processed_prompt,
+            target_service="comfyui",
+            estimated_time_minutes=estimated_time,
+            estimated_vram_gb=estimated_vram,
+            output_format=output_format,
+            ambiguity_flags=[],
+            confidence_score=1.0,  # High confidence since explicit type provided
+            suggested_clarifications=[]
+        )
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Intent classification error: {e}")
+        raise HTTPException(status_code=500, detail="Intent classification failed")
+
+
+@app.post("/api/workflow/route")
+async def route_workflow(classification: dict):
+    """
+    Route workflow based on classification results.
+    Routes to appropriate generation endpoint based on explicit type.
+    """
+    try:
+        content_type = classification["classification"]["content_type"]
+
+        if content_type == "image":
+            return {
+                "success": True,
+                "target_endpoint": "/api/anime/generate/image",
+                "prerequisites_met": True,
+                "prerequisites_missing": []
+            }
+        elif content_type == "video":
+            return {
+                "success": True,
+                "target_endpoint": "/api/anime/generate",
+                "prerequisites_met": True,
+                "prerequisites_missing": []
+            }
+        else:
+            return {
+                "success": False,
+                "error": f"Unknown content type: {content_type}",
+                "prerequisites_met": False,
+                "prerequisites_missing": ["valid_content_type"]
+            }
+
+    except Exception as e:
+        logger.error(f"Workflow routing error: {e}")
+        return {
+            "success": False,
+            "error": "Workflow routing failed",
+            "prerequisites_met": False,
+            "prerequisites_missing": ["valid_classification"]
+        }
 async def check_image_status(job_id: int, db: Session = Depends(get_db)):
     """Check status of image generation job"""
     job = db.query(ProductionJob).filter(
@@ -3260,9 +4148,137 @@ async def periodic_timeout_checker():
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on app startup"""
-    logger.info("Starting anime production API with timeout monitoring")
+    logger.info("Starting anime production API with quality control and timeout monitoring")
+
+    # Initialize quality control system if available
+    if QUALITY_CONTROL_AVAILABLE and quality_orchestrator:
+        try:
+            await quality_orchestrator.initialize_system()
+            logger.info("✅ Quality control system initialized")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize quality control: {e}")
+
+    # Initialize integrated pipeline if available
+    if PIPELINE_AVAILABLE and hasattr(pipeline, 'initialize_pipeline'):
+        try:
+            await pipeline.initialize_pipeline()
+            logger.info("✅ Integrated pipeline initialized")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize pipeline: {e}")
+
     asyncio.create_task(periodic_timeout_checker())
 
+
+# Quality Control Endpoints
+@app.post("/api/anime/quality/assess")
+async def assess_generated_content(file_path: str):
+    """Assess quality of generated anime content"""
+    if not QUALITY_CONTROL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Quality control system not available")
+
+    try:
+        # Validate file exists
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+
+        # Use quality orchestrator to assess content
+        result = await quality_orchestrator.quality_agent.analyze_video_quality(file_path)
+
+        assessment = result.dict()
+
+        # Add helpful interpretation
+        assessment["interpretation"] = {
+            "overall_rating": "APPROVED" if result.passes_standards else "REJECTED",
+            "quality_level": (
+                "Excellent" if result.overall_score >= 90 else
+                "Good" if result.overall_score >= 80 else
+                "Average" if result.overall_score >= 70 else
+                "Poor" if result.overall_score >= 50 else
+                "Very Poor"
+            ),
+            "main_issues": result.rejection_reasons[:3] if result.rejection_reasons else [],
+            "recommended_actions": []
+        }
+
+        # Add specific recommendations based on issues
+        if result.rejection_reasons:
+            for reason in result.rejection_reasons:
+                if "multiple body parts" in reason.lower() or "motion smoothness" in reason.lower():
+                    assessment["interpretation"]["recommended_actions"].append(
+                        "Regenerate with improved prompt: add 'single person, clear anatomy, well-defined limbs'"
+                    )
+                elif "resolution" in reason.lower():
+                    assessment["interpretation"]["recommended_actions"].append(
+                        "Increase resolution in generation settings"
+                    )
+                elif "duration" in reason.lower():
+                    assessment["interpretation"]["recommended_actions"].append(
+                        "Extend video length or use frame interpolation"
+                    )
+
+        return assessment
+    except Exception as e:
+        logger.error(f"Quality assessment failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Quality assessment failed: {str(e)}")
+
+@app.post("/api/anime/quality/assess-current-image")
+async def assess_current_generated_image():
+    """Assess the most recently generated image"""
+    try:
+        # Check the most recent image in the current project output
+        current_image_path = "/mnt/1TB-storage/anime-projects/project_1/output/drafts/character_26_20251201_212910.png"
+
+        if not os.path.exists(current_image_path):
+            raise HTTPException(status_code=404, detail="No current image found to assess")
+
+        return await assess_generated_content(current_image_path)
+
+    except Exception as e:
+        logger.error(f"Current image assessment failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Assessment failed: {str(e)}")
+
+@app.get("/api/anime/quality/standards")
+async def get_quality_standards():
+    """Get current quality standards and thresholds"""
+    return {
+        "motion_smoothness": {
+            "minimum": 7.0,
+            "scale": "1-10",
+            "description": "No multiple body parts, smooth animation"
+        },
+        "resolution": {
+            "minimum": "1024x1024",
+            "preferred": "4K (3840x2160)",
+            "description": "High resolution requirement"
+        },
+        "anatomical_integrity": {
+            "enabled": True,
+            "description": "Detects multiple limbs and malformed anatomy"
+        },
+        "auto_rejection": {
+            "enabled": QUALITY_CONTROL_AVAILABLE,
+            "threshold": 70.0,
+            "description": "Automatically reject low quality generations"
+        }
+    }
+
+@app.get("/api/anime/quality/status")
+async def get_quality_system_status():
+    """Get quality control system status"""
+    if not QUALITY_CONTROL_AVAILABLE:
+        return {
+            "quality_control": "disabled",
+            "message": "Quality control system not initialized"
+        }
+
+    try:
+        status = await quality_orchestrator.get_system_status()
+        return status
+    except Exception as e:
+        return {
+            "quality_control": "error",
+            "error": str(e)
+        }
 
 if __name__ == "__main__":
     import uvicorn

@@ -57,18 +57,32 @@
 
         <!-- Custom input -->
         <div class="custom-input">
-          <h3 class="text-lg font-semibold text-white mb-3">Or Describe Your Request</h3>
+          <h3 class="text-lg font-semibold text-white mb-3">Describe Your Request</h3>
+
+          <!-- Explicit Generation Type Selection -->
+          <div class="generation-type-selector mb-4">
+            <label class="block text-sm font-medium text-gray-300 mb-2">Generation Type</label>
+            <div class="type-buttons">
+              <button
+                @click="explicitGenerationType = 'image'"
+                :class="['type-btn', { 'active': explicitGenerationType === 'image' }]">
+                <i class="fas fa-image"></i>
+                Generate Image
+              </button>
+              <button
+                @click="explicitGenerationType = 'video'"
+                :class="['type-btn', { 'active': explicitGenerationType === 'video' }]">
+                <i class="fas fa-video"></i>
+                Generate Video
+              </button>
+            </div>
+          </div>
+
           <div class="input-container">
             <textarea
               v-model="userPrompt"
               @input="handlePromptChange"
-              placeholder="Describe what you want to create...
-
-Examples:
-• Create a character named Kai with silver hair and blue eyes
-• Generate a 30-second action scene with robots fighting
-• Make a photorealistic anime portrait of a cyberpunk girl
-• Create background art for a fantasy forest at sunset"
+              :placeholder="getPlaceholderText()"
               class="prompt-textarea"
               rows="6"
             ></textarea>
@@ -127,7 +141,7 @@ Examples:
             </button>
 
             <button @click="classifyIntent"
-                    :disabled="!userPrompt.trim() || isProcessing"
+                    :disabled="!userPrompt.trim() || !explicitGenerationType || isProcessing"
                     class="btn-primary">
               <i class="fas fa-magic" v-if="!isProcessing"></i>
               <i class="fas fa-spinner fa-spin" v-else></i>
@@ -392,6 +406,7 @@ export default {
     // Reactive state
     const currentStep = ref('input')
     const userPrompt = ref('')
+    const explicitGenerationType = ref('')
     const preferredStyle = ref('')
     const qualityPreference = ref('')
     const urgencyHint = ref('')
@@ -466,10 +481,40 @@ export default {
       classifyIntent()
     }
 
+    const getPlaceholderText = () => {
+      if (explicitGenerationType.value === 'image') {
+        return `Describe the image you want to create...
+
+Examples:
+• Character portrait of Kai with silver hair and blue eyes
+• Photorealistic anime portrait of a cyberpunk girl
+• Background art for a fantasy forest at sunset`
+      } else if (explicitGenerationType.value === 'video') {
+        return `Describe the video/animation you want to create...
+
+Examples:
+• 5-second action scene with robots fighting
+• Character walking through a futuristic city
+• Magical transformation sequence lasting 10 seconds`
+      } else {
+        return 'Please select generation type first (Image or Video)'
+      }
+    }
+
     const handlePromptChange = () => {
       inputHints.value = []
 
-      // Generate helpful hints based on input
+      // Validate generation type selection
+      if (!explicitGenerationType.value) {
+        inputHints.value.push({
+          type: 'error',
+          icon: 'fas fa-exclamation-triangle',
+          message: 'Please select generation type (Image or Video) first'
+        })
+        return
+      }
+
+      // Generate helpful hints based on input and type
       if (userPrompt.value.trim()) {
         if (!/\b(character|person|girl|boy|man|woman)\b/i.test(userPrompt.value)) {
           inputHints.value.push({
@@ -487,7 +532,7 @@ export default {
           })
         }
 
-        if (/\b(video|animation|scene)\b/i.test(userPrompt.value) && !/\d+\s*(second|minute)/i.test(userPrompt.value)) {
+        if (explicitGenerationType.value === 'video' && !/\d+\s*(second|minute)/i.test(userPrompt.value)) {
           inputHints.value.push({
             type: 'suggestion',
             icon: 'fas fa-clock',
@@ -498,7 +543,7 @@ export default {
     }
 
     const classifyIntent = async () => {
-      if (!userPrompt.value.trim()) return
+      if (!userPrompt.value.trim() || !explicitGenerationType.value) return
 
       isProcessing.value = true
       currentStep.value = 'classification'
@@ -517,6 +562,7 @@ export default {
       try {
         const requestData = {
           user_prompt: userPrompt.value,
+          explicit_type: explicitGenerationType.value,
           preferred_style: preferredStyle.value || null,
           quality_preference: qualityPreference.value || null,
           urgency_hint: urgencyHint.value || null,
@@ -687,6 +733,7 @@ export default {
       // State
       currentStep,
       userPrompt,
+      explicitGenerationType,
       preferredStyle,
       qualityPreference,
       urgencyHint,
@@ -712,6 +759,7 @@ export default {
 
       // Methods
       selectQuickTemplate,
+      getPlaceholderText,
       handlePromptChange,
       classifyIntent,
       setClarificationAnswer,
@@ -1289,6 +1337,51 @@ export default {
   color: #f56565;
 }
 
+/* Generation Type Selector */
+.generation-type-selector {
+  margin-bottom: 1.5rem;
+}
+
+.type-buttons {
+  display: flex;
+  gap: 1rem;
+}
+
+.type-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: #2d2d2d;
+  border: 2px solid #444;
+  border-radius: 8px;
+  color: #ccc;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.type-btn:hover {
+  background: #3d3d3d;
+  border-color: #ff6b6b;
+  color: #fff;
+}
+
+.type-btn.active {
+  background: #4a3737;
+  border-color: #ff6b6b;
+  color: #ff6b6b;
+  box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.2);
+}
+
+.type-btn i {
+  font-size: 1.1rem;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .intent-classification-wizard {
@@ -1301,6 +1394,10 @@ export default {
 
   .templates-grid {
     grid-template-columns: 1fr;
+  }
+
+  .type-buttons {
+    flex-direction: column;
   }
 
   .options-grid {
