@@ -1,5 +1,6 @@
 # Anime Production System - ACTUAL FIXES IMPLEMENTED
 ## Date: December 3, 2025
+## GitHub: https://github.com/pvestal/anime-production.git (feature/anime-system-redesign)
 ## Focus: Functionality over Security Theater
 
 ---
