@@ -10,8 +10,8 @@
         </h2>
       </template>
       <template #end>
-        <Button :label="viewMode === 'console' ? 'Studio View' : 'Console View'"
-                :icon="viewMode === 'console' ? 'pi pi-desktop' : 'pi pi-terminal'"
+        <Button :label="getViewButtonLabel()"
+                :icon="getViewButtonIcon()"
                 @click="toggleView"
                 severity="secondary" style="margin-right: 0.5rem;" />
         <Button label="New Project" icon="pi pi-plus" @click="showNewProjectDialog = true" style="margin-right: 0.5rem;" v-if="viewMode === 'studio'" />
@@ -19,6 +19,9 @@
         <Button label="Generate" icon="pi pi-play" @click="generateScene" :disabled="!selectedScene" severity="success" v-if="viewMode === 'studio'" />
       </template>
     </Toolbar>
+
+    <!-- Dashboard View -->
+    <AnimeDashboard v-if="viewMode === 'dashboard'" />
 
     <!-- Console View -->
     <EchoAnimeConsole v-if="viewMode === 'console'" />
@@ -168,12 +171,13 @@
 import { ref, computed, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import EchoAnimeConsole from './components/EchoAnimeConsole.vue'
+import AnimeDashboard from './components/AnimeDashboard.vue'
 
 const toast = useToast()
 const API_BASE = 'http://192.168.50.135:8323/api/anime'
 
 // View Mode
-const viewMode = ref('console')
+const viewMode = ref('dashboard')
 
 // State
 const projects = ref([])
@@ -189,7 +193,9 @@ const newScene = ref({ scene_number: 1, description: '', characters: '' })
 
 // View toggle
 function toggleView() {
-  viewMode.value = viewMode.value === 'console' ? 'studio' : 'console'
+  const modes = ['dashboard', 'console', 'studio']
+  const currentIndex = modes.indexOf(viewMode.value)
+  viewMode.value = modes[(currentIndex + 1) % modes.length]
 }
 
 // Computed
@@ -322,6 +328,24 @@ function getStatusSeverity(status) {
 function formatDate(dateString) {
   if (!dateString) return ''
   return new Date(dateString).toLocaleDateString()
+}
+
+function getViewButtonLabel() {
+  const labels = {
+    'dashboard': 'Console View',
+    'console': 'Studio View',
+    'studio': 'Dashboard View'
+  }
+  return labels[viewMode.value] || 'Dashboard View'
+}
+
+function getViewButtonIcon() {
+  const icons = {
+    'dashboard': 'pi pi-terminal',
+    'console': 'pi pi-desktop',
+    'studio': 'pi pi-chart-bar'
+  }
+  return icons[viewMode.value] || 'pi pi-chart-bar'
 }
 
 // Initialize

@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # Database configuration
 DB_CONFIG = {
-    'host': '192.168.50.135',
+    'host': 'localhost',
     'database': 'anime_production',
     'user': 'patrick',
     'password': 'tower_echo_brain_secret_key_2025',

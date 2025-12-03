@@ -37,7 +37,7 @@ class ProgressServer:
 
         logger.info(f"Client {websocket.remote_address} disconnected. Total clients: {len(self.clients)}")
 
-    async def handle_client(self, websocket, path):
+    async def handle_client(self, websocket):
         """Handle WebSocket client connections and messages"""
         await self.register_client(websocket)
 

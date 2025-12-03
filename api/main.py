@@ -3230,7 +3230,33 @@ async def get_personal_analysis():
 Base.metadata.create_all(bind=engine)
 
 
-# Static files and Git UI routes
+# Static files and Frontend UI routes
+@app.get("/", response_class=HTMLResponse)
+async def frontend_interface():
+    """Serve the main anime production frontend"""
+    try:
+        with open("/opt/tower-anime-production/static/dist/index.html", "r") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        return HTMLResponse(
+            content="""
+            <html>
+                <head><title>Anime Production Studio - Setup Required</title></head>
+                <body style="font-family: Arial; padding: 2rem; background: #1a1a1a; color: #e0e0e0;">
+                    <h1>Echo Brain Anime Studio</h1>
+                    <p>Frontend build not found. Run: <code>cd /opt/tower-anime-production/frontend && pnpm run build</code></p>
+                    <h2>Quick Actions</h2>
+                    <ul>
+                        <li><a href="/api/anime/projects" style="color: #4a9eff;">View Projects API</a></li>
+                        <li><a href="/api/anime/health" style="color: #4a9eff;">Health Check</a></li>
+                        <li><a href="/git" style="color: #4a9eff;">Git Control Interface</a></li>
+                    </ul>
+                </body>
+            </html>
+            """
+        )
+
 @app.get("/git", response_class=HTMLResponse)
 async def git_control_interface():
     """Serve the git control interface"""

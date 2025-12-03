@@ -26,7 +26,7 @@ class AnimeFileOrganizer(FileSystemEventHandler):
 
         # Database connection
         self.db_config = {
-            'host': '192.168.50.135',
+            'host': 'localhost',
             'database': 'anime_production',
             'user': 'patrick',
             'password': 'tower_echo_brain_secret_key_2025'
@@ -69,7 +69,7 @@ class AnimeFileOrganizer(FileSystemEventHandler):
 
             # Insert file record
             cursor.execute("""
-                INSERT INTO anime_files (
+                INSERT INTO anime_api.anime_files (
                     project_id,
                     filename,
                     file_path,
@@ -77,10 +77,10 @@ class AnimeFileOrganizer(FileSystemEventHandler):
                     file_size,
                     created_at
                 ) VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (file_path) DO UPDATE
-                SET updated_at = CURRENT_TIMESTAMP
+                ON CONFLICT (filename, file_path) DO UPDATE
+                SET organized_at = CURRENT_TIMESTAMP
             """, (
-                project_id,
+                None if project_id == 'unorganized' else project_id,
                 file_path.name,
                 str(new_location),
                 file_path.suffix[1:] if file_path.suffix else 'unknown',

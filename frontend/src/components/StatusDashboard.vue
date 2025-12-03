@@ -3,6 +3,18 @@
     <!-- Header -->
     <div class="dashboard-header">
       <h3>System Status</h3>
+      <div class="header-center">
+        <!-- Echo Brain Connection Status -->
+        <div class="echo-brain-status" :class="connectionIndicator.status.connected ? 'connected' : 'disconnected'">
+          <i :class="connectionIndicator.status.connected ? 'pi pi-wifi' : 'pi pi-wifi-slash'"></i>
+          <span class="status-text">
+            Echo Brain: {{ connectionIndicator.echoBrain }}
+          </span>
+          <span class="connection-text">
+            {{ connectionIndicator.status.connected ? 'Connected' : 'Disconnected' }}
+          </span>
+        </div>
+      </div>
       <div class="status-controls">
         <button @click="refreshStatus" class="control-button secondary" :disabled="loading">
           <i :class="loading ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'"></i>
@@ -12,6 +24,10 @@
           <i class="pi pi-trash"></i>
           Clear Completed
         </button>
+        <button @click="clearAlerts" class="control-button secondary" v-if="echoAlerts.length > 0">
+          <i class="pi pi-bell-slash"></i>
+          Clear Alerts ({{ echoAlerts.length }})
+        </button>
         <div class="auto-refresh-toggle">
           <input
             type="checkbox"
@@ -19,7 +35,7 @@
             v-model="autoRefresh"
             class="toggle-checkbox"
           />
-          <label for="auto-refresh" class="toggle-label">Auto-refresh</label>
+          <label for="auto-refresh" class="toggle-label">Real-time</label>
         </div>
       </div>
     </div>
@@ -138,17 +154,29 @@
         <div v-if="activeGeneration" class="active-generation">
           <div class="generation-header">
             <div class="generation-info">
-              <span class="generation-title">{{ activeGeneration.title }}</span>
-              <span class="generation-type">{{ activeGeneration.type }}</span>
+              <span class="generation-title">{{ activeGeneration.title || activeGeneration.id }}</span>
+              <span class="generation-type">{{ activeGeneration.type || 'Anime Generation' }}</span>
+              <div class="generation-meta">
+                <span class="generation-id">ID: {{ activeGeneration.id }}</span>
+                <span class="generation-status" :class="activeGeneration.status">
+                  {{ (activeGeneration.status || 'running').toUpperCase() }}
+                </span>
+              </div>
             </div>
             <div class="generation-actions">
-              <button @click="pauseGeneration" class="action-button" v-if="!activeGeneration.paused">
+              <button @click="pauseGeneration" class="action-button"
+                      v-if="activeGeneration.status === 'running' && !activeGeneration.paused"
+                      title="Pause Generation">
                 <i class="pi pi-pause"></i>
               </button>
-              <button @click="resumeGeneration" class="action-button" v-if="activeGeneration.paused">
+              <button @click="resumeGeneration" class="action-button"
+                      v-if="activeGeneration.paused || activeGeneration.status === 'paused'"
+                      title="Resume Generation">
                 <i class="pi pi-play"></i>
               </button>
-              <button @click="cancelGeneration" class="action-button danger">
+              <button @click="cancelGeneration" class="action-button danger"
+                      v-if="['running', 'paused'].includes(activeGeneration.status)"
+                      title="Cancel Generation">
                 <i class="pi pi-times"></i>
               </button>
             </div>
@@ -156,22 +184,42 @@
 
           <div class="generation-progress">
             <div class="progress-info">
-              <span>Step {{ activeGeneration.currentStep }} of {{ activeGeneration.totalSteps }}</span>
-              <span>{{ activeGeneration.percentage.toFixed(1) }}%</span>
+              <div class="progress-left">
+                <span>Step {{ activeGeneration.currentStep || 0 }} of {{ activeGeneration.totalSteps || 0 }}</span>
+                <span class="current-stage">{{ activeGeneration.stage || 'Processing' }}</span>
+              </div>
+              <div class="progress-right">
+                <span class="progress-percentage">{{ (activeGeneration.progress || 0).toFixed(1) }}%</span>
+                <span class="generation-speed" v-if="activeGeneration.speed">
+                  {{ activeGeneration.speed.toFixed(2) }} steps/sec
+                </span>
+              </div>
             </div>
+
             <div class="progress-bar large">
               <div
                 class="progress-fill active"
-                :style="{ width: activeGeneration.percentage + '%' }"
+                :style="{ width: (activeGeneration.progress || 0) + '%' }"
+                :class="{
+                  'progress-paused': activeGeneration.paused,
+                  'progress-error': activeGeneration.status === 'failed'
+                }"
               ></div>
             </div>
+
             <div class="progress-details">
-              <span>ETA: {{ formatTime(activeGeneration.eta) }}</span>
-              <span>Elapsed: {{ formatTime(activeGeneration.elapsed) }}</span>
+              <div class="time-info">
+                <span>ETA: {{ formatTime(activeGeneration.eta || 0) }}</span>
+                <span>Elapsed: {{ formatTime(activeGeneration.elapsed || 0) }}</span>
+              </div>
+              <div class="technical-info">
+                <span v-if="activeGeneration.model">Model: {{ activeGeneration.model }}</span>
+                <span v-if="activeGeneration.resolution">Size: {{ activeGeneration.resolution }}</span>
+              </div>
             </div>
           </div>
 
-          <div class="generation-stages">
+          <div class="generation-stages" v-if="activeGeneration.stages">
             <div
               v-for="stage in activeGeneration.stages"
               :key="stage.name"
@@ -179,8 +227,20 @@
             >
               <i :class="getStageIcon(stage.status)"></i>
               <span class="stage-name">{{ stage.name }}</span>
+              <span class="stage-progress" v-if="stage.progress">{{ stage.progress }}%</span>
               <span class="stage-time" v-if="stage.duration">{{ formatTime(stage.duration) }}</span>
             </div>
+          </div>
+
+          <!-- Real-time Generation Output Preview -->
+          <div class="generation-preview" v-if="activeGeneration.previewUrl">
+            <div class="preview-header">
+              <span>Live Preview</span>
+              <button @click="refreshPreview" class="mini-button">
+                <i class="pi pi-refresh"></i>
+              </button>
+            </div>
+            <img :src="activeGeneration.previewUrl" alt="Generation Preview" class="preview-image" />
           </div>
         </div>
 
@@ -331,7 +391,8 @@
 </template>
 
 <script>
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { useWebSocket } from '@/composables/useWebSocket.js'
 
 export default {
   name: 'StatusDashboard',
@@ -342,110 +403,150 @@ export default {
     const metricsTimeframe = ref('1h')
     const refreshInterval = ref(null)
 
-    // System health
-    const systemHealth = reactive({
-      status: 'healthy'
-    })
+    // Initialize WebSocket connection to Echo Brain
+    const {
+      connectionStatus,
+      isConnected,
+      systemStatus: echoSystemStatus,
+      generationState: echoGenerationState,
+      metrics: echoMetrics,
+      logs: echoLogs,
+      alerts: echoAlerts,
+      communications: echoCommunications,
+      requestSystemStatus,
+      requestQueueStatus,
+      subscribeToGeneration,
+      sendGenerationCommand,
+      clearAlerts,
+      clearLogs: clearEchoLogs
+    } = useWebSocket()
 
-    const vramStats = reactive({
-      used: 0,
-      total: 12000000000, // 12GB
-      percentage: 0,
+    // System health - now connected to Echo Brain
+    const systemHealth = computed(() => ({
+      status: isConnected.value ?
+        (echoSystemStatus.healthy ? 'healthy' : 'warning') :
+        'error'
+    }))
+
+    // VRAM stats from Echo Brain metrics
+    const vramStats = computed(() => ({
+      used: echoMetrics.vram?.nvidia_used || 0,
+      total: echoMetrics.vram?.nvidia_total || 12000000000,
+      percentage: echoMetrics.vram?.nvidia || 0,
       gpuName: 'NVIDIA RTX 3060'
-    })
+    }))
 
-    const cpuStats = reactive({
-      percentage: 0,
-      cores: 8,
-      loadAverage: 0
-    })
+    const cpuStats = computed(() => ({
+      percentage: echoMetrics.cpu || 0,
+      cores: echoMetrics.cpu_cores || 8,
+      loadAverage: echoMetrics.load_average || 0
+    }))
 
-    const memoryStats = reactive({
-      used: 0,
-      total: 16000000000, // 16GB
-      available: 0,
-      percentage: 0
-    })
+    const memoryStats = computed(() => ({
+      used: echoMetrics.memory_used || 0,
+      total: echoMetrics.memory_total || 16000000000,
+      available: echoMetrics.memory_available || 0,
+      percentage: echoMetrics.memory || 0
+    }))
 
-    const diskStats = reactive({
-      used: 0,
-      total: 1000000000000, // 1TB
-      free: 0,
-      percentage: 0
-    })
+    const diskStats = computed(() => ({
+      used: echoMetrics.disk_used || 0,
+      total: echoMetrics.disk_total || 1000000000000,
+      free: echoMetrics.disk_free || 0,
+      percentage: echoMetrics.disk || 0
+    }))
 
-    // Queue management
-    const activeGeneration = ref(null)
-    const queueItems = ref([])
-    const queueStats = reactive({
-      pending: 0,
-      running: 0,
-      completed: 0
-    })
+    // Queue management - connected to Echo Brain
+    const activeGeneration = computed(() => echoGenerationState.active)
+    const queueItems = computed(() => echoGenerationState.queue)
+    const queueStats = computed(() => echoGenerationState.queueStats)
 
-    // Logs
+    // Logs - combined local and Echo Brain
     const logs = ref([])
     const logsContainer = ref(null)
 
-    // Performance metrics
-    const performanceMetrics = reactive({
-      generationsPerHour: 0,
-      generationTrend: 'neutral',
-      generationChange: 0,
-      avgGenerationTime: 0,
-      timeTrend: 'neutral',
-      timeChange: 0,
-      successRate: 0,
-      successTrend: 'neutral',
-      successChange: 0,
-      errorRate: 0,
-      errorTrend: 'neutral',
-      errorChange: 0
-    })
+    // Performance metrics from Echo Brain
+    const performanceMetrics = computed(() => ({
+      generationsPerHour: echoMetrics.generationsPerHour || 0,
+      generationTrend: getTrendFromValue(echoMetrics.generationChange || 0),
+      generationChange: Math.abs(echoMetrics.generationChange || 0),
+      avgGenerationTime: echoMetrics.avgGenerationTime || 0,
+      timeTrend: getTrendFromValue(-(echoMetrics.timeChange || 0)), // Negative because less time is better
+      timeChange: Math.abs(echoMetrics.timeChange || 0),
+      successRate: echoMetrics.successRate || 0,
+      successTrend: getTrendFromValue(echoMetrics.successChange || 0),
+      successChange: Math.abs(echoMetrics.successChange || 0),
+      errorRate: echoMetrics.errorRate || 0,
+      errorTrend: getTrendFromValue(-(echoMetrics.errorChange || 0)), // Negative because less error is better
+      errorChange: Math.abs(echoMetrics.errorChange || 0)
+    }))
+
+    // Helper function for trend calculation
+    const getTrendFromValue = (value) => {
+      if (value > 0.5) return 'up'
+      if (value < -0.5) return 'down'
+      return 'neutral'
+    }
 
     // Computed properties
     const filteredLogs = computed(() => {
+      // Combine Echo logs with local logs
+      const allLogs = [
+        ...echoLogs.value.map(log => ({
+          ...log,
+          source: log.source || 'Echo Brain'
+        })),
+        ...logs.value
+      ]
+
       if (selectedLogLevel.value === 'all') {
-        return logs.value
+        return allLogs
       }
-      return logs.value.filter(log => log.level === selectedLogLevel.value)
+      return allLogs.filter(log => log.level === selectedLogLevel.value)
     })
+
+    // Connection status indicator
+    const connectionIndicator = computed(() => ({
+      connected: isConnected.value,
+      status: connectionStatus.value,
+      echoBrain: echoSystemStatus.consciousness || 'inactive'
+    }))
 
     // Methods
     const loadSystemHealth = async () => {
-      try {
-        const response = await fetch('/api/status/system-health')
-        if (response.ok) {
-          const data = await response.json()
-          systemHealth.status = data.status
-
-          // Update individual stats
-          Object.assign(vramStats, data.vram)
-          Object.assign(cpuStats, data.cpu)
-          Object.assign(memoryStats, data.memory)
-          Object.assign(diskStats, data.disk)
+      // Now handled by Echo Brain WebSocket
+      if (isConnected.value) {
+        requestSystemStatus()
+      } else {
+        // Fallback to REST API if WebSocket not connected
+        try {
+          const response = await fetch('/api/status/system-health')
+          if (response.ok) {
+            const data = await response.json()
+            // Update local reactive data as fallback
+            console.log('Fallback system health data:', data)
+          }
+        } catch (error) {
+          console.error('Failed to load system health:', error)
         }
-      } catch (error) {
-        console.error('Failed to load system health:', error)
-        systemHealth.status = 'error'
       }
     }
 
     const loadGenerationQueue = async () => {
-      try {
-        const response = await fetch('/api/generations/queue')
-        if (response.ok) {
-          const data = await response.json()
-          queueItems.value = data.items
-          queueStats.pending = data.stats.pending
-          queueStats.running = data.stats.running
-          queueStats.completed = data.stats.completed
-
-          // Get active generation
-          activeGeneration.value = data.active
+      // Now handled by Echo Brain WebSocket
+      if (isConnected.value) {
+        requestQueueStatus()
+      } else {
+        // Fallback to REST API if WebSocket not connected
+        try {
+          const response = await fetch('/api/generations/queue')
+          if (response.ok) {
+            const data = await response.json()
+            console.log('Fallback queue data:', data)
+          }
+        } catch (error) {
+          console.error('Failed to load generation queue:', error)
         }
-      } catch (error) {
-        console.error('Failed to load generation queue:', error)
       }
     }
 
@@ -494,35 +595,77 @@ export default {
     }
 
     const pauseGeneration = async () => {
+      if (!activeGeneration.value?.id) {
+        console.warn('No active generation to pause')
+        return
+      }
+
       try {
-        await fetch(`/api/generations/${activeGeneration.value.id}/pause`, {
-          method: 'POST'
-        })
-        await loadGenerationQueue()
+        if (isConnected.value) {
+          // Use Echo Brain WebSocket for real-time control
+          const success = sendGenerationCommand(activeGeneration.value.id, 'pause')
+          if (!success) {
+            throw new Error('WebSocket command failed')
+          }
+        } else {
+          // Fallback to REST API
+          await fetch(`/api/generations/${activeGeneration.value.id}/pause`, {
+            method: 'POST'
+          })
+          await loadGenerationQueue()
+        }
       } catch (error) {
         console.error('Failed to pause generation:', error)
       }
     }
 
     const resumeGeneration = async () => {
+      if (!activeGeneration.value?.id) {
+        console.warn('No active generation to resume')
+        return
+      }
+
       try {
-        await fetch(`/api/generations/${activeGeneration.value.id}/resume`, {
-          method: 'POST'
-        })
-        await loadGenerationQueue()
+        if (isConnected.value) {
+          // Use Echo Brain WebSocket for real-time control
+          const success = sendGenerationCommand(activeGeneration.value.id, 'resume')
+          if (!success) {
+            throw new Error('WebSocket command failed')
+          }
+        } else {
+          // Fallback to REST API
+          await fetch(`/api/generations/${activeGeneration.value.id}/resume`, {
+            method: 'POST'
+          })
+          await loadGenerationQueue()
+        }
       } catch (error) {
         console.error('Failed to resume generation:', error)
       }
     }
 
     const cancelGeneration = async () => {
+      if (!activeGeneration.value?.id) {
+        console.warn('No active generation to cancel')
+        return
+      }
+
       if (!confirm('Cancel the current generation?')) return
 
       try {
-        await fetch(`/api/generations/${activeGeneration.value.id}/cancel`, {
-          method: 'POST'
-        })
-        await loadGenerationQueue()
+        if (isConnected.value) {
+          // Use Echo Brain WebSocket for real-time control
+          const success = sendGenerationCommand(activeGeneration.value.id, 'cancel')
+          if (!success) {
+            throw new Error('WebSocket command failed')
+          }
+        } else {
+          // Fallback to REST API
+          await fetch(`/api/generations/${activeGeneration.value.id}/cancel`, {
+            method: 'POST'
+          })
+          await loadGenerationQueue()
+        }
       } catch (error) {
         console.error('Failed to cancel generation:', error)
       }
@@ -671,39 +814,140 @@ export default {
       }
     }
 
+    // WebSocket event handlers and watchers
+    watch(isConnected, (newValue) => {
+      console.log(`[StatusDashboard] WebSocket connection status changed: ${newValue}`)
+      if (newValue) {
+        // Connected to Echo Brain - request initial data
+        requestSystemStatus()
+        requestQueueStatus()
+      }
+    })
+
+    watch(echoAlerts, (newAlerts) => {
+      // Show browser notifications for critical alerts
+      if (newAlerts.length > 0) {
+        const latestAlert = newAlerts[0]
+        if (latestAlert.level === 'error' || latestAlert.level === 'critical') {
+          showNotification(latestAlert.title, latestAlert.message, 'error')
+        }
+      }
+    }, { deep: true })
+
+    // Auto-subscribe to active generation updates
+    watch(activeGeneration, (newGeneration, oldGeneration) => {
+      if (oldGeneration?.id && oldGeneration.id !== newGeneration?.id) {
+        console.log(`[StatusDashboard] Active generation changed from ${oldGeneration.id} to ${newGeneration?.id}`)
+      }
+
+      if (newGeneration?.id && isConnected.value) {
+        subscribeToGeneration(newGeneration.id)
+        console.log(`[StatusDashboard] Subscribed to generation updates: ${newGeneration.id}`)
+      }
+    })
+
+    // Notification system
+    const showNotification = (title, message, type = 'info') => {
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(title, {
+          body: message,
+          icon: '/favicon.ico'
+        })
+      } else if ('Notification' in window && Notification.permission !== 'denied') {
+        Notification.requestPermission().then(permission => {
+          if (permission === 'granted') {
+            new Notification(title, {
+              body: message,
+              icon: '/favicon.ico'
+            })
+          }
+        })
+      }
+
+      // Also add to local alerts if it's an error
+      if (type === 'error') {
+        logs.value.unshift({
+          id: Date.now().toString(),
+          timestamp: new Date().toISOString(),
+          level: 'error',
+          source: 'StatusDashboard',
+          message: `${title}: ${message}`
+        })
+      }
+    }
+
+    // Enhanced refresh function
+    const refreshPreview = () => {
+      if (activeGeneration.value?.id) {
+        // Request updated preview from Echo Brain
+        const timestamp = Date.now()
+        if (activeGeneration.value.previewUrl) {
+          activeGeneration.value.previewUrl = activeGeneration.value.previewUrl.split('?')[0] + '?t=' + timestamp
+        }
+      }
+    }
+
+    // Add method to return to setup
+    const addRefreshPreview = () => refreshPreview
+
     // Lifecycle
     onMounted(() => {
       refreshStatus()
       setupAutoRefresh()
 
-      // Watch for auto-refresh changes
-      const autoRefreshWatcher = () => setupAutoRefresh()
-      // Note: In a real Vue 3 app, you'd use watch() here
+      // Request notification permission
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission()
+      }
+
+      console.log('[StatusDashboard] Component mounted, WebSocket integration active')
     })
 
     onUnmounted(() => {
       if (refreshInterval.value) {
         clearInterval(refreshInterval.value)
       }
+      console.log('[StatusDashboard] Component unmounted')
     })
 
     return {
+      // Basic component state
       loading,
       autoRefresh,
       selectedLogLevel,
       metricsTimeframe,
+
+      // WebSocket connection data
+      isConnected,
+      connectionIndicator,
+      connectionStatus,
+
+      // Echo Brain data
+      echoAlerts,
+      echoCommunications,
+      echoLogs,
+
+      // System health (computed from Echo Brain)
       systemHealth,
       vramStats,
       cpuStats,
       memoryStats,
       diskStats,
+
+      // Generation state (computed from Echo Brain)
       activeGeneration,
       queueItems,
       queueStats,
+
+      // Local logs and container ref
       logs,
       logsContainer,
+
+      // Performance metrics (computed from Echo Brain)
       performanceMetrics,
       filteredLogs,
+
+      // Methods
       refreshStatus,
       pauseGeneration,
       resumeGeneration,
@@ -714,13 +958,24 @@ export default {
       clearCompleted,
       clearLogs,
       downloadLogs,
+      refreshPreview,
+
+      // Utility functions
       formatBytes,
       formatTime,
       formatRelativeTime,
       formatLogTime,
       getHealthIcon,
       getStageIcon,
-      getTrendIcon
+      getTrendIcon,
+
+      // WebSocket methods
+      requestSystemStatus,
+      requestQueueStatus,
+      subscribeToGeneration,
+      sendGenerationCommand,
+      clearAlerts,
+      showNotification
     }
   }
 }
@@ -745,6 +1000,54 @@ export default {
   align-items: center;
   padding: 1rem;
   border-bottom: 1px solid #333;
+}
+
+.header-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.echo-brain-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  border: 1px solid;
+  transition: all 0.3s ease;
+}
+
+.echo-brain-status.connected {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  border-color: #10b981;
+}
+
+.echo-brain-status.connected .pi-wifi {
+  animation: pulse 2s infinite;
+}
+
+.echo-brain-status.disconnected {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.status-text {
+  font-weight: 600;
+}
+
+.connection-text {
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
 }
 
 .dashboard-header h3 {
@@ -973,16 +1276,168 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  flex: 1;
 }
 
 .generation-title {
   font-weight: 600;
   color: #e0e0e0;
+  font-size: 1.1rem;
 }
 
 .generation-type {
   font-size: 0.8rem;
   color: #999;
+}
+
+.generation-meta {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.generation-id {
+  font-size: 0.75rem;
+  color: #666;
+  font-family: monospace;
+}
+
+.generation-status {
+  padding: 0.125rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.generation-status.running {
+  background: #3b82f6;
+  color: white;
+}
+
+.generation-status.paused {
+  background: #f59e0b;
+  color: white;
+}
+
+.generation-status.completed {
+  background: #10b981;
+  color: white;
+}
+
+.generation-status.failed {
+  background: #ef4444;
+  color: white;
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.progress-left, .progress-right {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.progress-right {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.current-stage {
+  font-size: 0.8rem;
+  color: #3b82f6;
+  font-style: italic;
+}
+
+.progress-percentage {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.generation-speed {
+  font-size: 0.75rem;
+  color: #10b981;
+}
+
+.progress-fill.progress-paused {
+  background: #f59e0b;
+  animation: blink 1s infinite;
+}
+
+.progress-fill.progress-error {
+  background: #ef4444;
+}
+
+@keyframes blink {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
+.progress-details {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.time-info, .technical-info {
+  display: flex;
+  gap: 1rem;
+}
+
+.technical-info {
+  color: #999;
+}
+
+.stage-progress {
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+.generation-preview {
+  margin-top: 1rem;
+  border: 1px solid #333;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background: #1a1a1a;
+  border-bottom: 1px solid #333;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.preview-image {
+  width: 100%;
+  height: auto;
+  max-height: 300px;
+  object-fit: contain;
+  display: block;
+}
+
+.mini-button {
+  padding: 0.25rem 0.5rem;
+  background: none;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #e0e0e0;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.mini-button:hover {
+  background: #333;
 }
 
 .generation-actions {
