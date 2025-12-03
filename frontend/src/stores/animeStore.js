@@ -29,6 +29,12 @@ export const useAnimeStore = defineStore('anime', () => {
   const currentGeneration = ref(null)
   const generationQueue = ref([])
 
+  // WebSocket Management
+  const wsConnection = ref(null)
+  const wsConnected = ref(false)
+  const jobProgress = ref({})
+  const jobETAs = ref({})
+
   // Echo Coordination
   const echoCoordination = ref(null)
   const echoStatus = ref('disconnected')

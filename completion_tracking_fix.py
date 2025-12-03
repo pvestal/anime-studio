@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # Database configuration
 DB_CONFIG = {
-    'host': '***REMOVED***',
+    'host': 'localhost',
     'database': 'anime_production',
     'user': 'patrick',
     'password': '***REMOVED***',

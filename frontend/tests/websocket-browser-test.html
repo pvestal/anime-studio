@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Echo Brain WebSocket Test</title>
+    <style>
+        body {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            padding: 20px;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            border-radius: 20px;
+            font-weight: 600;
+        }
+
+        .connection-status.connected {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            border: 1px solid #10b981;
+        }
+
+        .connection-status.disconnected {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid #ef4444;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 10px 15px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 4px;
+            color: #e0e0e0;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        button:hover {
+            background: #333;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .test-area {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .test-panel {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .test-panel h3 {
+            margin: 0 0 15px 0;
+            color: #3b82f6;
+        }
+
+        .log-area {
+            background: #0f0f0f;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+        }
+
+        .log-entry.info { color: #3b82f6; }
+        .log-entry.success { color: #10b981; }
+        .log-entry.warning { color: #f59e0b; }
+        .log-entry.error { color: #ef4444; }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .metric {
+            background: #0f0f0f;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #3b82f6;
+        }
+
+        .metric-label {
+            font-size: 0.8rem;
+            color: #999;
+            margin-top: 5px;
+        }
+
+        .generation-progress {
+            margin-top: 15px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: #3b82f6;
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Echo Brain WebSocket Integration Test</h1>
+            <div class="connection-status" id="connectionStatus">
+                <span id="statusIcon">⚫</span>
+                <span id="statusText">Disconnected</span>
+            </div>
+            <div class="controls">
+                <button id="connectBtn">Connect</button>
+                <button id="disconnectBtn" disabled>Disconnect</button>
+                <button id="clearLogsBtn">Clear Logs</button>
+            </div>
+        </div>
+
+        <div class="test-area">
+            <div class="test-panel">
+                <h3>WebSocket Messages</h3>
+                <div class="log-area" id="messageLog"></div>
+                <div class="controls" style="margin-top: 15px;">
+                    <button id="requestStatusBtn" disabled>Request System Status</button>
+                    <button id="requestQueueBtn" disabled>Request Queue Status</button>
+                    <button id="subscribeGenBtn" disabled>Subscribe to Test Generation</button>
+                </div>
+            </div>
+
+            <div class="test-panel">
+                <h3>System Metrics</h3>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="metric-value" id="cpuMetric">0%</div>
+                        <div class="metric-label">CPU Usage</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="memoryMetric">0%</div>
+                        <div class="metric-label">Memory Usage</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="vramMetric">0%</div>
+                        <div class="metric-label">VRAM Usage</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value" id="connectionMetric">0</div>
+                        <div class="metric-label">Messages Received</div>
+                    </div>
+                </div>
+
+                <div class="generation-progress">
+                    <h4>Active Generation</h4>
+                    <div class="progress-info">
+                        <span id="generationId">No active generation</span>
+                        <span id="generationProgress">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                    </div>
+                    <div class="progress-info">
+                        <span id="generationEta">ETA: N/A</span>
+                        <span id="generationElapsed">Elapsed: N/A</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-panel" style="grid-column: 1 / -1; margin-top: 20px;">
+            <h3>Test Results</h3>
+            <div class="log-area" id="testResults"></div>
+        </div>
+    </div>
+
+    <script>
+        class WebSocketTester {
+            constructor() {
+                this.ws = null
+                this.isConnected = false
+                this.messageCount = 0
+                this.testStartTime = Date.now()
+
+                this.initializeElements()
+                this.attachEventListeners()
+            }
+
+            initializeElements() {
+                this.elements = {
+                    connectionStatus: document.getElementById('connectionStatus'),
+                    statusIcon: document.getElementById('statusIcon'),
+                    statusText: document.getElementById('statusText'),
+                    connectBtn: document.getElementById('connectBtn'),
+                    disconnectBtn: document.getElementById('disconnectBtn'),
+                    clearLogsBtn: document.getElementById('clearLogsBtn'),
+                    messageLog: document.getElementById('messageLog'),
+                    requestStatusBtn: document.getElementById('requestStatusBtn'),
+                    requestQueueBtn: document.getElementById('requestQueueBtn'),
+                    subscribeGenBtn: document.getElementById('subscribeGenBtn'),
+                    cpuMetric: document.getElementById('cpuMetric'),
+                    memoryMetric: document.getElementById('memoryMetric'),
+                    vramMetric: document.getElementById('vramMetric'),
+                    connectionMetric: document.getElementById('connectionMetric'),
+                    generationId: document.getElementById('generationId'),
+                    generationProgress: document.getElementById('generationProgress'),
+                    progressFill: document.getElementById('progressFill'),
+                    generationEta: document.getElementById('generationEta'),
+                    generationElapsed: document.getElementById('generationElapsed'),
+                    testResults: document.getElementById('testResults')
+                }
+            }
+
+            attachEventListeners() {
+                this.elements.connectBtn.addEventListener('click', () => this.connect())
+                this.elements.disconnectBtn.addEventListener('click', () => this.disconnect())
+                this.elements.clearLogsBtn.addEventListener('click', () => this.clearLogs())
+                this.elements.requestStatusBtn.addEventListener('click', () => this.requestSystemStatus())
+                this.elements.requestQueueBtn.addEventListener('click', () => this.requestQueueStatus())
+                this.elements.subscribeGenBtn.addEventListener('click', () => this.subscribeToGeneration())
+            }
+
+            connect() {
+                if (this.ws) return
+
+                this.log('Connecting to Echo Brain WebSocket...', 'info')
+
+                this.ws = new WebSocket('wss://***REMOVED***/api/ws')
+
+                this.ws.onopen = () => {
+                    this.isConnected = true
+                    this.updateConnectionStatus(true)
+                    this.log('Connected to Echo Brain successfully', 'success')
+                    this.enableControls()
+                }
+
+                this.ws.onmessage = (event) => {
+                    this.handleMessage(JSON.parse(event.data))
+                }
+
+                this.ws.onclose = (event) => {
+                    this.isConnected = false
+                    this.updateConnectionStatus(false)
+                    this.log(`Connection closed: ${event.code} - ${event.reason}`, 'warning')
+                    this.disableControls()
+                    this.ws = null
+                }
+
+                this.ws.onerror = (error) => {
+                    this.log(`WebSocket error: ${error}`, 'error')
+                }
+            }
+
+            disconnect() {
+                if (this.ws) {
+                    this.ws.close(1000, 'User disconnect')
+                }
+            }
+
+            handleMessage(data) {
+                this.messageCount++
+                this.elements.connectionMetric.textContent = this.messageCount
+
+                const { type, payload } = data
+
+                switch (type) {
+                    case 'system_status':
+                        this.updateSystemMetrics(payload)
+                        this.log(`System status update received`, 'info')
+                        break
+
+                    case 'initial_state':
+                        this.log('Initial state received from Echo Brain', 'success')
+                        if (payload.system_status) {
+                            this.updateSystemMetrics(payload.system_status)
+                        }
+                        break
+
+                    case 'generation_progress':
+                        this.updateGenerationProgress(payload)
+                        this.log(`Generation progress: ${payload.progress || 0}%`, 'info')
+                        break
+
+                    case 'generation_complete':
+                        this.log(`Generation ${payload.jobId} completed`, 'success')
+                        break
+
+                    case 'generation_failed':
+                        this.log(`Generation ${payload.jobId} failed: ${payload.error}`, 'error')
+                        break
+
+                    case 'metrics_update':
+                        this.updateSystemMetrics(payload.metrics)
+                        this.log('Metrics update received', 'info')
+                        break
+
+                    case 'system_alert':
+                        this.log(`Alert [${payload.level}]: ${payload.title} - ${payload.message}`, payload.level)
+                        break
+
+                    case 'communication':
+                        this.log(`Communication from ${payload.source}: ${payload.message}`, payload.level || 'info')
+                        break
+
+                    default:
+                        this.log(`Received ${type} message`, 'info')
+                }
+            }
+
+            updateConnectionStatus(connected) {
+                if (connected) {
+                    this.elements.connectionStatus.className = 'connection-status connected'
+                    this.elements.statusIcon.textContent = '🟢'
+                    this.elements.statusText.textContent = 'Connected to Echo Brain'
+                } else {
+                    this.elements.connectionStatus.className = 'connection-status disconnected'
+                    this.elements.statusIcon.textContent = '🔴'
+                    this.elements.statusText.textContent = 'Disconnected'
+                }
+            }
+
+            updateSystemMetrics(metrics) {
+                if (metrics.cpu !== undefined) {
+                    this.elements.cpuMetric.textContent = `${metrics.cpu.toFixed(1)}%`
+                }
+                if (metrics.memory !== undefined) {
+                    this.elements.memoryMetric.textContent = `${metrics.memory.toFixed(1)}%`
+                }
+                if (metrics.vram && metrics.vram.nvidia !== undefined) {
+                    this.elements.vramMetric.textContent = `${metrics.vram.nvidia.toFixed(1)}%`
+                }
+            }
+
+            updateGenerationProgress(progress) {
+                if (progress.jobId) {
+                    this.elements.generationId.textContent = `Generation: ${progress.jobId}`
+                }
+                if (progress.progress !== undefined) {
+                    this.elements.generationProgress.textContent = `${progress.progress.toFixed(1)}%`
+                    this.elements.progressFill.style.width = `${progress.progress}%`
+                }
+                if (progress.eta !== undefined) {
+                    this.elements.generationEta.textContent = `ETA: ${this.formatTime(progress.eta)}`
+                }
+                if (progress.elapsed !== undefined) {
+                    this.elements.generationElapsed.textContent = `Elapsed: ${this.formatTime(progress.elapsed)}`
+                }
+            }
+
+            enableControls() {
+                this.elements.connectBtn.disabled = true
+                this.elements.disconnectBtn.disabled = false
+                this.elements.requestStatusBtn.disabled = false
+                this.elements.requestQueueBtn.disabled = false
+                this.elements.subscribeGenBtn.disabled = false
+            }
+
+            disableControls() {
+                this.elements.connectBtn.disabled = false
+                this.elements.disconnectBtn.disabled = true
+                this.elements.requestStatusBtn.disabled = true
+                this.elements.requestQueueBtn.disabled = true
+                this.elements.subscribeGenBtn.disabled = true
+            }
+
+            sendMessage(message) {
+                if (this.ws && this.isConnected) {
+                    this.ws.send(JSON.stringify({
+                        ...message,
+                        timestamp: new Date().toISOString()
+                    }))
+                    return true
+                }
+                return false
+            }
+
+            requestSystemStatus() {
+                if (this.sendMessage({ type: 'request_system_status' })) {
+                    this.log('Requested system status', 'info')
+                }
+            }
+
+            requestQueueStatus() {
+                if (this.sendMessage({ type: 'request_queue_status' })) {
+                    this.log('Requested queue status', 'info')
+                }
+            }
+
+            subscribeToGeneration() {
+                const testJobId = 'test-job-' + Date.now()
+                if (this.sendMessage({
+                    type: 'subscribe_generation',
+                    payload: { jobId: testJobId }
+                })) {
+                    this.log(`Subscribed to generation: ${testJobId}`, 'info')
+                }
+            }
+
+            log(message, level = 'info') {
+                const timestamp = new Date().toLocaleTimeString()
+                const entry = document.createElement('div')
+                entry.className = `log-entry ${level}`
+                entry.textContent = `[${timestamp}] ${message}`
+
+                this.elements.messageLog.appendChild(entry)
+                this.elements.messageLog.scrollTop = this.elements.messageLog.scrollHeight
+            }
+
+            clearLogs() {
+                this.elements.messageLog.innerHTML = ''
+                this.elements.testResults.innerHTML = ''
+            }
+
+            formatTime(seconds) {
+                if (!seconds) return '0s'
+                const mins = Math.floor(seconds / 60)
+                const secs = Math.floor(seconds % 60)
+                return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
+            }
+        }
+
+        // Initialize the tester
+        const tester = new WebSocketTester()
+
+        // Auto-connect for demonstration
+        setTimeout(() => {
+            tester.connect()
+        }, 1000)
+    </script>
+</body>
+</html>

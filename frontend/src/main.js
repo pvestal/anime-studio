@@ -10,6 +10,7 @@ import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Textarea from 'primevue/textarea'
 import Dialog from 'primevue/dialog'
+import Dropdown from 'primevue/dropdown'
 import Splitter from 'primevue/splitter'
 import SplitterPanel from 'primevue/splitterpanel'
 import Toolbar from 'primevue/toolbar'
@@ -17,10 +18,12 @@ import Card from 'primevue/card'
 import Tag from 'primevue/tag'
 import Toast from 'primevue/toast'
 import ToastService from 'primevue/toastservice'
+import { createPinia } from 'pinia'
 import 'primeicons/primeicons.css'
 
 const app = createApp(App)
 
+app.use(createPinia())
 app.use(PrimeVue, {
   theme: {
     preset: Aura,
@@ -39,6 +42,7 @@ app.component('Button', Button)
 app.component('InputText', InputText)
 app.component('Textarea', Textarea)
 app.component('Dialog', Dialog)
+app.component('Dropdown', Dropdown)
 app.component('Splitter', Splitter)
 app.component('SplitterPanel', SplitterPanel)
 app.component('Toolbar', Toolbar)
