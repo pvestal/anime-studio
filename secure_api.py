@@ -26,13 +26,18 @@ from dotenv import load_dotenv
 
 from database_operations import EnhancedDatabaseManager
 from pose_library import pose_library
+from src.storyline_database import StorylineDatabase
 
-# Initialize database manager
+# Initialize database managers
 db_manager = EnhancedDatabaseManager()
+storyline_db = StorylineDatabase()
+
 async def initialize_database():
-    return True  # Database initialized in __init__
+    await storyline_db.initialize()
+    return True
 async def close_database():
-    return None  # EnhancedDatabaseManager doesn't have a close method
+    await storyline_db.cleanup()
+    return None
 
 # Load environment variables
 load_dotenv()
@@ -614,10 +619,7 @@ async def create_project(project: ProjectCreate):
 
     return project_data
 
-@app.get("/api/anime/projects")
-async def list_projects():
-    """List all projects"""
-    return {"projects": list(projects.values())}
+# OLD projects endpoint removed - replaced with file system version below
 
 @app.get("/api/anime/projects/{project_id}")
 async def get_project(project_id: str):
@@ -792,6 +794,34 @@ async def health_check():
         "security": "enabled"
     }
 
+@app.get("/api/health")
+async def api_health_check():
+    """Health check endpoint for API pattern"""
+    return {
+        "status": "healthy",
+        "model_preloaded": MODEL_PRELOADED,
+        "queue_size": generation_queue.qsize(),
+        "active_websockets": len(websocket_connections),
+        "projects": len(projects),
+        "characters": len(characters),
+        "jobs_in_memory": len(jobs_cache),
+        "security": "enabled"
+    }
+
+@app.get("/api/anime/health")
+async def anime_api_health_check():
+    """Health check endpoint for anime API pattern"""
+    return {
+        "status": "healthy",
+        "model_preloaded": MODEL_PRELOADED,
+        "queue_size": generation_queue.qsize(),
+        "active_websockets": len(websocket_connections),
+        "projects": len(projects),
+        "characters": len(characters),
+        "jobs_in_memory": len(jobs_cache),
+        "security": "enabled"
+    }
+
 if __name__ == "__main__":
     # Install python-dotenv if needed
     import subprocess
@@ -811,3 +841,314 @@ if __name__ == "__main__":
         reload=False,
         log_level="info"
     )
+# Characters endpoint that was missing from tests
+@app.get("/characters")
+async def list_characters():
+    """List all characters from actual project directories"""
+    try:
+        characters = []
+        projects_dir = Path("/mnt/1TB-storage/anime/projects")
+
+        if projects_dir.exists():
+            for project_dir in projects_dir.iterdir():
+                if project_dir.is_dir():
+                    chars_dir = project_dir / "characters"
+                    if chars_dir.exists():
+                        for char_dir in chars_dir.iterdir():
+                            if char_dir.is_dir():
+                                characters.append({
+                                    "name": char_dir.name,
+                                    "project_id": project_dir.name,
+                                    "path": str(char_dir)
+                                })
+
+        return {"characters": characters}
+    except Exception as e:
+        raise HTTPException(500, f"Error reading characters: {e}")
+
+# Fix projects endpoint to read actual data
+@app.get("/api/anime/projects")
+async def list_projects():
+    """List actual projects from file system"""
+    try:
+        projects = []
+        projects_dir = Path("/mnt/1TB-storage/anime/projects")
+
+        if projects_dir.exists():
+            for project_dir in projects_dir.iterdir():
+                if project_dir.is_dir():
+                    project_info = {
+                        "id": project_dir.name,
+                        "name": project_dir.name,
+                        "path": str(project_dir),
+                        "characters": [],
+                        "images": 0
+                    }
+
+                    # Count characters
+                    chars_dir = project_dir / "characters"
+                    if chars_dir.exists():
+                        project_info["characters"] = [d.name for d in chars_dir.iterdir() if d.is_dir()]
+
+                    # Count images
+                    general_dir = project_dir / "general"
+                    if general_dir.exists():
+                        project_info["images"] = len(list(general_dir.glob("*.png")))
+
+                    projects.append(project_info)
+
+        return {"projects": projects}
+    except Exception as e:
+        raise HTTPException(500, f"Error reading projects: {e}")
+
+# Storyline endpoints
+@app.get("/api/stories")
+async def list_stories():
+    """List all stories in database"""
+    try:
+        stories = await storyline_db.list_stories()
+        return {"stories": stories}
+    except Exception as e:
+        raise HTTPException(500, f"Database error: {e}")
+
+@app.post("/api/stories")
+async def create_story(story_data: dict):
+    """Create new interactive story"""
+    try:
+        story_id = str(uuid.uuid4())[:8]
+        await storyline_db.save_story(story_id, story_data)
+        return {"story_id": story_id, "status": "created"}
+    except Exception as e:
+        raise HTTPException(500, f"Error creating story: {e}")
+
+@app.get("/api/stories/{story_id}")
+async def get_story(story_id: str):
+    """Get specific story details"""
+    try:
+        story = await storyline_db.load_story(story_id)
+        if not story:
+            raise HTTPException(404, "Story not found")
+        return story
+    except Exception as e:
+        raise HTTPException(500, f"Error loading story: {e}")
+
+@app.get("/api/stories/test")
+async def test_sakura():
+    """Test loading Sakura story"""
+    try:
+        story = await storyline_db.load_story("sakura_adventure")
+        if story:
+            return {"found": True, "title": story["title"], "author": story["author"]}
+        else:
+            return {"found": False, "message": "Sakura story not found"}
+    except Exception as e:
+        return {"error": str(e)}
+
+# Story branching endpoints
+@app.post("/api/stories/{story_id}/branches")
+async def create_story_branch(story_id: str, branch_data: dict):
+    """Create new story branch"""
+    try:
+        from src.storyline_version_control import StorylineVersionControl
+        vcs = StorylineVersionControl(story_id)
+
+        branch_name = branch_data.get("name", f"branch_{int(time.time())}")
+        description = branch_data.get("description", "")
+
+        new_branch = vcs.create_branch(branch_name, description)
+
+        # Save branch to database
+        await storyline_db.save_branch(story_id, {
+            "name": branch_name,
+            "head_commit": vcs.head_commit,
+            "parent_branch": vcs.current_branch,
+            "description": description
+        })
+
+        return {"branch": new_branch, "status": "created"}
+    except Exception as e:
+        raise HTTPException(500, f"Error creating branch: {e}")
+
+@app.post("/api/stories/{story_id}/branches/{branch_name}/switch")
+async def switch_story_branch(story_id: str, branch_name: str):
+    """Switch to different story branch"""
+    try:
+        from src.storyline_version_control import StorylineVersionControl
+        vcs = StorylineVersionControl(story_id)
+
+        vcs.switch_branch(branch_name)
+
+        return {
+            "current_branch": vcs.current_branch,
+            "head_commit": vcs.head_commit,
+            "story": vcs.working_story
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Error switching branch: {e}")
+
+@app.get("/api/stories/{story_id}/branches")
+async def list_story_branches(story_id: str):
+    """List all branches for a story"""
+    try:
+        branches = await storyline_db.load_branches(story_id)
+        return {"branches": branches}
+    except Exception as e:
+        raise HTTPException(500, f"Error loading branches: {e}")
+
+@app.post("/api/stories/{story_id}/merge")
+async def merge_story_branches(story_id: str, merge_data: dict):
+    """Merge story branches"""
+    try:
+        from src.storyline_version_control import StorylineVersionControl
+        vcs = StorylineVersionControl(story_id)
+
+        source_branch = merge_data["source_branch"]
+        target_branch = merge_data.get("target_branch", vcs.current_branch)
+
+        success, conflicts = vcs.merge_branches(source_branch, target_branch)
+
+        return {
+            "success": success,
+            "conflicts": conflicts,
+            "source": source_branch,
+            "target": target_branch
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Error merging branches: {e}")
+
+# Character evolution endpoints
+@app.post("/api/stories/{story_id}/characters/{character_name}/evolve")
+async def evolve_character(story_id: str, character_name: str, evolution_data: dict):
+    """Evolve character based on story events"""
+    try:
+        commit_hash = evolution_data.get("commit_hash", f"evolution_{int(time.time())}")
+
+        await storyline_db.save_character_evolution(story_id, {
+            "name": character_name,
+            "commit_hash": commit_hash,
+            "evolution_state": evolution_data.get("evolution_state", {}),
+            "emotional_state": evolution_data.get("emotional_state", {}),
+            "relationships": evolution_data.get("relationships", {})
+        })
+
+        return {"status": "character evolved", "character": character_name}
+    except Exception as e:
+        raise HTTPException(500, f"Error evolving character: {e}")
+
+@app.get("/api/stories/{story_id}/characters/{character_name}/evolution")
+async def get_character_evolution(story_id: str, character_name: str):
+    """Get character evolution history"""
+    try:
+        evolution = await storyline_db.load_character_evolution(story_id, character_name)
+        return {"character": character_name, "evolution": evolution}
+    except Exception as e:
+        raise HTTPException(500, f"Error loading evolution: {e}")
+
+# Echo Brain integration endpoints
+@app.post("/api/stories/{story_id}/intent")
+async def analyze_user_intent(story_id: str, intent_data: dict):
+    """Analyze user intent for story interaction using Echo Brain"""
+    try:
+        from src.user_interaction_system import UserInteractionSystem
+
+        user_system = UserInteractionSystem()
+        await user_system.initialize()
+
+        user_input = intent_data["input"]
+        context = intent_data.get("context", {})
+        context["story_id"] = story_id
+
+        intent = await user_system.capture_intent(user_input, context)
+
+        await user_system.cleanup()
+
+        return {
+            "action": intent.action,
+            "target": intent.target,
+            "parameters": intent.parameters,
+            "confidence": intent.confidence
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Error analyzing intent: {e}")
+
+@app.post("/api/stories/{story_id}/suggestions")
+async def get_story_suggestions(story_id: str):
+    """Get AI suggestions for next story actions using Echo Brain"""
+    try:
+        from src.user_interaction_system import UserInteractionSystem
+
+        user_system = UserInteractionSystem()
+        await user_system.initialize()
+
+        # Load story for context
+        story = await storyline_db.load_story(story_id)
+        if not story:
+            raise HTTPException(404, "Story not found")
+
+        context = {
+            "story": story["working_story"],
+            "current_branch": story["current_branch"],
+            "story_id": story_id
+        }
+
+        suggestions = await user_system.suggest_next_action(context)
+
+        await user_system.cleanup()
+
+        return {"suggestions": suggestions}
+    except Exception as e:
+        raise HTTPException(500, f"Error getting suggestions: {e}")
+
+# Enhanced generation endpoint that links to story progression
+@app.post("/api/stories/{story_id}/generate")
+async def generate_for_story(story_id: str, generation_data: dict):
+    """Generate image linked to specific story chapter/scene"""
+    try:
+        # Get story details
+        story = await storyline_db.load_story(story_id)
+        if not story:
+            raise HTTPException(404, "Story not found")
+
+        # Extract generation parameters
+        prompt = generation_data["prompt"]
+        character_name = generation_data.get("character_name")
+        chapter_index = generation_data.get("chapter_index", 0)
+        scene_description = generation_data.get("scene_description", "")
+
+        # Enhance prompt with story context
+        if character_name and character_name in story["working_story"].get("characters", {}):
+            char_data = story["working_story"]["characters"][character_name]
+            prompt += f", {char_data.get('hair_color', '')} hair, {char_data.get('eye_color', '')} eyes"
+
+        # Call existing generation endpoint
+        job_data = {
+            "prompt": prompt,
+            "project_id": story["metadata"].get("project_id", "default"),
+            "character_name": character_name,
+            "negative_prompt": generation_data.get("negative_prompt", "bad quality"),
+            "width": generation_data.get("width", 512),
+            "height": generation_data.get("height", 768)
+        }
+
+        # Submit job (reuse existing generation logic)
+        job_id = str(uuid.uuid4())[:8]
+        job_tracker = get_job_tracker()
+        job_tracker.create_job(job_id, job_data)
+
+        # Track connection to story/chapter
+        job_data["story_connection"] = {
+            "story_id": story_id,
+            "chapter_index": chapter_index,
+            "scene_description": scene_description
+        }
+
+        return {
+            "job_id": job_id,
+            "status": "queued",
+            "story_id": story_id,
+            "chapter_index": chapter_index
+        }
+
+    except Exception as e:
+        raise HTTPException(500, f"Error generating for story: {e}")
+
