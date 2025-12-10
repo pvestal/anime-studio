@@ -1,0 +1,31 @@
+# Minimal requirements for Anime Production API
+# Last updated: 2025-12-05
+
+# Core API framework
+fastapi==0.104.1
+uvicorn==0.24.0
+
+# Database
+psycopg2-binary==2.9.7
+asyncpg==0.29.0
+
+# HTTP client
+httpx==0.25.0
+
+# Data validation
+pydantic==2.5.0
+
+# Environment
+python-dotenv==1.0.0
+
+# Redis for queue
+redis==5.0.1
+
+# WebSocket support
+websockets==12.0
+
+# Image processing (minimal)
+pillow==10.1.0
+
+# Basic utilities
+numpy==1.26.0

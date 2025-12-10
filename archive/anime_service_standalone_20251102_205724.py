@@ -5,56 +5,41 @@ Port: 8328
 Generates KB-quality videos using ComfyUI with AOM3A1B.safetensors
 """
 
-from project_bible_api import (
-    ProjectBibleAPI,
-    ProjectBibleCreate,
-    ProjectBibleUpdate,
-    CharacterDefinition,
-)
-from contextlib import contextmanager
-from psycopg2.extras import RealDictCursor
-import psycopg2
-from git_branching import (
-    create_branch,
-    create_commit,
-    get_commit_history,
-    compare_branches,
-    merge_branches,
-    revert_to_commit,
-    tag_commit,
-    list_branches,
-    get_commit_details,
-)
-import sys
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from fastapi import HTTPException
-from fastapi.background import BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Dict, Optional, Any, List, Set
-import json
-import uvicorn
-import requests
-import uuid
-import os
-import time
-from pathlib import Path
-from datetime import datetime
-import subprocess
-import logging
-from logging.handlers import RotatingFileHandler
 import asyncio
+import json
+import logging
+import os
+import subprocess
+import sys
+import time
+import uuid
+from contextlib import contextmanager
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
+
 import aiohttp
-
-# from quality_integration import assess_video_quality, QUALITY_ENABLED
-from error_handler import (
-    ErrorHandler,
-)
-
+import psycopg2
+import requests
+import uvicorn
 # Import character system for proper character generation
 from character_system import get_character_prompt
+# from quality_integration import assess_video_quality, QUALITY_ENABLED
+from error_handler import ErrorHandler
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.background import BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from git_branching import (compare_branches, create_branch, create_commit,
+                           get_commit_details, get_commit_history,
+                           list_branches, merge_branches, revert_to_commit,
+                           tag_commit)
+from project_bible_api import (CharacterDefinition, ProjectBibleAPI,
+                               ProjectBibleCreate, ProjectBibleUpdate)
+from psycopg2.extras import RealDictCursor
+from pydantic import BaseModel
 
 # PHASE 1 FIX: Structured logging with rotation
 log_dir = Path("/opt/tower-anime-production/logs")
@@ -124,9 +109,9 @@ APPLE_MUSIC_VIDEO_USE_PLAYLIST = {
 sys.path.append("/opt/tower-echo-brain/src/services")
 sys.path.append("/opt/tower-echo-brain/routing")
 try:
-    from quality_assessment import VideoQualityAssessment
-    from feedback_system import FeedbackProcessor, FeedbackType
     from echo_integration import EchoIntegration
+    from feedback_system import FeedbackProcessor, FeedbackType
+    from quality_assessment import VideoQualityAssessment
 
     echo = EchoIntegration()
     quality_assessor = VideoQualityAssessment()
@@ -145,8 +130,7 @@ AUTH_SERVICE_URL = "http://127.0.0.1:8088"
 APPLE_MUSIC_SERVICE_URL = "http://127.0.0.1:8315"
 
 
-def match_scene_to_music(scene_description: str,
-                         scene_type: str = "action") -> dict:
+def match_scene_to_music(scene_description: str, scene_type: str = "action") -> dict:
     """Match scene to appropriate track from Video Use playlist with 30-second copyright compliance"""
     scene_lower = scene_description.lower()
 
@@ -198,8 +182,7 @@ async def get_apple_music_track(track_info: dict) -> dict:
         return track_info
 
 
-async def scrape_music_for_video(
-        track_info: dict, duration_seconds: int = 30) -> dict:
+async def scrape_music_for_video(track_info: dict, duration_seconds: int = 30) -> dict:
     """Scrape up to 30 seconds of music data for copyright compliance"""
     try:
         # Simulate music scraping with metadata
@@ -290,16 +273,14 @@ class DirectorStudioWebSocketManager:
                     self.active_connections)} total)"
         )
 
-    async def subscribe_to_generation(
-            self, websocket: WebSocket, generation_id: str):
+    async def subscribe_to_generation(self, websocket: WebSocket, generation_id: str):
         if generation_id not in self.generation_subscribers:
             self.generation_subscribers[generation_id] = set()
         self.generation_subscribers[generation_id].add(websocket)
         logger.info(
             f"📺 WebSocket subscribed to generation {generation_id[:8]}")
 
-    async def broadcast_generation_update(
-            self, generation_id: str, status_data: dict):
+    async def broadcast_generation_update(self, generation_id: str, status_data: dict):
         """Broadcast generation status update to subscribed WebSocket connections"""
         if generation_id in self.generation_subscribers:
             message = {
@@ -633,8 +614,7 @@ class RateLimiter:
             now = time.time()
             # Remove requests outside the window
             self.requests = [
-                r for r in self.requests if now -
-                r < self.window_seconds]
+                r for r in self.requests if now - r < self.window_seconds]
 
             if len(self.requests) >= self.max_requests:
                 oldest_request = min(self.requests)
@@ -659,8 +639,7 @@ class RateLimiter:
 
 
 apple_music_limiter = RateLimiter(
-    APPLE_MUSIC_MAX_REQUESTS,
-    APPLE_MUSIC_WINDOW_SECONDS)
+    APPLE_MUSIC_MAX_REQUESTS, APPLE_MUSIC_WINDOW_SECONDS)
 
 
 # PHASE 2B: Retry decorator with exponential backoff
@@ -1016,8 +995,7 @@ async def generate_character(request: CharacterGenerationRequest):
 
 
 @app.post("/api/anime/generate")
-async def generate_anime_content(
-        request: dict, background_tasks: BackgroundTasks):
+async def generate_anime_content(request: dict, background_tasks: BackgroundTasks):
     """Frontend-compatible generation endpoint that delegates to existing generate_simple_video"""
     try:
         # Forward request to existing generation function with proper path
@@ -1032,8 +1010,7 @@ async def generate_anime_content(
 
 
 @app.post("/api/anime/generate/async")
-async def generate_anime_async(
-        request: dict, background_tasks: BackgroundTasks):
+async def generate_anime_async(request: dict, background_tasks: BackgroundTasks):
     """Async generation endpoint that returns immediately with generation_id"""
     try:
         generation_id = f"async_{int(time.time())}_{uuid.uuid4().hex[:8]}"
@@ -1204,16 +1181,14 @@ async def call_echo_for_generation(request: dict):
                         "echo_response": echo_data.get("response", ""),
                     }
                 else:
-                    return {"success": False,
-                            "error": "Echo Brain unavailable"}
+                    return {"success": False, "error": "Echo Brain unavailable"}
 
     except Exception as e:
         logger.error(f"Echo Brain call failed: {e}")
         return {"success": False, "error": str(e)}
 
 
-async def update_user_preferences_from_generation(
-        request: dict, echo_response: dict):
+async def update_user_preferences_from_generation(request: dict, echo_response: dict):
     """Learn and update user preferences based on successful generation"""
     try:
         # Extract style preferences from successful request
@@ -1273,8 +1248,7 @@ async def echo_orchestrated_generation(request: dict):
             }
         else:
             raise HTTPException(
-                status_code=500,
-                detail=echo_response.get("error"))
+                status_code=500, detail=echo_response.get("error"))
 
     except Exception as e:
         logger.error(f"Echo orchestration failed: {e}")
@@ -1339,16 +1313,13 @@ async def get_generation_status(generation_id: str):
                 "message": status_info.get("message", "Generating..."),
             }
 
-        return {"status": "not_found",
-                "generation_id": generation_id, "progress": 0}
+        return {"status": "not_found", "generation_id": generation_id, "progress": 0}
     except Exception as e:
         logger.error(f"Status check failed: {e}")
-        return {"status": "error",
-                "generation_id": generation_id, "error": str(e)}
+        return {"status": "error", "generation_id": generation_id, "error": str(e)}
 
 
-def build_character_description(
-        base_prompt: str, parameters: Dict[str, Any]) -> str:
+def build_character_description(base_prompt: str, parameters: Dict[str, Any]) -> str:
     """Transform frontend parameters into comprehensive character description using narrative director"""
 
     # Try to use narrative director for enhanced prompts
@@ -1551,8 +1522,7 @@ async def call_echo_character_generation(
 
     except Exception as e:
         logger.error(f"Character generation error: {e}")
-        return {"success": False,
-                "error": f"Character generation failed: {str(e)}"}
+        return {"success": False, "error": f"Character generation failed: {str(e)}"}
 
 
 async def get_echo_enhanced_prompt(
@@ -1639,8 +1609,7 @@ async def generate_character_with_comfyui(
 
     except Exception as e:
         logger.error(f"ComfyUI character generation error: {e}")
-        return {"success": False,
-                "error": f"Character generation failed: {str(e)}"}
+        return {"success": False, "error": f"Character generation failed: {str(e)}"}
 
 
 async def wait_for_character_generation(
@@ -1976,8 +1945,7 @@ async def create_project(project: ProjectCreate):
     except psycopg2.IntegrityError as e:
         logger.error(f"Project creation failed - integrity error: {e}")
         raise HTTPException(
-            status_code=400,
-            detail="Project name already exists")
+            status_code=400, detail="Project name already exists")
     except Exception as e:
         logger.error(f"Error creating project: {e}")
         raise HTTPException(
@@ -2103,8 +2071,7 @@ async def update_project(project_id: int, project_update: ProjectUpdate):
     except psycopg2.IntegrityError as e:
         logger.error(f"Project update failed - integrity error: {e}")
         raise HTTPException(
-            status_code=400,
-            detail="Project name already exists")
+            status_code=400, detail="Project name already exists")
     except Exception as e:
         logger.error(f"Error updating project {project_id}: {e}")
         raise HTTPException(
@@ -2297,8 +2264,7 @@ async def create_scene(scene: SceneCreate):
             )
         else:
             raise HTTPException(
-                status_code=400,
-                detail="Database constraint violation")
+                status_code=400, detail="Database constraint violation")
     except Exception as e:
         logger.error(f"Error creating scene: {e}")
         raise HTTPException(
@@ -2470,8 +2436,7 @@ async def update_scene(scene_id: int, scene_update: SceneUpdate):
             )
         else:
             raise HTTPException(
-                status_code=400,
-                detail="Database constraint violation")
+                status_code=400, detail="Database constraint violation")
     except Exception as e:
         logger.error(f"Error updating scene {scene_id}: {e}")
         raise HTTPException(
@@ -2561,8 +2526,7 @@ async def director_studio_websocket(websocket: WebSocket):
                 elif message_type == "ping":
                     await websocket.send_text(
                         json.dumps(
-                            {"type": "pong",
-                             "timestamp": datetime.now().isoformat()}
+                            {"type": "pong", "timestamp": datetime.now().isoformat()}
                         )
                     )
 
@@ -2639,9 +2603,7 @@ async def generate_professional_video(
 
     # Start generation in background with semaphore control
     background_tasks.add_task(
-        generate_video_with_semaphore,
-        generation_id,
-        request)
+        generate_video_with_semaphore, generation_id, request)
 
     logger.info(
         f"✅ Generation accepted [{generation_id[:8]}]: VRAM={vram_free:.2f}GB, Active={active_count}/{MAX_CONCURRENT_GENERATIONS}"
@@ -2679,8 +2641,7 @@ async def generate_video_with_semaphore(
             logger.info(f"🔓 Released generation slot [{generation_id[:8]}]")
 
 
-async def generate_video_async(
-        generation_id: str, request: AnimeGenerationRequest):
+async def generate_video_async(generation_id: str, request: AnimeGenerationRequest):
     """Generate video asynchronously with proper ComfyUI workflow"""
     start_time = time.time()
     try:
@@ -3415,8 +3376,7 @@ async def create_scene_commit(request: Dict[str, Any]):
 
 
 @app.get("/api/git/commits/{project_id}/{branch_name}")
-async def get_branch_history(
-        project_id: int, branch_name: str, limit: int = 20):
+async def get_branch_history(project_id: int, branch_name: str, limit: int = 20):
     """Get commit history for a branch"""
     try:
         commits = get_commit_history(project_id, branch_name, limit)
@@ -3526,11 +3486,8 @@ async def search_soundtracks(
     """Search Apple Music for soundtrack options"""
     try:
         async with aiohttp.ClientSession() as session:
-            search_params = {
-                "q": query,
-                "limit": limit,
-                "types": "songs",
-                "mood": mood}
+            search_params = {"q": query, "limit": limit,
+                             "types": "songs", "mood": mood}
 
             async with session.get(
                 f"{APPLE_MUSIC_URL}/api/search", params=search_params, timeout=10
@@ -3591,11 +3548,8 @@ async def get_git_status(project_id: int):
     """Get comprehensive git status for a project including Echo analysis"""
     try:
         sys.path.append("/opt/tower-anime-production")
-        from git_branching import (
-            list_branches,
-            get_commit_history,
-            echo_analyze_storyline,
-        )
+        from git_branching import (echo_analyze_storyline, get_commit_history,
+                                   list_branches)
 
         # Get all branches
         branches = list_branches(project_id)
@@ -3617,8 +3571,7 @@ async def get_git_status(project_id: int):
                 }
         else:
             latest_analysis = {
-                "analysis": "No commits found",
-                "recommendations": []}
+                "analysis": "No commits found", "recommendations": []}
 
         return {
             "project_id": project_id,
@@ -3681,10 +3634,7 @@ class GitBranchDeleteRequest(BaseModel):
 async def get_project_git_status(project_id: int):
     """Get Git status for project - used by GitCommandInterface.vue"""
     try:
-        from git_branching import (
-            list_branches,
-            get_commit_history,
-        )
+        from git_branching import get_commit_history, list_branches
 
         logger.info(f"Getting git status for project {project_id}")
 
@@ -3995,8 +3945,7 @@ async def get_video_thumbnail(video_id: str, t: float = 0.0):
 
         if not video_file:
             raise HTTPException(
-                status_code=404,
-                detail=f"Video {video_id} not found")
+                status_code=404, detail=f"Video {video_id} not found")
 
         # Create thumbnails cache directory
         thumbnails_dir = OUTPUT_DIR / "thumbnails"
@@ -4030,25 +3979,20 @@ async def get_video_thumbnail(video_id: str, t: float = 0.0):
         ]
 
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30)
+            cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
             logger.error(
                 f"FFmpeg thumbnail generation failed: {
                     result.stderr}"
             )
             raise HTTPException(
-                status_code=500,
-                detail="Failed to generate thumbnail")
+                status_code=500, detail="Failed to generate thumbnail")
 
         return FileResponse(thumbnail_path, media_type="image/jpeg")
 
     except subprocess.TimeoutExpired:
         raise HTTPException(
-            status_code=500,
-            detail="Thumbnail generation timeout")
+            status_code=500, detail="Thumbnail generation timeout")
     except Exception as e:
         logger.error(f"Error generating thumbnail: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -4078,8 +4022,7 @@ async def get_video_timeline(video_id: str):
 
         if not video_file:
             raise HTTPException(
-                status_code=404,
-                detail=f"Video {video_id} not found")
+                status_code=404, detail=f"Video {video_id} not found")
 
         # Extract video metadata using FFprobe
         cmd = [
@@ -4094,14 +4037,10 @@ async def get_video_timeline(video_id: str):
         ]
 
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30)
+            cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
             raise HTTPException(
-                status_code=500,
-                detail="Failed to analyze video")
+                status_code=500, detail="Failed to analyze video")
 
         metadata = json.loads(result.stdout)
 
@@ -4116,8 +4055,7 @@ async def get_video_timeline(video_id: str):
 
         if not video_stream:
             raise HTTPException(
-                status_code=500,
-                detail="No video stream found")
+                status_code=500, detail="No video stream found")
 
         # Calculate frame info
         duration = float(metadata.get("format", {}).get("duration", 0))
@@ -4176,8 +4114,7 @@ async def get_video_timeline(video_id: str):
 
 
 @app.get("/api/videos/{video_id}/frames")
-async def get_video_frames(
-        video_id: str, start_frame: int = 0, count: int = 10):
+async def get_video_frames(video_id: str, start_frame: int = 0, count: int = 10):
     """Extract individual frames from video for frame-by-frame navigation"""
     try:
         # Find video file
@@ -4200,8 +4137,7 @@ async def get_video_frames(
 
         if not video_file:
             raise HTTPException(
-                status_code=404,
-                detail=f"Video {video_id} not found")
+                status_code=404, detail=f"Video {video_id} not found")
 
         # Create frames cache directory
         frames_dir = OUTPUT_DIR / "frames" / video_file.stem
@@ -4221,14 +4157,10 @@ async def get_video_frames(
         ]
 
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30)
+            cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
             raise HTTPException(
-                status_code=500,
-                detail="Failed to analyze video")
+                status_code=500, detail="Failed to analyze video")
 
         metadata = json.loads(result.stdout)
         video_stream = metadata.get("streams", [{}])[0]
@@ -4575,8 +4507,7 @@ bible_api = ProjectBibleAPI(DatabaseWrapper())
 
 
 @app.post("/api/anime/projects/{project_id}/bible")
-async def create_project_bible(
-        project_id: int, bible_data: ProjectBibleCreate):
+async def create_project_bible(project_id: int, bible_data: ProjectBibleCreate):
     """Create a new project bible for the specified project"""
     return await bible_api.create_project_bible(project_id, bible_data)
 
@@ -4588,15 +4519,13 @@ async def get_project_bible(project_id: int):
 
 
 @app.put("/api/anime/projects/{project_id}/bible")
-async def update_project_bible(
-        project_id: int, bible_update: ProjectBibleUpdate):
+async def update_project_bible(project_id: int, bible_update: ProjectBibleUpdate):
     """Update the project bible for the specified project"""
     return await bible_api.update_project_bible(project_id, bible_update)
 
 
 @app.post("/api/anime/projects/{project_id}/bible/characters")
-async def add_character_to_bible(
-        project_id: int, character: CharacterDefinition):
+async def add_character_to_bible(project_id: int, character: CharacterDefinition):
     """Add a character definition to the project bible"""
     return await bible_api.add_character_to_bible(project_id, character)
 

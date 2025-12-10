@@ -30,6 +30,7 @@ DB_CONFIG = {
     "host": "localhost",
     "database": "anime_production",
     "user": "patrick",
+    "password": "***REMOVED***",
     "port": 5432,
     "options": "-c search_path=anime_api,public",
 }

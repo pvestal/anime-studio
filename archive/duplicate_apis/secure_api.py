@@ -4,49 +4,57 @@ Secure Anime Production API - with practical security measures
 Not theater, just sensible protections
 """
 
-import os
-import re
 import asyncio
 import json
+import os
+import re
+import shutil
 import time
 import uuid
-import requests
-import shutil
-from pathlib import Path
-from typing import Dict, Any, Optional, List
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from pathlib import Path
 from queue import Queue
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, validator
+import requests
 import uvicorn
-from dotenv import load_dotenv
-
 from database_operations import EnhancedDatabaseManager
+from dotenv import load_dotenv
+from fastapi import (BackgroundTasks, FastAPI, HTTPException, WebSocket,
+                     WebSocketDisconnect)
+from fastapi.middleware.cors import CORSMiddleware
 from pose_library import pose_library
+from pydantic import BaseModel, Field, validator
+from v2_integration import (complete_job_with_quality, create_tracked_job,
+                            reproduce_job, v2_integration)
+
 from src.storyline_database import StorylineDatabase
 
 # Initialize database managers
 db_manager = EnhancedDatabaseManager()
 storyline_db = StorylineDatabase()
 
+
 async def initialize_database():
     await storyline_db.initialize()
     return True
+
+
 async def close_database():
     await storyline_db.cleanup()
     return None
+
 
 # Load environment variables
 load_dotenv()
 
 # Configuration from environment
-COMFYUI_URL = os.getenv('COMFYUI_URL', 'http://localhost:8188')
-OUTPUT_DIR = Path(os.getenv('OUTPUT_DIR', '/mnt/1TB-storage/ComfyUI/output'))
-ORGANIZED_DIR = Path(os.getenv('ORGANIZED_DIR', '/mnt/1TB-storage/anime/projects'))
-PORT = int(os.getenv('API_PORT', '8328'))
+COMFYUI_URL = os.getenv("COMFYUI_URL", "http://localhost:8188")
+OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "/mnt/1TB-storage/ComfyUI/output"))
+ORGANIZED_DIR = Path(
+    os.getenv("ORGANIZED_DIR", "/mnt/1TB-storage/anime/projects"))
+PORT = int(os.getenv("API_PORT", "8328"))
 
 # Ensure organized directory exists
 ORGANIZED_DIR.mkdir(parents=True, exist_ok=True)
@@ -55,7 +63,7 @@ ORGANIZED_DIR.mkdir(parents=True, exist_ok=True)
 app = FastAPI(
     title="Anime Production API - Secure",
     description="Production anime generation with practical security",
-    version="4.0.0"
+    version="4.0.0",
 )
 
 app.add_middleware(
@@ -74,6 +82,7 @@ websocket_connections: Dict[str, WebSocket] = {}
 generation_queue = Queue()
 MODEL_PRELOADED = False
 
+
 # Input validation helpers
 def sanitize_text(text: str, max_length: int = 1000) -> str:
     """Sanitize text input to prevent injection"""
@@ -81,20 +90,24 @@ def sanitize_text(text: str, max_length: int = 1000) -> str:
         return ""
 
     # Remove null bytes
-    text = text.replace('\x00', '')
+    text = text.replace("\x00", "")
 
     # Limit length
     text = text[:max_length]
 
     # Remove control characters except newlines and tabs
-    text = ''.join(char for char in text if char == '\n' or char == '\t' or ord(char) >= 32)
+    text = "".join(
+        char for char in text if char == "\n" or char == "\t" or ord(char) >= 32
+    )
 
     return text.strip()
+
 
 def validate_id(id_string: str) -> bool:
     """Validate ID format to prevent injection"""
     # IDs should be alphanumeric with hyphens only
-    return bool(re.match(r'^[a-zA-Z0-9\-]+$', id_string)) and len(id_string) <= 50
+    return bool(re.match(r"^[a-zA-Z0-9\-]+$", id_string)) and len(id_string) <= 50
+
 
 # Pydantic models with validation
 class ProjectCreate(BaseModel):
@@ -103,11 +116,12 @@ class ProjectCreate(BaseModel):
     style: Optional[str] = Field("anime", max_length=50)
     metadata: Optional[Dict[str, Any]] = {}
 
-    @validator('name', 'description', 'style')
+    @validator("name", "description", "style")
     def sanitize_fields(cls, v):
         if v:
             return sanitize_text(v)
         return v
+
 
 class CharacterCreate(BaseModel):
     project_id: str = Field(..., min_length=1, max_length=50)
@@ -118,21 +132,24 @@ class CharacterCreate(BaseModel):
     backstory: Optional[str] = Field("", max_length=1000)
     reference_prompts: Optional[List[str]] = []
 
-    @validator('project_id')
+    @validator("project_id")
     def validate_project_id(cls, v):
         if not validate_id(v):
-            raise ValueError('Invalid project ID format')
+            raise ValueError("Invalid project ID format")
         return v
 
-    @validator('name', 'description', 'personality', 'appearance', 'backstory')
+    @validator("name", "description", "personality", "appearance", "backstory")
     def sanitize_fields(cls, v):
         if v:
             return sanitize_text(v)
         return v
 
+
 class GenerationRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=1000)
-    negative_prompt: Optional[str] = Field("bad quality, deformed, blurry", max_length=500)
+    negative_prompt: Optional[str] = Field(
+        "bad quality, deformed, blurry", max_length=500
+    )
     width: int = Field(512, ge=64, le=2048)
     height: int = Field(768, ge=64, le=2048)
     project_id: Optional[str] = Field(None, max_length=50)
@@ -140,22 +157,23 @@ class GenerationRequest(BaseModel):
     style_preset: Optional[str] = Field(None, max_length=50)
     pose_description: Optional[str] = Field(None, max_length=200)
 
-    @validator('prompt', 'negative_prompt')
+    @validator("prompt", "negative_prompt")
     def sanitize_prompts(cls, v):
         if v:
             return sanitize_text(v)
         return v
 
-    @validator('project_id', 'character_id')
+    @validator("project_id", "character_id")
     def validate_ids(cls, v):
         if v and not validate_id(v):
-            raise ValueError('Invalid ID format')
+            raise ValueError("Invalid ID format")
         return v
 
-    @validator('width', 'height')
+    @validator("width", "height")
     def validate_dimensions(cls, v):
         # Round to nearest 64 for better generation
         return (v // 64) * 64
+
 
 def preload_models():
     """Preload ComfyUI models at startup"""
@@ -165,9 +183,7 @@ def preload_models():
     try:
         dummy_workflow = create_workflow("preload test", "bad", 512, 512)
         response = requests.post(
-            f"{COMFYUI_URL}/prompt",
-            json={"prompt": dummy_workflow},
-            timeout=60
+            f"{COMFYUI_URL}/prompt", json={"prompt": dummy_workflow}, timeout=60
         )
 
         if response.status_code == 200:
@@ -178,9 +194,16 @@ def preload_models():
     except Exception as e:
         print(f"❌ Failed to preload models: {e}")
 
-def create_workflow(prompt: str, negative_prompt: str, width: int, height: int,
-                   style_preset: Optional[str] = None, character_ref: Optional[str] = None,
-                   pose_ref: Optional[str] = None) -> Dict[str, Any]:
+
+def create_workflow(
+    prompt: str,
+    negative_prompt: str,
+    width: int,
+    height: int,
+    style_preset: Optional[str] = None,
+    character_ref: Optional[str] = None,
+    pose_ref: Optional[str] = None,
+) -> Dict[str, Any]:
     """Create 93% consistency workflow with ControlNet + IPAdapter"""
 
     # Sanitize inputs for workflow
@@ -190,7 +213,13 @@ def create_workflow(prompt: str, negative_prompt: str, width: int, height: int,
     seed = int(time.time() * 1000) % 2147483647
     filename_prefix = f"anime_{int(time.time())}"
 
-    if style_preset and style_preset in ["cyberpunk", "fantasy", "steampunk", "studio_ghibli", "manga"]:
+    if style_preset and style_preset in [
+        "cyberpunk",
+        "fantasy",
+        "steampunk",
+        "studio_ghibli",
+        "manga",
+    ]:
         prompt = apply_style_preset(prompt, style_preset)
 
     # If character reference and pose are provided, use the proven 93% workflow
@@ -200,8 +229,10 @@ def create_workflow(prompt: str, negative_prompt: str, width: int, height: int,
         pose_name = f"pose_{seed}.png"
 
         try:
-            shutil.copy(character_ref, f"/mnt/1TB-storage/ComfyUI/input/{char_name}")
-            shutil.copy(pose_ref, f"/mnt/1TB-storage/ComfyUI/input/{pose_name}")
+            shutil.copy(character_ref,
+                        f"/mnt/1TB-storage/ComfyUI/input/{char_name}")
+            shutil.copy(
+                pose_ref, f"/mnt/1TB-storage/ComfyUI/input/{pose_name}")
         except Exception as e:
             print(f"File copy error: {e}")
             # Fall back to basic workflow if files can't be copied
@@ -214,19 +245,16 @@ def create_workflow(prompt: str, negative_prompt: str, width: int, height: int,
             # Base model
             "model": {
                 "inputs": {"ckpt_name": "counterfeit_v3.safetensors"},
-                "class_type": "CheckpointLoaderSimple"
+                "class_type": "CheckpointLoaderSimple",
             },
             # IPAdapter for character consistency
             "ipa_loader": {
-                "inputs": {
-                    "model": ["model", 0],
-                    "preset": "PLUS (high strength)"
-                },
-                "class_type": "IPAdapterUnifiedLoader"
+                "inputs": {"model": ["model", 0], "preset": "PLUS (high strength)"},
+                "class_type": "IPAdapterUnifiedLoader",
             },
             "char_img": {
                 "inputs": {"image": char_name, "upload": "image"},
-                "class_type": "LoadImage"
+                "class_type": "LoadImage",
             },
             "ipa_apply": {
                 "inputs": {
@@ -236,27 +264,33 @@ def create_workflow(prompt: str, negative_prompt: str, width: int, height: int,
                     "weight": 0.9,
                     "weight_type": "standard",
                     "start_at": 0.0,
-                    "end_at": 0.9
+                    "end_at": 0.9,
                 },
-                "class_type": "IPAdapter"
+                "class_type": "IPAdapter",
             },
             # ControlNet for pose control
             "cn_loader": {
                 "inputs": {"control_net_name": "control_v11p_sd15_openpose.pth"},
-                "class_type": "ControlNetLoader"
+                "class_type": "ControlNetLoader",
             },
             "pose_img": {
                 "inputs": {"image": pose_name, "upload": "image"},
-                "class_type": "LoadImage"
+                "class_type": "LoadImage",
             },
             # Text conditioning
             "pos_text": {
-                "inputs": {"text": f"{prompt}, masterpiece, best quality", "clip": ["model", 1]},
-                "class_type": "CLIPTextEncode"
+                "inputs": {
+                    "text": f"{prompt}, masterpiece, best quality",
+                    "clip": ["model", 1],
+                },
+                "class_type": "CLIPTextEncode",
             },
             "neg_text": {
-                "inputs": {"text": f"{negative_prompt}, low quality, blurry, different character", "clip": ["model", 1]},
-                "class_type": "CLIPTextEncode"
+                "inputs": {
+                    "text": f"{negative_prompt}, low quality, blurry, different character",
+                    "clip": ["model", 1],
+                },
+                "class_type": "CLIPTextEncode",
             },
             # Apply ControlNet to conditioning
             "cn_pos": {
@@ -264,23 +298,23 @@ def create_workflow(prompt: str, negative_prompt: str, width: int, height: int,
                     "conditioning": ["pos_text", 0],
                     "control_net": ["cn_loader", 0],
                     "image": ["pose_img", 0],
-                    "strength": 0.7
+                    "strength": 0.7,
                 },
-                "class_type": "ControlNetApply"
+                "class_type": "ControlNetApply",
             },
             "cn_neg": {
                 "inputs": {
                     "conditioning": ["neg_text", 0],
                     "control_net": ["cn_loader", 0],
                     "image": ["pose_img", 0],
-                    "strength": 0.7
+                    "strength": 0.7,
                 },
-                "class_type": "ControlNetApply"
+                "class_type": "ControlNetApply",
             },
             # Generation
             "latent": {
                 "inputs": {"width": width, "height": height, "batch_size": 1},
-                "class_type": "EmptyLatentImage"
+                "class_type": "EmptyLatentImage",
             },
             "sampler": {
                 "inputs": {
@@ -293,21 +327,18 @@ def create_workflow(prompt: str, negative_prompt: str, width: int, height: int,
                     "model": ["ipa_apply", 0],
                     "positive": ["cn_pos", 0],
                     "negative": ["cn_neg", 0],
-                    "latent_image": ["latent", 0]
+                    "latent_image": ["latent", 0],
                 },
-                "class_type": "KSampler"
+                "class_type": "KSampler",
             },
             "decode": {
                 "inputs": {"samples": ["sampler", 0], "vae": ["model", 2]},
-                "class_type": "VAEDecode"
+                "class_type": "VAEDecode",
             },
             "save": {
-                "inputs": {
-                    "filename_prefix": filename_prefix,
-                    "images": ["decode", 0]
-                },
-                "class_type": "SaveImage"
-            }
+                "inputs": {"filename_prefix": filename_prefix, "images": ["decode", 0]},
+                "class_type": "SaveImage",
+            },
         }
 
     # Fall back to original basic workflow if no character/pose
@@ -323,53 +354,36 @@ def create_workflow(prompt: str, negative_prompt: str, width: int, height: int,
                 "model": ["4", 0],
                 "positive": ["6", 0],
                 "negative": ["7", 0],
-                "latent_image": ["5", 0]
+                "latent_image": ["5", 0],
             },
-            "class_type": "KSampler"
+            "class_type": "KSampler",
         },
         "4": {
-            "inputs": {
-                "ckpt_name": "Counterfeit-V2.5.safetensors"
-            },
-            "class_type": "CheckpointLoaderSimple"
+            "inputs": {"ckpt_name": "Counterfeit-V2.5.safetensors"},
+            "class_type": "CheckpointLoaderSimple",
         },
         "5": {
-            "inputs": {
-                "width": width,
-                "height": height,
-                "batch_size": 1
-            },
-            "class_type": "EmptyLatentImage"
+            "inputs": {"width": width, "height": height, "batch_size": 1},
+            "class_type": "EmptyLatentImage",
         },
         "6": {
-            "inputs": {
-                "text": prompt,
-                "clip": ["4", 1]
-            },
-            "class_type": "CLIPTextEncode"
+            "inputs": {"text": prompt, "clip": ["4", 1]},
+            "class_type": "CLIPTextEncode",
         },
         "7": {
-            "inputs": {
-                "text": negative_prompt,
-                "clip": ["4", 1]
-            },
-            "class_type": "CLIPTextEncode"
+            "inputs": {"text": negative_prompt, "clip": ["4", 1]},
+            "class_type": "CLIPTextEncode",
         },
         "8": {
-            "inputs": {
-                "samples": ["3", 0],
-                "vae": ["4", 2]
-            },
-            "class_type": "VAEDecode"
+            "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
+            "class_type": "VAEDecode",
         },
         "9": {
-            "inputs": {
-                "filename_prefix": filename_prefix,
-                "images": ["8", 0]
-            },
-            "class_type": "SaveImage"
-        }
+            "inputs": {"filename_prefix": filename_prefix, "images": ["8", 0]},
+            "class_type": "SaveImage",
+        },
     }
+
 
 def apply_style_preset(prompt: str, style: str) -> str:
     """Apply validated style presets"""
@@ -378,11 +392,14 @@ def apply_style_preset(prompt: str, style: str) -> str:
         "fantasy": f"{prompt}, fantasy art style, magical, ethereal lighting, detailed",
         "steampunk": f"{prompt}, steampunk style, brass and copper, victorian era, mechanical",
         "studio_ghibli": f"{prompt}, studio ghibli style, soft colors, whimsical, detailed background",
-        "manga": f"{prompt}, manga style, black and white, detailed linework, expressive"
+        "manga": f"{prompt}, manga style, black and white, detailed linework, expressive",
     }
     return styles.get(style, prompt)
 
-def organize_file(source_path: Path, project_id: str, character_id: Optional[str] = None) -> Path:
+
+def organize_file(
+    source_path: Path, project_id: str, character_id: Optional[str] = None
+) -> Path:
     """Organize generated files with validation"""
 
     # Validate IDs
@@ -410,6 +427,7 @@ def organize_file(source_path: Path, project_id: str, character_id: Optional[str
 
     return dest_path
 
+
 async def process_generation_worker():
     """Worker to process generation queue"""
     executor = ThreadPoolExecutor(max_workers=3)
@@ -419,6 +437,7 @@ async def process_generation_worker():
             job_data = generation_queue.get()
             executor.submit(process_single_generation, job_data)
         await asyncio.sleep(0.1)
+
 
 def process_single_generation(job_data: Dict[str, Any]):
     """Process a single generation job"""
@@ -431,7 +450,9 @@ def process_single_generation(job_data: Dict[str, Any]):
 
         if job_data.get("character_id"):
             # Check if we have character reference
-            char_path = Path(f"/home/patrick/.anime-characters/{job_data['character_id']}/reference.png")
+            char_path = Path(
+                f"/home/patrick/.anime-characters/{job_data['character_id']}/reference.png"
+            )
             if char_path.exists():
                 character_ref = str(char_path)
 
@@ -441,7 +462,8 @@ def process_single_generation(job_data: Dict[str, Any]):
 
             # Fallback to default pose if library fails
             if not pose_ref:
-                pose_path = Path("/mnt/1TB-storage/ComfyUI/output/pose_test_00001_.png")
+                pose_path = Path(
+                    "/mnt/1TB-storage/ComfyUI/output/pose_test_00001_.png")
                 if pose_path.exists():
                     pose_ref = str(pose_path)
 
@@ -452,13 +474,11 @@ def process_single_generation(job_data: Dict[str, Any]):
             job_data["height"],
             job_data.get("style_preset"),
             character_ref,
-            pose_ref
+            pose_ref,
         )
 
         response = requests.post(
-            f"{COMFYUI_URL}/prompt",
-            json={"prompt": workflow},
-            timeout=30
+            f"{COMFYUI_URL}/prompt", json={"prompt": workflow}, timeout=30
         )
 
         if response.status_code == 200:
@@ -474,6 +494,7 @@ def process_single_generation(job_data: Dict[str, Any]):
     except Exception as e:
         job_data["status"] = "failed"
         job_data["error"] = str(e)
+
 
 def monitor_and_complete(job_id: str, comfyui_id: str, job_data: Dict[str, Any]):
     """Monitor job completion with real progress"""
@@ -498,7 +519,10 @@ def monitor_and_complete(job_id: str, comfyui_id: str, job_data: Dict[str, Any])
                         progress = 50
                         if progress != last_progress:
                             last_progress = progress
-                            asyncio.run(send_progress_update(job_id, progress, "processing"))
+                            asyncio.run(
+                                send_progress_update(
+                                    job_id, progress, "processing")
+                            )
                         break
 
                 # Check if still pending
@@ -509,7 +533,8 @@ def monitor_and_complete(job_id: str, comfyui_id: str, job_data: Dict[str, Any])
                         job_data["queue_position"] = idx + 1
                         if last_progress != 0:
                             last_progress = 0
-                            asyncio.run(send_progress_update(job_id, 0, "queued"))
+                            asyncio.run(send_progress_update(
+                                job_id, 0, "queued"))
                         break
 
             # Check history for completion
@@ -531,18 +556,27 @@ def monitor_and_complete(job_id: str, comfyui_id: str, job_data: Dict[str, Any])
                                             organized_path = organize_file(
                                                 source_path,
                                                 job_data["project_id"],
-                                                job_data.get("character_id")
+                                                job_data.get("character_id"),
                                             )
-                                            job_data["organized_path"] = str(organized_path)
+                                            job_data["organized_path"] = str(
+                                                organized_path
+                                            )
                                         except ValueError as e:
                                             print(f"Organization error: {e}")
 
                                     job_data["output_path"] = str(source_path)
                                     job_data["status"] = "completed"
-                                    job_data["completed_at"] = datetime.utcnow().isoformat()
-                                    job_data["total_time"] = time.time() - job_data["start_time"]
+                                    job_data["completed_at"] = (
+                                        datetime.utcnow().isoformat()
+                                    )
+                                    job_data["total_time"] = (
+                                        time.time() - job_data["start_time"]
+                                    )
 
-                                    asyncio.run(send_progress_update(job_id, 100, "completed"))
+                                    asyncio.run(
+                                        send_progress_update(
+                                            job_id, 100, "completed")
+                                    )
                                     return
 
                     job_data["status"] = "failed"
@@ -557,18 +591,22 @@ def monitor_and_complete(job_id: str, comfyui_id: str, job_data: Dict[str, Any])
     job_data["status"] = "failed"
     job_data["error"] = "Generation timeout after 5 minutes"
 
+
 async def send_progress_update(job_id: str, progress: int, status: str):
     """Send progress updates via WebSocket"""
     if job_id in websocket_connections:
         try:
-            await websocket_connections[job_id].send_json({
-                "job_id": job_id,
-                "progress": progress,
-                "status": status,
-                "timestamp": datetime.utcnow().isoformat()
-            })
+            await websocket_connections[job_id].send_json(
+                {
+                    "job_id": job_id,
+                    "progress": progress,
+                    "status": status,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
         except:
             pass
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -579,12 +617,15 @@ async def startup_event():
     asyncio.create_task(process_generation_worker())
     print("System ready!")
 
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up on shutdown"""
     await close_database()
 
+
 # API Endpoints
+
 
 @app.post("/api/anime/projects")
 async def create_project(project: ProjectCreate):
@@ -599,18 +640,20 @@ async def create_project(project: ProjectCreate):
         "metadata": project.metadata,
         "created_at": datetime.utcnow().isoformat(),
         "file_count": 0,
-        "characters": []
+        "characters": [],
     }
 
     projects[project_id] = project_data
 
     # Save to database with parameterized query
     try:
-        await db_manager.create_job({
-            "id": project_id,
-            "prompt": f"Project: {project.name}",
-            "status": "project_created"
-        })
+        await db_manager.create_job(
+            {
+                "id": project_id,
+                "prompt": f"Project: {project.name}",
+                "status": "project_created",
+            }
+        )
     except:
         pass  # Project tracking in memory is sufficient
 
@@ -619,7 +662,9 @@ async def create_project(project: ProjectCreate):
 
     return project_data
 
+
 # OLD projects endpoint removed - replaced with file system version below
+
 
 @app.get("/api/anime/projects/{project_id}")
 async def get_project(project_id: str):
@@ -631,6 +676,7 @@ async def get_project(project_id: str):
         raise HTTPException(404, "Project not found")
 
     return projects[project_id]
+
 
 @app.post("/api/anime/characters")
 async def create_character(character: CharacterCreate):
@@ -647,7 +693,7 @@ async def create_character(character: CharacterCreate):
         "backstory": character.backstory,
         "reference_prompts": character.reference_prompts,
         "created_at": datetime.utcnow().isoformat(),
-        "generation_count": 0
+        "generation_count": 0,
     }
 
     characters[character_id] = character_data
@@ -656,6 +702,7 @@ async def create_character(character: CharacterCreate):
         projects[character.project_id]["characters"].append(character_id)
 
     return character_data
+
 
 @app.get("/api/anime/characters/{character_id}")
 async def get_character(character_id: str):
@@ -667,6 +714,7 @@ async def get_character(character_id: str):
         raise HTTPException(404, "Character not found")
 
     return characters[character_id]
+
 
 @app.get("/api/anime/characters/{character_id}/bible")
 async def get_character_bible(character_id: str):
@@ -686,17 +734,35 @@ async def get_character_bible(character_id: str):
             "personality": char["personality"],
             "backstory": char["backstory"],
             "reference_prompts": char["reference_prompts"],
-            "generation_count": char["generation_count"]
-        }
+            "generation_count": char["generation_count"],
+        },
     }
+
 
 @app.post("/generate")
 async def generate_image(request: GenerationRequest, background_tasks: BackgroundTasks):
-    """Generate image with full validation"""
+    """Generate image with full validation and v2.0 tracking"""
     job_id = str(uuid.uuid4())[:8]
+
+    # Create v2.0 tracked job
+    v2_job_data = await create_tracked_job(
+        character_name=request.character_id or "default",
+        prompt=request.prompt,
+        project_name=(
+            f"project_{request.project_id}" if request.project_id else "default"
+        ),
+        seed=-1,  # Will be set by ComfyUI
+        model="default",
+        width=request.width,
+        height=request.height,
+        duration=4 if hasattr(request, "duration") else 0,
+        frames=24 if hasattr(request, "frames") else 1,
+    )
+    v2_job_id = v2_job_data["job_id"]
 
     job_data = {
         "id": job_id,
+        "v2_job_id": v2_job_id,  # Link to v2.0 tracking
         "status": "queued",
         "prompt": request.prompt,
         "negative_prompt": request.negative_prompt,
@@ -707,7 +773,7 @@ async def generate_image(request: GenerationRequest, background_tasks: Backgroun
         "style_preset": request.style_preset,
         "pose_description": request.pose_description,
         "created_at": datetime.utcnow().isoformat(),
-        "start_time": time.time()
+        "start_time": time.time(),
     }
 
     jobs_cache[job_id] = job_data
@@ -721,11 +787,14 @@ async def generate_image(request: GenerationRequest, background_tasks: Backgroun
 
     return {
         "job_id": job_id,
+        "v2_job_id": v2_job_id,
         "status": "queued",
+        "tracking": "v2.0 enabled",
         "queue_position": generation_queue.qsize(),
         "estimated_time": f"{generation_queue.qsize() * 4} seconds",
-        "websocket_url": f"ws://localhost:{PORT}/ws/{job_id}"
+        "websocket_url": f"ws://localhost:{PORT}/ws/{job_id}",
     }
+
 
 @app.websocket("/ws/{job_id}")
 async def websocket_progress(websocket: WebSocket, job_id: str):
@@ -750,12 +819,14 @@ async def websocket_progress(websocket: WebSocket, job_id: str):
                 elif job["status"] == "processing" and progress == 0:
                     progress = 50  # Default if no real progress yet
 
-                await websocket.send_json({
-                    "job_id": job_id,
-                    "status": job["status"],
-                    "progress": progress,
-                    "queue_position": job.get("queue_position")
-                })
+                await websocket.send_json(
+                    {
+                        "job_id": job_id,
+                        "status": job["status"],
+                        "progress": progress,
+                        "queue_position": job.get("queue_position"),
+                    }
+                )
 
                 if job["status"] in ["completed", "failed"]:
                     break
@@ -765,6 +836,7 @@ async def websocket_progress(websocket: WebSocket, job_id: str):
     finally:
         if job_id in websocket_connections:
             del websocket_connections[job_id]
+
 
 @app.get("/jobs/{job_id}")
 async def get_job_status(job_id: str):
@@ -780,6 +852,7 @@ async def get_job_status(job_id: str):
 
     return jobs_cache[job_id]
 
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
@@ -791,8 +864,9 @@ async def health_check():
         "projects": len(projects),
         "characters": len(characters),
         "jobs_in_memory": len(jobs_cache),
-        "security": "enabled"
+        "security": "enabled",
     }
+
 
 @app.get("/api/health")
 async def api_health_check():
@@ -805,8 +879,9 @@ async def api_health_check():
         "projects": len(projects),
         "characters": len(characters),
         "jobs_in_memory": len(jobs_cache),
-        "security": "enabled"
+        "security": "enabled",
     }
+
 
 @app.get("/api/anime/health")
 async def anime_api_health_check():
@@ -819,8 +894,9 @@ async def anime_api_health_check():
         "projects": len(projects),
         "characters": len(characters),
         "jobs_in_memory": len(jobs_cache),
-        "security": "enabled"
+        "security": "enabled",
     }
+
 
 if __name__ == "__main__":
     # Install python-dotenv if needed
@@ -831,16 +907,15 @@ if __name__ == "__main__":
         from dotenv import load_dotenv
     except ImportError:
         print("Installing python-dotenv...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "python-dotenv"])
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "python-dotenv"])
         from dotenv import load_dotenv
 
     uvicorn.run(
-        "secure_api:app",
-        host="0.0.0.0",
-        port=PORT,
-        reload=False,
-        log_level="info"
+        "secure_api:app", host="0.0.0.0", port=PORT, reload=False, log_level="info"
     )
+
+
 # Characters endpoint that was missing from tests
 @app.get("/characters")
 async def list_characters():
@@ -856,15 +931,18 @@ async def list_characters():
                     if chars_dir.exists():
                         for char_dir in chars_dir.iterdir():
                             if char_dir.is_dir():
-                                characters.append({
-                                    "name": char_dir.name,
-                                    "project_id": project_dir.name,
-                                    "path": str(char_dir)
-                                })
+                                characters.append(
+                                    {
+                                        "name": char_dir.name,
+                                        "project_id": project_dir.name,
+                                        "path": str(char_dir),
+                                    }
+                                )
 
         return {"characters": characters}
     except Exception as e:
         raise HTTPException(500, f"Error reading characters: {e}")
+
 
 # Fix projects endpoint to read actual data
 @app.get("/api/anime/projects")
@@ -882,24 +960,28 @@ async def list_projects():
                         "name": project_dir.name,
                         "path": str(project_dir),
                         "characters": [],
-                        "images": 0
+                        "images": 0,
                     }
 
                     # Count characters
                     chars_dir = project_dir / "characters"
                     if chars_dir.exists():
-                        project_info["characters"] = [d.name for d in chars_dir.iterdir() if d.is_dir()]
+                        project_info["characters"] = [
+                            d.name for d in chars_dir.iterdir() if d.is_dir()
+                        ]
 
                     # Count images
                     general_dir = project_dir / "general"
                     if general_dir.exists():
-                        project_info["images"] = len(list(general_dir.glob("*.png")))
+                        project_info["images"] = len(
+                            list(general_dir.glob("*.png")))
 
                     projects.append(project_info)
 
         return {"projects": projects}
     except Exception as e:
         raise HTTPException(500, f"Error reading projects: {e}")
+
 
 # Storyline endpoints
 @app.get("/api/stories")
@@ -911,6 +993,7 @@ async def list_stories():
     except Exception as e:
         raise HTTPException(500, f"Database error: {e}")
 
+
 @app.post("/api/stories")
 async def create_story(story_data: dict):
     """Create new interactive story"""
@@ -920,6 +1003,7 @@ async def create_story(story_data: dict):
         return {"story_id": story_id, "status": "created"}
     except Exception as e:
         raise HTTPException(500, f"Error creating story: {e}")
+
 
 @app.get("/api/stories/{story_id}")
 async def get_story(story_id: str):
@@ -931,6 +1015,7 @@ async def get_story(story_id: str):
         return story
     except Exception as e:
         raise HTTPException(500, f"Error loading story: {e}")
+
 
 @app.get("/api/stories/test")
 async def test_sakura():
@@ -944,12 +1029,14 @@ async def test_sakura():
     except Exception as e:
         return {"error": str(e)}
 
+
 # Story branching endpoints
 @app.post("/api/stories/{story_id}/branches")
 async def create_story_branch(story_id: str, branch_data: dict):
     """Create new story branch"""
     try:
         from src.storyline_version_control import StorylineVersionControl
+
         vcs = StorylineVersionControl(story_id)
 
         branch_name = branch_data.get("name", f"branch_{int(time.time())}")
@@ -958,22 +1045,27 @@ async def create_story_branch(story_id: str, branch_data: dict):
         new_branch = vcs.create_branch(branch_name, description)
 
         # Save branch to database
-        await storyline_db.save_branch(story_id, {
-            "name": branch_name,
-            "head_commit": vcs.head_commit,
-            "parent_branch": vcs.current_branch,
-            "description": description
-        })
+        await storyline_db.save_branch(
+            story_id,
+            {
+                "name": branch_name,
+                "head_commit": vcs.head_commit,
+                "parent_branch": vcs.current_branch,
+                "description": description,
+            },
+        )
 
         return {"branch": new_branch, "status": "created"}
     except Exception as e:
         raise HTTPException(500, f"Error creating branch: {e}")
+
 
 @app.post("/api/stories/{story_id}/branches/{branch_name}/switch")
 async def switch_story_branch(story_id: str, branch_name: str):
     """Switch to different story branch"""
     try:
         from src.storyline_version_control import StorylineVersionControl
+
         vcs = StorylineVersionControl(story_id)
 
         vcs.switch_branch(branch_name)
@@ -981,10 +1073,11 @@ async def switch_story_branch(story_id: str, branch_name: str):
         return {
             "current_branch": vcs.current_branch,
             "head_commit": vcs.head_commit,
-            "story": vcs.working_story
+            "story": vcs.working_story,
         }
     except Exception as e:
         raise HTTPException(500, f"Error switching branch: {e}")
+
 
 @app.get("/api/stories/{story_id}/branches")
 async def list_story_branches(story_id: str):
@@ -995,11 +1088,13 @@ async def list_story_branches(story_id: str):
     except Exception as e:
         raise HTTPException(500, f"Error loading branches: {e}")
 
+
 @app.post("/api/stories/{story_id}/merge")
 async def merge_story_branches(story_id: str, merge_data: dict):
     """Merge story branches"""
     try:
         from src.storyline_version_control import StorylineVersionControl
+
         vcs = StorylineVersionControl(story_id)
 
         source_branch = merge_data["source_branch"]
@@ -1011,38 +1106,47 @@ async def merge_story_branches(story_id: str, merge_data: dict):
             "success": success,
             "conflicts": conflicts,
             "source": source_branch,
-            "target": target_branch
+            "target": target_branch,
         }
     except Exception as e:
         raise HTTPException(500, f"Error merging branches: {e}")
+
 
 # Character evolution endpoints
 @app.post("/api/stories/{story_id}/characters/{character_name}/evolve")
 async def evolve_character(story_id: str, character_name: str, evolution_data: dict):
     """Evolve character based on story events"""
     try:
-        commit_hash = evolution_data.get("commit_hash", f"evolution_{int(time.time())}")
+        commit_hash = evolution_data.get(
+            "commit_hash", f"evolution_{int(time.time())}")
 
-        await storyline_db.save_character_evolution(story_id, {
-            "name": character_name,
-            "commit_hash": commit_hash,
-            "evolution_state": evolution_data.get("evolution_state", {}),
-            "emotional_state": evolution_data.get("emotional_state", {}),
-            "relationships": evolution_data.get("relationships", {})
-        })
+        await storyline_db.save_character_evolution(
+            story_id,
+            {
+                "name": character_name,
+                "commit_hash": commit_hash,
+                "evolution_state": evolution_data.get("evolution_state", {}),
+                "emotional_state": evolution_data.get("emotional_state", {}),
+                "relationships": evolution_data.get("relationships", {}),
+            },
+        )
 
         return {"status": "character evolved", "character": character_name}
     except Exception as e:
         raise HTTPException(500, f"Error evolving character: {e}")
 
+
 @app.get("/api/stories/{story_id}/characters/{character_name}/evolution")
 async def get_character_evolution(story_id: str, character_name: str):
     """Get character evolution history"""
     try:
-        evolution = await storyline_db.load_character_evolution(story_id, character_name)
+        evolution = await storyline_db.load_character_evolution(
+            story_id, character_name
+        )
         return {"character": character_name, "evolution": evolution}
     except Exception as e:
         raise HTTPException(500, f"Error loading evolution: {e}")
+
 
 # Echo Brain integration endpoints
 @app.post("/api/stories/{story_id}/intent")
@@ -1066,10 +1170,11 @@ async def analyze_user_intent(story_id: str, intent_data: dict):
             "action": intent.action,
             "target": intent.target,
             "parameters": intent.parameters,
-            "confidence": intent.confidence
+            "confidence": intent.confidence,
         }
     except Exception as e:
         raise HTTPException(500, f"Error analyzing intent: {e}")
+
 
 @app.post("/api/stories/{story_id}/suggestions")
 async def get_story_suggestions(story_id: str):
@@ -1088,7 +1193,7 @@ async def get_story_suggestions(story_id: str):
         context = {
             "story": story["working_story"],
             "current_branch": story["current_branch"],
-            "story_id": story_id
+            "story_id": story_id,
         }
 
         suggestions = await user_system.suggest_next_action(context)
@@ -1098,6 +1203,7 @@ async def get_story_suggestions(story_id: str):
         return {"suggestions": suggestions}
     except Exception as e:
         raise HTTPException(500, f"Error getting suggestions: {e}")
+
 
 # Enhanced generation endpoint that links to story progression
 @app.post("/api/stories/{story_id}/generate")
@@ -1116,7 +1222,9 @@ async def generate_for_story(story_id: str, generation_data: dict):
         scene_description = generation_data.get("scene_description", "")
 
         # Enhance prompt with story context
-        if character_name and character_name in story["working_story"].get("characters", {}):
+        if character_name and character_name in story["working_story"].get(
+            "characters", {}
+        ):
             char_data = story["working_story"]["characters"][character_name]
             prompt += f", {char_data.get('hair_color', '')} hair, {char_data.get('eye_color', '')} eyes"
 
@@ -1127,7 +1235,7 @@ async def generate_for_story(story_id: str, generation_data: dict):
             "character_name": character_name,
             "negative_prompt": generation_data.get("negative_prompt", "bad quality"),
             "width": generation_data.get("width", 512),
-            "height": generation_data.get("height", 768)
+            "height": generation_data.get("height", 768),
         }
 
         # Submit job (reuse existing generation logic)
@@ -1139,16 +1247,88 @@ async def generate_for_story(story_id: str, generation_data: dict):
         job_data["story_connection"] = {
             "story_id": story_id,
             "chapter_index": chapter_index,
-            "scene_description": scene_description
+            "scene_description": scene_description,
         }
 
         return {
             "job_id": job_id,
             "status": "queued",
             "story_id": story_id,
-            "chapter_index": chapter_index
+            "chapter_index": chapter_index,
         }
 
     except Exception as e:
         raise HTTPException(500, f"Error generating for story: {e}")
 
+
+# V2.0 Tracking Endpoints
+@app.post("/api/anime/jobs/{job_id}/complete")
+async def complete_anime_job(job_id: int, request: Dict[str, Any]):
+    """Complete job with v2.0 quality metrics"""
+    try:
+        output_path = request.get("output_path")
+        if not output_path:
+            raise HTTPException(status_code=400, detail="output_path required")
+
+        # Get quality metrics from request or calculate defaults
+        face_similarity = request.get("face_similarity", 0.75)
+        aesthetic_score = request.get("aesthetic_score", 6.0)
+
+        # Complete job with v2.0 quality tracking
+        gate_status = await complete_job_with_quality(
+            job_id=job_id,
+            output_path=output_path,
+            face_similarity=face_similarity,
+            aesthetic_score=aesthetic_score,
+        )
+
+        return {
+            "job_id": job_id,
+            "status": "completed",
+            "output_path": output_path,
+            "quality_gate": gate_status,
+            "message": "Job completed with v2.0 quality tracking",
+        }
+
+    except Exception as e:
+        print(f"Error completing job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/anime/jobs/{job_id}/reproduce")
+async def reproduce_anime_job(job_id: int):
+    """Get reproduction parameters for exact regeneration"""
+    try:
+        repro_data = await reproduce_job(job_id)
+
+        return {
+            "job_id": job_id,
+            "reproduction_data": repro_data,
+            "message": "Use these parameters for exact reproduction",
+        }
+
+    except Exception as e:
+        print(f"Error getting reproduction data for job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/anime/v2/status")
+async def get_v2_status():
+    """Get v2.0 integration status"""
+    try:
+        # Test v2.0 database connection
+        test_query = "SELECT COUNT(*) FROM anime_api.v2_jobs"
+        result = v2_integration.db.execute_query(test_query)
+        job_count = result[0][0] if result else 0
+
+        return {
+            "status": "active",
+            "v2_tracking": "enabled",
+            "jobs_tracked": job_count,
+            "quality_gates": "enabled",
+            "reproduction": "available",
+            "message": "V2.0 tracking system operational",
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

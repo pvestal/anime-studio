@@ -4,30 +4,29 @@ ANIME GENERATION API - With Database Persistence
 FastAPI ComfyUI integration with PostgreSQL job tracking
 """
 
+import asyncio
 import json
+import logging
 import time
 import uuid
-import requests
-import asyncio
-import logging
-from pathlib import Path
-from typing import Dict, Any, Optional
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+import requests
+import uvicorn
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-import uvicorn
 
 # Import our database manager
-from database import db_manager, initialize_database, close_database
+from database import close_database, db_manager, initialize_database
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -40,7 +39,7 @@ PORT = 8328
 app = FastAPI(
     title="Anime Production API",
     description="Production-ready anime generation with database persistence",
-    version="2.0.0"
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -54,6 +53,7 @@ app.add_middleware(
 # In-memory cache for quick lookups (backed by database)
 jobs_cache: Dict[str, Dict[str, Any]] = {}
 
+
 class GenerationRequest(BaseModel):
     prompt: str
     negative_prompt: Optional[str] = "bad quality, deformed, blurry"
@@ -62,7 +62,10 @@ class GenerationRequest(BaseModel):
     project_id: Optional[str] = None
     character_id: Optional[str] = None
 
-def create_working_workflow(prompt: str, negative_prompt: str, width: int, height: int) -> Dict[str, Any]:
+
+def create_working_workflow(
+    prompt: str, negative_prompt: str, width: int, height: int
+) -> Dict[str, Any]:
     """Create workflow - optimized for speed"""
 
     seed = int(time.time() * 1000) % 2147483647
@@ -80,53 +83,36 @@ def create_working_workflow(prompt: str, negative_prompt: str, width: int, heigh
                 "model": ["4", 0],
                 "positive": ["6", 0],
                 "negative": ["7", 0],
-                "latent_image": ["5", 0]
+                "latent_image": ["5", 0],
             },
-            "class_type": "KSampler"
+            "class_type": "KSampler",
         },
         "4": {
-            "inputs": {
-                "ckpt_name": "Counterfeit-V2.5.safetensors"
-            },
-            "class_type": "CheckpointLoaderSimple"
+            "inputs": {"ckpt_name": "Counterfeit-V2.5.safetensors"},
+            "class_type": "CheckpointLoaderSimple",
         },
         "5": {
-            "inputs": {
-                "width": width,
-                "height": height,
-                "batch_size": 1
-            },
-            "class_type": "EmptyLatentImage"
+            "inputs": {"width": width, "height": height, "batch_size": 1},
+            "class_type": "EmptyLatentImage",
         },
         "6": {
-            "inputs": {
-                "text": prompt,
-                "clip": ["4", 1]
-            },
-            "class_type": "CLIPTextEncode"
+            "inputs": {"text": prompt, "clip": ["4", 1]},
+            "class_type": "CLIPTextEncode",
         },
         "7": {
-            "inputs": {
-                "text": negative_prompt,
-                "clip": ["4", 1]
-            },
-            "class_type": "CLIPTextEncode"
+            "inputs": {"text": negative_prompt, "clip": ["4", 1]},
+            "class_type": "CLIPTextEncode",
         },
         "8": {
-            "inputs": {
-                "samples": ["3", 0],
-                "vae": ["4", 2]
-            },
-            "class_type": "VAEDecode"
+            "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
+            "class_type": "VAEDecode",
         },
         "9": {
-            "inputs": {
-                "filename_prefix": filename_prefix,
-                "images": ["8", 0]
-            },
-            "class_type": "SaveImage"
-        }
+            "inputs": {"filename_prefix": filename_prefix, "images": ["8", 0]},
+            "class_type": "SaveImage",
+        },
     }
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -139,11 +125,12 @@ async def startup_event():
     try:
         recent_jobs = await db_manager.list_jobs(limit=50)
         for job in recent_jobs:
-            if job['id']:
-                jobs_cache[job['id']] = job
+            if job["id"]:
+                jobs_cache[job["id"]] = job
         logger.info(f"Loaded {len(recent_jobs)} recent jobs into cache")
     except Exception as e:
         logger.error(f"Failed to load recent jobs: {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -151,6 +138,7 @@ async def shutdown_event():
     logger.info("Shutting down anime production API...")
     await close_database()
     logger.info("Database connections closed")
+
 
 @app.get("/")
 async def root():
@@ -162,8 +150,9 @@ async def root():
         "status": "running",
         "database": "connected",
         "stats": stats,
-        "port": PORT
+        "port": PORT,
     }
+
 
 @app.get("/health")
 async def health_check():
@@ -172,7 +161,11 @@ async def health_check():
     try:
         # Test ComfyUI connection
         response = requests.get(f"{COMFYUI_URL}/system_stats", timeout=5)
-        comfyui_status = "connected" if response.status_code == 200 else f"error_{response.status_code}"
+        comfyui_status = (
+            "connected"
+            if response.status_code == 200
+            else f"error_{response.status_code}"
+        )
 
         # Get VRAM info if connected
         vram_info = "unknown"
@@ -182,7 +175,9 @@ async def health_check():
             if devices:
                 vram_free = devices[0].get("vram_free", 0)
                 vram_total = devices[0].get("vram_total", 0)
-                vram_info = f"{vram_free//1024//1024}MB free / {vram_total//1024//1024}MB total"
+                vram_info = (
+                    f"{vram_free//1024//1024}MB free / {vram_total//1024//1024}MB total"
+                )
 
     except Exception as e:
         comfyui_status = f"connection_error: {str(e)}"
@@ -207,8 +202,9 @@ async def health_check():
         "output_dir": str(OUTPUT_DIR),
         "output_accessible": output_accessible,
         "jobs": stats,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
     }
+
 
 @app.post("/generate")
 async def generate_image(request: GenerationRequest, background_tasks: BackgroundTasks):
@@ -232,7 +228,7 @@ async def generate_image(request: GenerationRequest, background_tasks: Backgroun
             "comfyui_id": None,
             "output_path": None,
             "error": None,
-            "start_time": time.time()
+            "start_time": time.time(),
         }
 
         # Store in cache
@@ -241,7 +237,7 @@ async def generate_image(request: GenerationRequest, background_tasks: Backgroun
         # Save to database
         try:
             db_id = await db_manager.create_job(job_data)
-            job_data['db_id'] = db_id
+            job_data["db_id"] = db_id
             logger.info(f"Created job {job_id} in database with ID {db_id}")
         except Exception as e:
             logger.error(f"Failed to save job to database: {e}")
@@ -249,17 +245,12 @@ async def generate_image(request: GenerationRequest, background_tasks: Backgroun
 
         # Create workflow
         workflow = create_working_workflow(
-            request.prompt,
-            request.negative_prompt,
-            request.width,
-            request.height
+            request.prompt, request.negative_prompt, request.width, request.height
         )
 
         # Submit to ComfyUI
         response = requests.post(
-            f"{COMFYUI_URL}/prompt",
-            json={"prompt": workflow},
-            timeout=10
+            f"{COMFYUI_URL}/prompt", json={"prompt": workflow}, timeout=10
         )
 
         if response.status_code != 200:
@@ -300,7 +291,7 @@ async def generate_image(request: GenerationRequest, background_tasks: Backgroun
             "status": "running",
             "comfyui_id": comfyui_id,
             "estimated_time": "30-60 seconds",
-            "message": "Generation started - check /jobs/{job_id} for status"
+            "message": "Generation started - check /jobs/{job_id} for status",
         }
 
     except requests.RequestException as e:
@@ -324,6 +315,7 @@ async def generate_image(request: GenerationRequest, background_tasks: Backgroun
 
         raise HTTPException(500, f"Generation error: {str(e)}")
 
+
 async def monitor_job_completion(job_id: str):
     """Background task to monitor job completion"""
     max_wait = 120  # 2 minutes max
@@ -346,8 +338,7 @@ async def monitor_job_completion(job_id: str):
         try:
             # Check ComfyUI history
             response = requests.get(
-                f"{COMFYUI_URL}/history/{job['comfyui_id']}",
-                timeout=5
+                f"{COMFYUI_URL}/history/{job['comfyui_id']}", timeout=5
             )
 
             if response.status_code == 200:
@@ -366,8 +357,10 @@ async def monitor_job_completion(job_id: str):
                                 if output_path.exists():
                                     job["output_path"] = str(output_path)
                                     job["status"] = "completed"
-                                    job["completed_at"] = datetime.utcnow().isoformat()
-                                    job["total_time"] = time.time() - job["start_time"]
+                                    job["completed_at"] = datetime.utcnow(
+                                    ).isoformat()
+                                    job["total_time"] = time.time() - \
+                                        job["start_time"]
                                     output_found = True
 
                                     # Update database
@@ -375,10 +368,12 @@ async def monitor_job_completion(job_id: str):
                                         job_id,
                                         "completed",
                                         output_path=str(output_path),
-                                        total_time=job["total_time"]
+                                        total_time=job["total_time"],
                                     )
 
-                                    logger.info(f"Job {job_id} completed in {job['total_time']:.2f} seconds")
+                                    logger.info(
+                                        f"Job {job_id} completed in {job['total_time']:.2f} seconds"
+                                    )
                                     break
                             if output_found:
                                 break
@@ -389,9 +384,7 @@ async def monitor_job_completion(job_id: str):
                         job["error"] = "Generation completed but no output file found"
 
                         await db_manager.update_job_status(
-                            job_id,
-                            "failed",
-                            error=job["error"]
+                            job_id, "failed", error=job["error"]
                         )
 
                         logger.error(f"Job {job_id} failed: no output file")
@@ -409,12 +402,11 @@ async def monitor_job_completion(job_id: str):
             job["error"] = "Generation timeout"
 
             await db_manager.update_job_status(
-                job_id,
-                "failed",
-                error="Generation timeout"
+                job_id, "failed", error="Generation timeout"
             )
 
             logger.error(f"Job {job_id} timed out")
+
 
 @app.get("/jobs/{job_id}")
 async def get_job_status(job_id: str):
@@ -435,18 +427,15 @@ async def get_job_status(job_id: str):
 
     return job
 
+
 @app.get("/jobs")
 async def list_jobs(limit: int = 50, offset: int = 0):
     """List jobs from database"""
     jobs = await db_manager.list_jobs(limit=limit, offset=offset)
     stats = await db_manager.get_stats()
 
-    return {
-        "jobs": jobs,
-        "summary": stats,
-        "limit": limit,
-        "offset": offset
-    }
+    return {"jobs": jobs, "summary": stats, "limit": limit, "offset": offset}
+
 
 @app.delete("/jobs/{job_id}")
 async def cancel_job(job_id: str):
@@ -461,7 +450,9 @@ async def cancel_job(job_id: str):
     job = jobs_cache[job_id]
 
     if job["status"] not in ["queued", "running"]:
-        raise HTTPException(400, f"Job {job_id} cannot be cancelled (status: {job['status']})")
+        raise HTTPException(
+            400, f"Job {job_id} cannot be cancelled (status: {job['status']})"
+        )
 
     # Update status
     job["status"] = "cancelled"
@@ -472,11 +463,12 @@ async def cancel_job(job_id: str):
 
     return {"message": f"Job {job_id} cancelled", "job": job}
 
+
 if __name__ == "__main__":
     uvicorn.run(
         "anime_generation_api_with_db:app",
         host="0.0.0.0",
         port=PORT,
         reload=False,
-        log_level="info"
+        log_level="info",
     )
