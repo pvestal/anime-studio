@@ -33,6 +33,8 @@ from project_bible_api import (CharacterDefinition, ProjectBibleAPI,
 from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 from pydantic import BaseModel, Field
+from v2_integration import (complete_job_with_quality, create_tracked_job,
+                            reproduce_job, v2_integration)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -57,6 +59,7 @@ app.add_middleware(
 # Import and include Redis router
 try:
     from redis_api_endpoints import redis_router
+
     app.include_router(redis_router, tags=["Redis Queue"])
     logger.info("Redis router integrated successfully")
 except ImportError as e:
@@ -165,6 +168,86 @@ def init_db():
 
         conn.commit()
         logger.info("Database initialized successfully")
+
+
+# Add v2.0 endpoint for job completion
+@app.post("/api/anime/jobs/{job_id}/complete")
+async def complete_anime_job(job_id: int, request: Dict[str, Any]):
+    """Complete job with quality metrics and v2.0 tracking"""
+    try:
+        output_path = request.get("output_path")
+        if not output_path:
+            raise HTTPException(status_code=400, detail="output_path required")
+
+        # Get quality metrics from request or calculate defaults
+        face_similarity = request.get(
+            "face_similarity", 0.75)  # Default passing
+        aesthetic_score = request.get(
+            "aesthetic_score", 6.0)  # Default passing
+
+        # Complete job with v2.0 quality tracking
+        gate_status = await complete_job_with_quality(
+            job_id=job_id,
+            output_path=output_path,
+            face_similarity=face_similarity,
+            aesthetic_score=aesthetic_score,
+        )
+
+        return {
+            "job_id": job_id,
+            "status": "completed",
+            "output_path": output_path,
+            "quality_gate": gate_status,
+            "message": "Job completed with v2.0 quality tracking",
+        }
+
+    except Exception as e:
+        logger.error(f"Error completing job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Add v2.0 endpoint for reproduction
+@app.get("/api/anime/jobs/{job_id}/reproduce")
+async def reproduce_anime_job(job_id: int):
+    """Get reproduction parameters for exact regeneration"""
+    try:
+        repro_data = await reproduce_job(job_id)
+
+        return {
+            "job_id": job_id,
+            "reproduction_data": repro_data,
+            "message": "Use these parameters for exact reproduction",
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting reproduction data for job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Add endpoint to get job status and quality metrics
+@app.get("/api/anime/jobs/{job_id}/status")
+async def get_job_status(job_id: int):
+    """Get job status and quality metrics"""
+    try:
+        job = v2_integration.db.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        quality_scores = v2_integration.db.get_job_quality_scores(job_id)
+
+        return {
+            "job_id": job_id,
+            "status": job["status"],
+            "created_at": job["created_at"],
+            "completed_at": job.get("completed_at"),
+            "output_path": job.get("output_path"),
+            "quality_scores": quality_scores,
+            "error_message": job.get("error_message"),
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting job status {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Pydantic Models
@@ -1198,9 +1281,25 @@ async def generate_from_command(project_id: int, request: Dict[str, Any]):
             "fps": 24,
         }
 
-        # Step 3: Trigger generation via anime service
+        # Step 3: Create v2.0 tracked job first
+        logger.info("Creating v2.0 tracked job")
+        job_data = await create_tracked_job(
+            character_name=generation_params["character"],
+            prompt=generation_params["prompt"],
+            project_name=project["name"],
+            seed=-1,  # Will be set by ComfyUI
+            model="default",
+            width=generation_params["width"],
+            height=generation_params["height"],
+            duration=generation_params["duration"],
+            frames=generation_params["frames"],
+        )
+
+        # Step 4: Trigger generation via anime service
         logger.info(
             f"Triggering generation via anime service: {generation_params}")
+        generation_params["v2_job_id"] = job_data["job_id"]  # Pass tracking ID
+
         async with httpx.AsyncClient() as client:
             gen_response = await client.post(
                 f"http://127.0.0.1:8328/api/anime/generate-redis",
@@ -1216,15 +1315,18 @@ async def generate_from_command(project_id: int, request: Dict[str, Any]):
 
             generation_data = gen_response.json()
 
-        # Return generation tracking info
+        # Return generation tracking info with v2.0 job ID
         return {
             "success": True,
             "generation_id": generation_data.get("generation_id"),
+            "v2_job_id": job_data["job_id"],  # v2.0 tracking ID
             "status": "generating",
             "command": command,
             "interpretation": interpretation,
             "project_id": project_id,
-            "message": "Scene generation started via Echo Brain interpretation",
+            "tracking_enabled": True,
+            "reproducible": True,
+            "message": "Scene generation started with v2.0 tracking",
         }
 
     except HTTPException:

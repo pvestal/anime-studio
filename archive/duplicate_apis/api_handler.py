@@ -848,7 +848,8 @@ def setup_anime_api_routes(api_handler: EnhancedAPIHandler):
         try:
             # Import job queue
             import sys
-            sys.path.insert(0, '/opt/tower-anime-production')
+
+            sys.path.insert(0, "/opt/tower-anime-production")
             from services.fixes.job_queue import AnimeJobQueue
 
             # Initialize job queue
@@ -859,43 +860,44 @@ def setup_anime_api_routes(api_handler: EnhancedAPIHandler):
 
             if not job_data:
                 raise HTTPException(
-                    status_code=404,
-                    detail=f"Job {job_id} not found"
-                )
+                    status_code=404, detail=f"Job {job_id} not found")
 
             # Parse progress and calculate ETA
-            progress = int(job_data.get('progress', 0))
+            progress = int(job_data.get("progress", 0))
             eta = None
 
-            if progress > 0 and job_data.get('created_at'):
-                created_at = datetime.fromisoformat(job_data['created_at'])
+            if progress > 0 and job_data.get("created_at"):
+                created_at = datetime.fromisoformat(job_data["created_at"])
                 elapsed = (datetime.utcnow() - created_at).total_seconds()
                 if progress < 100:
                     estimated_total = elapsed / (progress / 100)
-                    eta = datetime.utcnow() + timedelta(seconds=(estimated_total - elapsed))
+                    eta = datetime.utcnow() + timedelta(
+                        seconds=(estimated_total - elapsed)
+                    )
 
             # Build response with real data
             status_data = {
                 "job_id": job_id,
-                "project_id": job_data.get('project_id'),
-                "status": job_data.get('status', 'unknown'),
+                "project_id": job_data.get("project_id"),
+                "status": job_data.get("status", "unknown"),
                 "progress_percent": progress,
                 "estimated_completion": eta.isoformat() if eta else None,
                 "message": f"Job {job_data.get('status', 'processing')}...",
-                "created_at": job_data.get('created_at'),
-                "updated_at": job_data.get('updated_at')
+                "created_at": job_data.get("created_at"),
+                "updated_at": job_data.get("updated_at"),
             }
 
             # Add completion data if available
-            if job_data.get('status') == 'completed':
-                status_data['completed_at'] = job_data.get('completed_at')
-                if job_data.get('result'):
-                    status_data['result'] = json.loads(job_data.get('result', '{}'))
+            if job_data.get("status") == "completed":
+                status_data["completed_at"] = job_data.get("completed_at")
+                if job_data.get("result"):
+                    status_data["result"] = json.loads(
+                        job_data.get("result", "{}"))
 
             # Add error info if failed
-            if job_data.get('status') == 'failed':
-                status_data['error'] = job_data.get('error')
-                status_data['failed_at'] = job_data.get('failed_at')
+            if job_data.get("status") == "failed":
+                status_data["error"] = job_data.get("error")
+                status_data["failed_at"] = job_data.get("failed_at")
 
             return JSONResponse(content=status_data)
 
@@ -904,8 +906,7 @@ def setup_anime_api_routes(api_handler: EnhancedAPIHandler):
         except Exception as e:
             logger.error(f"Error getting job status for {job_id}: {e}")
             raise HTTPException(
-                status_code=500,
-                detail=f"Failed to retrieve job status: {str(e)}"
+                status_code=500, detail=f"Failed to retrieve job status: {str(e)}"
             )
 
 
