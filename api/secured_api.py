@@ -594,75 +594,27 @@ async def get_production_phases():
         "quality_gates": "80% quality required per phase"
     }
 
-# WebSocket connections manager
+# Import WebSocket functionality
+from websocket_endpoints import add_websocket_endpoints, start_background_tasks
+
+# Add WebSocket endpoints to the app
+add_websocket_endpoints(app, jobs, get_comfyui_job_status)
+
+# Legacy WebSocket support for backward compatibility
 websocket_connections = {}
 
-@app.websocket("/ws/progress/{job_id}")
-async def websocket_progress(websocket: WebSocket, job_id: str):
-    """WebSocket for real-time progress updates with ComfyUI integration"""
-    await websocket.accept()
-    websocket_connections[job_id] = websocket
-    logger.info(f"WebSocket connected for job {job_id}")
-
-    try:
-        while True:
-            if job_id in jobs:
-                job = jobs[job_id]
-
-                # Get real-time status from ComfyUI
-                comfyui_id = job.get("comfyui_id", job_id)
-                real_status = await get_comfyui_job_status(comfyui_id)
-
-                if real_status:
-                    job.update(real_status)
-
-                progress_data = {
-                    "job_id": job_id,
-                    "status": job["status"],
-                    "progress": job.get("progress", 0),
-                    "estimated_remaining": job.get("estimated_remaining", 0),
-                    "output_path": job.get("output_path"),
-                    "timestamp": time.time()
-                }
-
-                await websocket.send_json(progress_data)
-
-                if job["status"] in ["completed", "failed"]:
-                    logger.info(f"WebSocket job {job_id} finished with status: {job['status']}")
-                    break
-            else:
-                # Job not found, send error and close
-                await websocket.send_json({
-                    "job_id": job_id,
-                    "status": "not_found",
-                    "error": "Job not found",
-                    "timestamp": time.time()
-                })
-                break
-
-            await asyncio.sleep(2)  # Update every 2 seconds
-
-    except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for job {job_id}")
-        if job_id in websocket_connections:
-            del websocket_connections[job_id]
-
 async def send_progress_update(job_id: str, progress: int, status: str, message: str = ""):
-    """Send progress update via WebSocket"""
-    if job_id in websocket_connections:
-        try:
-            await websocket_connections[job_id].send_json({
-                "job_id": job_id,
-                "progress": progress,
-                "status": status,
-                "message": message,
-                "timestamp": datetime.utcnow().isoformat()
-            })
-        except Exception as e:
-            logger.error(f"Failed to send progress update: {e}")
-            # Remove failed connection
-            if job_id in websocket_connections:
-                del websocket_connections[job_id]
+    """Legacy function for backward compatibility - now uses connection manager"""
+    try:
+        from websocket_manager import connection_manager
+        await connection_manager.send_progress_update(
+            job_id=job_id,
+            progress=progress,
+            status=status,
+            message=message
+        )
+    except Exception as e:
+        logger.error(f"Failed to send progress update via connection manager: {e}")
 
 
 if __name__ == "__main__":
@@ -672,6 +624,13 @@ if __name__ == "__main__":
     if not DB_CONFIG['password']:
         logger.warning("Database password not set in environment. Using fallback.")
         DB_CONFIG['password'] = 'tower_echo_brain_secret_key_2025'  # Should be from Vault
+
+    # Start WebSocket background tasks
+    try:
+        start_background_tasks()
+        logger.info("WebSocket background tasks started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start WebSocket background tasks: {e}")
 
     uvicorn.run(
         app,

@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anime Production WebSocket Test Client</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: #ffffff;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .panel {
+            background: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #444;
+        }
+
+        .panel h2 {
+            color: #66d9ff;
+            margin-top: 0;
+            border-bottom: 2px solid #66d9ff;
+            padding-bottom: 10px;
+        }
+
+        .control-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #cccccc;
+            font-weight: 500;
+        }
+
+        input, button {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: #333;
+            color: white;
+            font-size: 14px;
+        }
+
+        button {
+            background: #0084ff;
+            cursor: pointer;
+            font-weight: 500;
+            margin-bottom: 10px;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background: #0066cc;
+        }
+
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+
+        button.disconnect {
+            background: #ff4444;
+        }
+
+        button.disconnect:hover {
+            background: #cc3333;
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        .status.connected {
+            background: #1a5f1a;
+            border: 1px solid #4caf50;
+            color: #4caf50;
+        }
+
+        .status.disconnected {
+            background: #5f1a1a;
+            border: 1px solid #f44336;
+            color: #f44336;
+        }
+
+        .status.connecting {
+            background: #5f5f1a;
+            border: 1px solid #ff9800;
+            color: #ff9800;
+        }
+
+        #messages {
+            height: 400px;
+            overflow-y: auto;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .message {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            border-left: 4px solid #666;
+        }
+
+        .message.progress {
+            border-left-color: #2196f3;
+            background: rgba(33, 150, 243, 0.1);
+        }
+
+        .message.connection {
+            border-left-color: #4caf50;
+            background: rgba(76, 175, 80, 0.1);
+        }
+
+        .message.error {
+            border-left-color: #f44336;
+            background: rgba(244, 67, 54, 0.1);
+        }
+
+        .message.system_status {
+            border-left-color: #ff9800;
+            background: rgba(255, 152, 0, 0.1);
+        }
+
+        .timestamp {
+            color: #888;
+            font-size: 10px;
+        }
+
+        .progress-bar {
+            background: #333;
+            border-radius: 10px;
+            overflow: hidden;
+            height: 20px;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            background: linear-gradient(90deg, #4caf50, #66d9ff);
+            height: 100%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .stat {
+            background: #333;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #66d9ff;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #ccc;
+            margin-top: 5px;
+        }
+
+        .clear-btn {
+            width: auto;
+            float: right;
+            padding: 5px 15px;
+            font-size: 12px;
+            margin-top: -10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎌 Anime Production WebSocket Test Client</h1>
+    <p>Real-time testing for WebSocket progress updates and system monitoring</p>
+
+    <div class="container">
+        <!-- Job Progress Panel -->
+        <div class="panel">
+            <h2>Job Progress Monitoring</h2>
+
+            <div id="jobStatus" class="status disconnected">
+                Disconnected
+            </div>
+
+            <div class="control-group">
+                <label for="jobId">Job ID:</label>
+                <input type="text" id="jobId" placeholder="Enter job ID (e.g., test-123)" value="test-job-1">
+            </div>
+
+            <div class="control-group">
+                <label for="serverUrl">Server URL:</label>
+                <input type="text" id="serverUrl" placeholder="ws://localhost:8328" value="ws://192.168.50.135:8328">
+            </div>
+
+            <button id="connectBtn" onclick="connectToJob()">Connect to Job</button>
+            <button id="disconnectBtn" onclick="disconnectFromJob()" class="disconnect" disabled>Disconnect</button>
+
+            <div id="progressContainer" style="display:none;">
+                <h3>Current Progress</h3>
+                <div class="progress-bar">
+                    <div id="progressFill" class="progress-fill" style="width: 0%">0%</div>
+                </div>
+                <div id="progressInfo">
+                    <p><strong>Status:</strong> <span id="currentStatus">-</span></p>
+                    <p><strong>Estimated remaining:</strong> <span id="estimatedTime">-</span></p>
+                    <p><strong>Message:</strong> <span id="statusMessage">-</span></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Monitor Panel -->
+        <div class="panel">
+            <h2>System Monitor</h2>
+
+            <div id="monitorStatus" class="status disconnected">
+                Disconnected
+            </div>
+
+            <button id="monitorBtn" onclick="connectToMonitor()">Connect to System Monitor</button>
+            <button id="disconnectMonitorBtn" onclick="disconnectFromMonitor()" class="disconnect" disabled>Disconnect</button>
+
+            <div id="systemStats" class="stats">
+                <div class="stat">
+                    <div class="stat-value" id="totalJobs">0</div>
+                    <div class="stat-label">Total Jobs</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="activeJobs">0</div>
+                    <div class="stat-label">Active Jobs</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="totalConnections">0</div>
+                    <div class="stat-label">Connections</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="connectedJobs">0</div>
+                    <div class="stat-label">Jobs w/ WS</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Message Log -->
+    <div class="panel" style="margin-top: 20px;">
+        <h2>Message Log
+            <button class="clear-btn" onclick="clearMessages()">Clear</button>
+        </h2>
+        <div id="messages"></div>
+    </div>
+
+    <script>
+        let jobWebSocket = null;
+        let monitorWebSocket = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+
+        function updateStatus(elementId, status, text) {
+            const element = document.getElementById(elementId);
+            element.className = `status ${status}`;
+            element.textContent = text;
+        }
+
+        function addMessage(type, content, timestamp = new Date()) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+
+            messageDiv.innerHTML = `
+                <div class="timestamp">${timestamp.toLocaleTimeString()}</div>
+                <pre>${JSON.stringify(content, null, 2)}</pre>
+            `;
+
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+        }
+
+        function updateProgress(data) {
+            const progressContainer = document.getElementById('progressContainer');
+            const progressFill = document.getElementById('progressFill');
+            const currentStatus = document.getElementById('currentStatus');
+            const estimatedTime = document.getElementById('estimatedTime');
+            const statusMessage = document.getElementById('statusMessage');
+
+            progressContainer.style.display = 'block';
+
+            const progress = data.progress || 0;
+            progressFill.style.width = `${progress}%`;
+            progressFill.textContent = `${progress}%`;
+
+            currentStatus.textContent = data.status || 'unknown';
+            estimatedTime.textContent = data.estimated_remaining ? `${data.estimated_remaining}s` : 'unknown';
+            statusMessage.textContent = data.message || 'No message';
+        }
+
+        function updateSystemStats(data) {
+            if (data.jobs) {
+                document.getElementById('totalJobs').textContent = data.jobs.total || 0;
+                document.getElementById('activeJobs').textContent = data.jobs.active || 0;
+            }
+
+            if (data.websockets) {
+                document.getElementById('totalConnections').textContent = data.websockets.total_connections || 0;
+                document.getElementById('connectedJobs').textContent = data.websockets.jobs_with_connections || 0;
+            }
+        }
+
+        function connectToJob() {
+            const jobId = document.getElementById('jobId').value.trim();
+            const serverUrl = document.getElementById('serverUrl').value.trim();
+
+            if (!jobId || !serverUrl) {
+                alert('Please enter both Job ID and Server URL');
+                return;
+            }
+
+            if (jobWebSocket && jobWebSocket.readyState === WebSocket.OPEN) {
+                jobWebSocket.close();
+            }
+
+            updateStatus('jobStatus', 'connecting', 'Connecting...');
+
+            const wsUrl = `${serverUrl}/ws/${jobId}`;
+            jobWebSocket = new WebSocket(wsUrl);
+
+            jobWebSocket.onopen = function(event) {
+                updateStatus('jobStatus', 'connected', `Connected to job ${jobId}`);
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                reconnectAttempts = 0;
+                addMessage('connection', { event: 'connected', job_id: jobId, url: wsUrl });
+            };
+
+            jobWebSocket.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    addMessage(data.type || 'message', data);
+
+                    if (data.type === 'progress') {
+                        updateProgress(data);
+                    }
+                } catch (e) {
+                    addMessage('error', { error: 'Failed to parse message', raw: event.data });
+                }
+            };
+
+            jobWebSocket.onclose = function(event) {
+                updateStatus('jobStatus', 'disconnected', 'Disconnected');
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+
+                addMessage('connection', {
+                    event: 'disconnected',
+                    code: event.code,
+                    reason: event.reason || 'No reason provided'
+                });
+
+                // Auto-reconnect logic
+                if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    setTimeout(() => {
+                        addMessage('connection', { event: 'reconnect_attempt', attempt: reconnectAttempts });
+                        connectToJob();
+                    }, 2000 * reconnectAttempts);
+                }
+            };
+
+            jobWebSocket.onerror = function(error) {
+                addMessage('error', { error: 'WebSocket error', details: error });
+            };
+        }
+
+        function disconnectFromJob() {
+            if (jobWebSocket) {
+                jobWebSocket.close(1000, 'User requested disconnect');
+                jobWebSocket = null;
+            }
+        }
+
+        function connectToMonitor() {
+            const serverUrl = document.getElementById('serverUrl').value.trim();
+
+            if (!serverUrl) {
+                alert('Please enter Server URL');
+                return;
+            }
+
+            if (monitorWebSocket && monitorWebSocket.readyState === WebSocket.OPEN) {
+                monitorWebSocket.close();
+            }
+
+            updateStatus('monitorStatus', 'connecting', 'Connecting...');
+
+            const wsUrl = `${serverUrl}/ws/monitor`;
+            monitorWebSocket = new WebSocket(wsUrl);
+
+            monitorWebSocket.onopen = function(event) {
+                updateStatus('monitorStatus', 'connected', 'Connected to system monitor');
+                document.getElementById('monitorBtn').disabled = true;
+                document.getElementById('disconnectMonitorBtn').disabled = false;
+                addMessage('connection', { event: 'monitor_connected', url: wsUrl });
+            };
+
+            monitorWebSocket.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'system_status') {
+                        updateSystemStats(data);
+                        // Only add detailed system status to log occasionally
+                        if (Math.random() < 0.1) {
+                            addMessage('system_status', data);
+                        }
+                    } else {
+                        addMessage(data.type || 'monitor', data);
+                    }
+                } catch (e) {
+                    addMessage('error', { error: 'Failed to parse monitor message', raw: event.data });
+                }
+            };
+
+            monitorWebSocket.onclose = function(event) {
+                updateStatus('monitorStatus', 'disconnected', 'Disconnected');
+                document.getElementById('monitorBtn').disabled = false;
+                document.getElementById('disconnectMonitorBtn').disabled = true;
+
+                addMessage('connection', {
+                    event: 'monitor_disconnected',
+                    code: event.code,
+                    reason: event.reason || 'No reason provided'
+                });
+            };
+
+            monitorWebSocket.onerror = function(error) {
+                addMessage('error', { error: 'Monitor WebSocket error', details: error });
+            };
+        }
+
+        function disconnectFromMonitor() {
+            if (monitorWebSocket) {
+                monitorWebSocket.close(1000, 'User requested disconnect');
+                monitorWebSocket = null;
+            }
+        }
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (jobWebSocket) {
+                jobWebSocket.close();
+            }
+            if (monitorWebSocket) {
+                monitorWebSocket.close();
+            }
+        });
+
+        // Initialize with a welcome message
+        addMessage('connection', {
+            event: 'client_ready',
+            message: 'WebSocket test client loaded successfully',
+            instructions: 'Enter a job ID and click Connect to start monitoring'
+        });
+    </script>
+</body>
+</html>
