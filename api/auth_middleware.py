@@ -15,6 +15,8 @@ JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "tower_jwt_secret_2025")  # Should 
 
 
 @lru_cache()
+
+
 def get_jwt_secret():
     """Get JWT secret, preferably from Vault"""
     try:
@@ -109,8 +111,11 @@ from functools import wraps
 
 
 class RateLimiter:
+
+
     def __init__(self):
         self.requests = defaultdict(list)
+
 
     def is_allowed(self, key: str, max_requests: int, window_seconds: int) -> bool:
         """Check if request is allowed within rate limit"""
@@ -135,8 +140,11 @@ rate_limiter = RateLimiter()
 def rate_limit(max_requests: int = 10, window_seconds: int = 60):
     """Rate limiting decorator"""
 
+
     def decorator(func):
         @wraps(func)
+
+
         async def wrapper(*args, **kwargs):
             # Get user from auth if available
             user_data = kwargs.get("user_data", {})
@@ -162,6 +170,8 @@ from auth_middleware import require_auth, optional_auth, rate_limit
 
 @app.post("/api/anime/generate")
 @rate_limit(max_requests=10, window_seconds=60)
+
+
 async def generate_anime(
     request: GenerateRequest,
     user_data: dict = Depends(require_auth)
@@ -171,6 +181,8 @@ async def generate_anime(
     # ... generation logic ...
 
 @app.get("/api/anime/gallery")
+
+
 async def get_gallery(
     user_data: Optional[dict] = Depends(optional_auth)
 ):

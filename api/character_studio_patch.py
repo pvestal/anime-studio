@@ -54,6 +54,8 @@ class CharacterProfile(EchoBrainBase):
 
 
 # Pydantic models for API
+
+
 class CharacterProfileCreate(BaseModel):
     character_name: str
     source_franchise: str = "Tower Studio Original"
@@ -138,6 +140,7 @@ class CharacterProfileResponse(BaseModel):
     updated_at: datetime
     notes: Optional[str]
     is_active: bool
+
 
     class Config:
         from_attributes = True

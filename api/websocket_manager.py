@@ -31,6 +31,7 @@ class ConnectionManager:
     - Error handling and reconnection support
     """
 
+
     def __init__(self, redis_host: str = "localhost", redis_port: int = 6379):
         # Dictionary of job_id -> set of WebSocket connections
         self.connections: Dict[str, Set[WebSocket]] = {}
@@ -52,6 +53,7 @@ class ConnectionManager:
             "user": "patrick",
             "password": "tower_echo_brain_secret_key_2025",
         }
+
 
     async def connect(self, websocket: WebSocket, job_id: str, user_info: Optional[dict] = None):
         """
@@ -95,6 +97,7 @@ class ConnectionManager:
             },
         )
 
+
     async def disconnect(self, websocket: WebSocket):
         """
         Disconnect a WebSocket client with proper cleanup.
@@ -119,6 +122,7 @@ class ConnectionManager:
 
             logger.info(f"WebSocket disconnected from job {job_id}")
 
+
     async def send_to_connection(self, websocket: WebSocket, message: dict):
         """
         Send message to a specific WebSocket connection with error handling.
@@ -133,6 +137,7 @@ class ConnectionManager:
             logger.error(f"Failed to send message to WebSocket: {e}")
             # Clean up failed connection
             await self.disconnect(websocket)
+
 
     async def broadcast_to_job(self, job_id: str, message: dict):
         """
@@ -168,6 +173,7 @@ class ConnectionManager:
             logger.info(
                 f"Cleaned up {len(disconnected_connections)} disconnected WebSockets for job {job_id}"
             )
+
 
     async def send_progress_update(
         self,
@@ -221,6 +227,7 @@ class ConnectionManager:
                 self.redis_client.publish(f"anime_progress:{job_id}", json.dumps(progress_data))
             except Exception as e:
                 logger.warning(f"Failed to publish to Redis: {e}")
+
 
     async def sync_progress_to_db(
         self,
@@ -285,6 +292,7 @@ class ConnectionManager:
         except Exception as e:
             logger.error(f"Failed to sync progress to database for job {job_id}: {e}")
 
+
     async def get_job_connections_count(self, job_id: str) -> int:
         """
         Get number of active connections for a job.
@@ -296,6 +304,7 @@ class ConnectionManager:
             Number of active connections
         """
         return len(self.connections.get(job_id, set()))
+
 
     async def get_all_connections_info(self) -> dict:
         """
@@ -330,6 +339,7 @@ class ConnectionManager:
             "timestamp": datetime.now().isoformat(),
         }
 
+
     async def cleanup_stale_connections(self, timeout_seconds: int = 300):
         """
         Clean up connections that haven't been active for timeout_seconds.
@@ -353,6 +363,7 @@ class ConnectionManager:
 
         if stale_connections:
             logger.info(f"Cleaned up {len(stale_connections)} stale connections")
+
 
     async def ping_all_connections(self):
         """

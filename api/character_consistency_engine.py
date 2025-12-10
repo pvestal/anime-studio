@@ -20,11 +20,13 @@ logger = logging.getLogger(__name__)
 class CharacterConsistencyEngine:
     """Advanced character consistency validation with Echo Brain integration"""
 
+
     def __init__(self, echo_brain_url: str = "http://127.0.0.1:8309"):
         self.echo_brain_url = echo_brain_url
         self.consistency_threshold = 0.85
         self.character_cache = {}
         self.reference_library = {}
+
 
     async def generate_character_sheet(
         self, character_name: str, project_id: int
@@ -84,6 +86,7 @@ class CharacterConsistencyEngine:
             logger.error(f"Error generating character sheet for {character_name}: {e}")
             raise
 
+
     async def validate_character_consistency(
         self, character_name: str, new_image_path: str
     ) -> Dict[str, Any]:
@@ -139,6 +142,7 @@ class CharacterConsistencyEngine:
             logger.error(f"Error validating character consistency: {e}")
             return {"consistency_score": 0.0, "status": "error", "message": str(e)}
 
+
     async def _load_character_definition(
         self, character_name: str, project_id: int
     ) -> Optional[Dict[str, Any]]:
@@ -157,6 +161,7 @@ class CharacterConsistencyEngine:
         except Exception as e:
             logger.error(f"Error loading character definition: {e}")
             return None
+
 
     async def _generate_reference_poses(
         self, character_def: Dict[str, Any]
@@ -203,6 +208,7 @@ class CharacterConsistencyEngine:
 
         return reference_poses
 
+
     async def _generate_expression_bank(
         self, character_def: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
@@ -247,11 +253,13 @@ class CharacterConsistencyEngine:
 
         return expression_bank
 
+
     async def _generate_via_comfyui(self, params: Dict[str, Any], filename_prefix: str) -> str:
         """Generate image via ComfyUI integration"""
         # This would integrate with the existing ComfyUI connector
         # For now, return a placeholder path
         return f"/opt/tower-anime-production/generated/{filename_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+
 
     async def _validate_sheet_consistency(
         self, character_name: str, all_images: List[Dict[str, Any]]
@@ -276,6 +284,7 @@ class CharacterConsistencyEngine:
 
         return consistency_scores
 
+
     async def _calculate_image_similarity(self, image1_path: str, image2_path: str) -> float:
         """Calculate visual similarity between two images"""
         try:
@@ -285,6 +294,7 @@ class CharacterConsistencyEngine:
         except Exception as e:
             logger.error(f"Error calculating image similarity: {e}")
             return 0.0
+
 
     async def _calculate_visual_similarity(
         self, new_image: str, reference_poses: List[Dict[str, Any]]
@@ -297,6 +307,7 @@ class CharacterConsistencyEngine:
             similarity_scores[pose["pose_name"]] = score
 
         return similarity_scores
+
 
     async def _store_canonical_reference(
         self, character_name: str, poses: List[Dict], expressions: List[Dict]
@@ -329,16 +340,18 @@ class CharacterConsistencyEngine:
             logger.error(f"Error storing canonical reference: {e}")
             return ""
 
+
     async def _load_canonical_reference(self, character_name: str) -> Optional[Dict[str, Any]]:
         """Load canonical reference for character"""
         return self.reference_library.get(character_name, {}).get("data")
+
 
     async def _get_echo_quality_assessment(
         self, character_name: str, poses: List[Dict], expressions: List[Dict]
     ) -> Dict[str, Any]:
         """Get Echo Brain's assessment of character sheet quality"""
         try:
-            assessment_prompt = f"""
+            assessment_prompt = """
             As the Production Director, assess the quality and consistency of this character sheet for {character_name}.
 
             Generated content:
@@ -374,12 +387,13 @@ class CharacterConsistencyEngine:
             logger.error(f"Error getting Echo quality assessment: {e}")
             return {"status": "error", "message": str(e)}
 
+
     async def _request_echo_character_analysis(
         self, character_name: str, image_path: str
     ) -> Dict[str, Any]:
         """Request Echo Brain analysis of character generation"""
         try:
-            analysis_prompt = f"""
+            analysis_prompt = """
             Analyze this character generation for {character_name} against established project bible standards.
 
             Focus on:
@@ -410,6 +424,7 @@ class CharacterConsistencyEngine:
         except Exception as e:
             logger.error(f"Error requesting Echo character analysis: {e}")
             return {"status": "error", "message": str(e)}
+
 
     async def _generate_improvement_suggestions(
         self, character_name: str, image_path: str, similarity_scores: Dict[str, float]
@@ -447,12 +462,13 @@ class CharacterConsistencyEngine:
 
         return suggestions
 
+
     async def _request_echo_improvement_suggestions(
         self, character_name: str, scores: Dict[str, float]
     ) -> Dict[str, Any]:
         """Request specific improvement suggestions from Echo Brain"""
         try:
-            suggestion_prompt = f"""
+            suggestion_prompt = """
             Character consistency validation for {character_name} shows these scores:
             {json.dumps(scores, indent=2)}
 
@@ -493,12 +509,16 @@ class CharacterConsistencyEngine:
 
 
 # Echo Integration Functions for Character Consistency
+
+
 class EchoCharacterOrchestrator:
     """Orchestrates character generation workflows through Echo Brain"""
+
 
     def __init__(self, echo_brain_url: str = "http://127.0.0.1:8309"):
         self.echo_brain_url = echo_brain_url
         self.consistency_engine = CharacterConsistencyEngine(echo_brain_url)
+
 
     async def orchestrate_character_pipeline(
         self, character_request: Dict[str, Any]
@@ -548,10 +568,11 @@ class EchoCharacterOrchestrator:
                 "orchestrated_at": datetime.now().isoformat(),
             }
 
+
     async def _parse_character_requirements(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Use Echo Brain to parse and enhance character requirements"""
         try:
-            parsing_prompt = f"""
+            parsing_prompt = """
             Parse and enhance these character generation requirements:
             {json.dumps(request, indent=2)}
 
@@ -584,20 +605,24 @@ class EchoCharacterOrchestrator:
             logger.error(f"Error parsing character requirements: {e}")
             return {"status": "error", "message": str(e)}
 
+
     async def _orchestrate_initial_generation(self, requirements: Dict[str, Any]) -> Dict[str, Any]:
         """Orchestrate initial character generation"""
         # This would integrate with ComfyUI generation
         return {"status": "generated", "image_path": "/path/to/generated/character.png"}
+
 
     async def _quality_assessment_loop(self, generation: Dict[str, Any]) -> Dict[str, Any]:
         """Quality assessment with Echo Brain feedback"""
         # Implement iterative quality improvement
         return {"status": "quality_approved", "score": 0.92}
 
+
     async def _validate_and_score(self, generation: Dict[str, Any]) -> Dict[str, Any]:
         """Validate consistency and provide scoring"""
         # Use consistency engine for validation
         return {"status": "validated", "consistency_score": 0.89}
+
 
     async def _finalize_character(self, validation: Dict[str, Any]) -> Dict[str, Any]:
         """Finalize character and store canonical reference"""

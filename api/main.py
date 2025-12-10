@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 import aiohttp
+import requests
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -100,6 +101,8 @@ if CONSISTENCY_AVAILABLE:
 
 
 # Database Models
+
+
 class AnimeProject(Base):
     __tablename__ = "projects"
     __table_args__ = {"schema": "anime_api"}
@@ -155,6 +158,8 @@ class ProductionJob(Base):
 
 
 # Bible Database Models
+
+
 class ProjectBible(Base):
     __tablename__ = "project_bibles"
     __table_args__ = {"schema": "anime_api"}
@@ -184,6 +189,8 @@ class BibleCharacter(Base):
 
 
 # Pydantic Models
+
+
 class AnimeProjectBase(BaseModel):
     name: str
     description: Optional[str] = None
@@ -198,6 +205,7 @@ class AnimeProjectResponse(AnimeProjectBase):
     status: str
     created_at: datetime
     project_metadata: Optional[dict] = None
+
 
     class Config:
         from_attributes = True
@@ -248,6 +256,8 @@ class IntentClassificationResponse(BaseModel):
 
 
 # Bible Pydantic Models
+
+
 class ProjectBibleCreate(BaseModel):
     title: str
     description: str
@@ -284,6 +294,7 @@ class ProjectBibleResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
     class Config:
         from_attributes = True
 
@@ -299,11 +310,14 @@ class CharacterResponse(BaseModel):
     evolution_arc: List[dict]
     created_at: datetime
 
+
     class Config:
         from_attributes = True
 
 
 # Dependency
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -481,7 +495,7 @@ async def generate_with_fixed_workflow(
 
         # Handle image vs video generation
         if generation_type == "image":
-            print(f"DEBUG: Generating single image")
+            print("DEBUG: Generating single image")
             logger.info(f"Generating single image for prompt: {prompt}")
             # For images, we don't need frame calculations
             frames = 1
@@ -602,7 +616,7 @@ async def generate_with_fixed_workflow(
                         "filename_prefix": f"animatediff_context_{frames}frames_{timestamp}",
                         "format": "video/h264-mp4",
                         "pix_fmt": "yuv420p",
-                        "crf": 18,
+                        "cr": 18,
                         "save_metadata": True,
                         "pingpong": False,
                         "save_output": True,
@@ -706,7 +720,7 @@ async def generate_with_fixed_workflow(
                         "filename_prefix": f"animatediff_simple_{frames}frames_{timestamp}",
                         "format": "video/h264-mp4",
                         "pix_fmt": "yuv420p",
-                        "crf": 18,
+                        "cr": 18,
                         "save_metadata": True,
                         "pingpong": False,
                         "save_output": True,
@@ -813,7 +827,7 @@ async def generate_with_quality_control(
         # Step 3: Quality Assessment (if quality control available)
         if QUALITY_CONTROL_AVAILABLE and quality_orchestrator:
             try:
-                logger.info(f"🔍 Assessing quality of generated content...")
+                logger.info("🔍 Assessing quality of generated content...")
 
                 # Assess the generated content
                 quality_result = await quality_orchestrator.quality_agent.analyze_video_quality(
@@ -853,7 +867,7 @@ async def generate_with_quality_control(
                         "corrections_suggested": quality_result.comfyui_corrections,
                     }
                 else:
-                    logger.info(f"✅ Quality control APPROVED generation")
+                    logger.info("✅ Quality control APPROVED generation")
 
                     # Move to approved folder
                     approved_dir = "/mnt/1TB-storage/ComfyUI/output/approved"
@@ -999,18 +1013,24 @@ async def get_real_comfyui_progress(request_id: str) -> float:
 
 
 @app.get("/api/anime/health")
+
+
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "tower-anime-production"}
 
 
 @app.get("/api/anime-enhanced/health")
+
+
 async def enhanced_health_check():
     """Enhanced health check endpoint (alias for compatibility)"""
     return {"status": "healthy", "service": "tower-anime-production", "enhanced": True}
 
 
 @app.get("/api/anime/status")
+
+
 async def service_status(db: Session = Depends(get_db)):
     """Get comprehensive service status"""
     try:
@@ -1050,6 +1070,8 @@ async def service_status(db: Session = Depends(get_db)):
 
 
 @app.post("/api/anime/test-generate")
+
+
 async def test_generate_with_quality(quality: str = "low", duration: int = 2):
     """Test generation with different quality levels for performance testing - Progressive 2,3,5,10,30 seconds"""
     import time
@@ -1148,7 +1170,7 @@ async def test_generate_with_quality(quality: str = "low", duration: int = 2):
                     "filename_prefix": f"test_context_{quality}_{duration}s_{timestamp}",
                     "format": "video/h264-mp4",
                     "pix_fmt": "yuv420p",
-                    "crf": settings["crf"],
+                    "cr": settings["cr"],
                     "save_metadata": True,
                     "pingpong": False,
                     "save_output": True,
@@ -1255,7 +1277,7 @@ async def test_generate_with_quality(quality: str = "low", duration: int = 2):
                     "filename_prefix": f"test_simple_{quality}_{duration}s_{timestamp}",
                     "format": "video/h264-mp4",
                     "pix_fmt": "yuv420p",
-                    "crf": settings["crf"],
+                    "cr": settings["cr"],
                     "save_metadata": True,
                     "pingpong": False,
                     "save_output": True,
@@ -1305,6 +1327,8 @@ async def test_generate_with_quality(quality: str = "low", duration: int = 2):
 
 
 @app.post("/api/anime/generate")
+
+
 async def generate_anime_content(request: AnimeGenerationRequest, db: Session = Depends(get_db)):
     """Unified anime generation endpoint - handles both image and video based on explicit type selection"""
     try:
@@ -1420,6 +1444,8 @@ async def generate_anime_content(request: AnimeGenerationRequest, db: Session = 
 
 
 @app.post("/api/anime/generate-fast")
+
+
 async def generate_anime_video_fast(request: AnimeGenerationRequest, db: Session = Depends(get_db)):
     """Fast 5-second anime video generation using parallel segments via Echo Brain task queue"""
     try:
@@ -1553,6 +1579,8 @@ async def generate_anime_video_fast(request: AnimeGenerationRequest, db: Session
 
 
 @app.get("/api/anime/projects", response_model=List[AnimeProjectResponse])
+
+
 async def get_projects(db: Session = Depends(get_db)):
     """Get all anime projects"""
     projects = db.query(AnimeProject).all()
@@ -1560,6 +1588,8 @@ async def get_projects(db: Session = Depends(get_db)):
 
 
 @app.post("/api/anime/projects", response_model=AnimeProjectResponse)
+
+
 async def create_project(project: AnimeProjectCreate, db: Session = Depends(get_db)):
     """Create new anime project"""
     db_project = AnimeProject(**project.dict())
@@ -1570,6 +1600,8 @@ async def create_project(project: AnimeProjectCreate, db: Session = Depends(get_
 
 
 @app.patch("/api/anime/projects/{project_id}")
+
+
 async def update_project(project_id: int, updates: dict, db: Session = Depends(get_db)):
     """Update anime project"""
     project = db.query(AnimeProject).filter(AnimeProject.id == project_id).first()
@@ -1587,6 +1619,8 @@ async def update_project(project_id: int, updates: dict, db: Session = Depends(g
 
 
 @app.delete("/api/anime/projects/{project_id}")
+
+
 async def delete_project(project_id: int, db: Session = Depends(get_db)):
     """Delete anime project"""
     project = db.query(AnimeProject).filter(AnimeProject.id == project_id).first()
@@ -1604,6 +1638,8 @@ async def delete_project(project_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/anime/projects/{project_id}/bible", response_model=ProjectBibleResponse)
+
+
 async def create_project_bible(
     project_id: int, bible_data: ProjectBibleCreate, db: Session = Depends(get_db)
 ):
@@ -1636,6 +1672,8 @@ async def create_project_bible(
 
 
 @app.get("/api/anime/projects/{project_id}/bible", response_model=ProjectBibleResponse)
+
+
 async def get_project_bible(project_id: int, db: Session = Depends(get_db)):
     """Get project bible for a project"""
     bible = db.query(ProjectBible).filter(ProjectBible.project_id == project_id).first()
@@ -1646,6 +1684,8 @@ async def get_project_bible(project_id: int, db: Session = Depends(get_db)):
 
 
 @app.put("/api/anime/projects/{project_id}/bible", response_model=ProjectBibleResponse)
+
+
 async def update_project_bible(
     project_id: int, bible_update: ProjectBibleUpdate, db: Session = Depends(get_db)
 ):
@@ -1677,6 +1717,8 @@ async def update_project_bible(
     "/api/anime/projects/{project_id}/bible/characters",
     response_model=CharacterResponse,
 )
+
+
 async def add_character_to_bible(
     project_id: int, character: CharacterDefinition, db: Session = Depends(get_db)
 ):
@@ -1717,6 +1759,8 @@ async def add_character_to_bible(
     "/api/anime/projects/{project_id}/bible/characters",
     response_model=List[CharacterResponse],
 )
+
+
 async def get_bible_characters(project_id: int, db: Session = Depends(get_db)):
     """Get all characters from project bible"""
     bible = db.query(ProjectBible).filter(ProjectBible.project_id == project_id).first()
@@ -1728,6 +1772,8 @@ async def get_bible_characters(project_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/anime/generate/project/{project_id}")
+
+
 async def generate_video_for_project(
     project_id: int, request: AnimeGenerationRequest, db: Session = Depends(get_db)
 ):
@@ -1791,6 +1837,8 @@ async def generate_video_for_project(
 # FRONTEND COMPATIBILITY: Renamed to avoid routing conflicts with
 # /generate/{type}
 @app.post("/api/anime/projects/{project_id}/generate")
+
+
 async def generate_video_frontend_compat(
     project_id: int, request: dict, db: Session = Depends(get_db)
 ):
@@ -1808,6 +1856,8 @@ async def generate_video_frontend_compat(
 
 
 @app.get("/api/anime/generation/{request_id}/status")
+
+
 async def get_generation_status(request_id: str, db: Session = Depends(get_db)):
     """Get generation status by request ID with REAL ComfyUI monitoring and fast generation support"""
     # Try to find the job in database first (supports both ID and ComfyUI job ID lookup)
@@ -1858,7 +1908,7 @@ async def get_generation_status(request_id: str, db: Session = Depends(get_db)):
                     with open(actual_output, "rb") as f:
                         image_data = base64.b64encode(f.read()).decode("utf-8")
 
-                    qc_prompt = f"""
+                    qc_prompt = """
                     STRICT ANATOMICAL ANALYSIS: This should show: "{job.prompt}"
 
                     CRITICAL VALIDATION:
@@ -2108,7 +2158,7 @@ async def merge_video_segments(batch_id: str, total_segments: int, original_requ
             # Look for segment files (they might have various naming patterns)
             possible_patterns = [
                 f"{segments_dir}segment_{i}.mp4",
-                f"{segments_dir}segment_{i}.gif",
+                f"{segments_dir}segment_{i}.gi",
                 f"{output_dir}segment_{batch_id}_{i}.mp4",
                 f"{output_dir}{batch_id}_segment_{i}.mp4",
             ]
@@ -2140,7 +2190,7 @@ async def merge_video_segments(batch_id: str, total_segments: int, original_requ
         ffmpeg_cmd = [
             "ffmpeg",
             "-y",  # -y to overwrite output file
-            "-f",
+            "-",
             "concat",
             "-safe",
             "0",
@@ -2177,12 +2227,16 @@ async def merge_video_segments(batch_id: str, total_segments: int, original_requ
 
 
 @app.post("/api/anime/generation/{request_id}/cancel")
+
+
 async def cancel_generation(request_id: str, db: Session = Depends(get_db)):
     """Cancel generation by request ID"""
     return {"message": "Generation cancelled"}
 
 
 @app.get("/api/anime/projects/{project_id}/history")
+
+
 async def get_project_history(project_id: int, db: Session = Depends(get_db)):
     """Get project history"""
     project = db.query(AnimeProject).filter(AnimeProject.id == project_id).first()
@@ -2204,6 +2258,8 @@ async def get_project_history(project_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/anime/projects/clear-stuck")
+
+
 async def clear_stuck_projects(db: Session = Depends(get_db)):
     """Clear projects stuck in 'generating' status"""
     try:
@@ -2251,6 +2307,8 @@ async def clear_stuck_projects(db: Session = Depends(get_db)):
 
 
 @app.get("/api/anime/media/video/{filename}")
+
+
 async def get_video_file(filename: str):
     """Serve video files"""
     # This would serve actual video files in production
@@ -2258,6 +2316,8 @@ async def get_video_file(filename: str):
 
 
 @app.get("/characters")
+
+
 async def get_characters():
     """Get available characters"""
     return {
@@ -2292,6 +2352,8 @@ async def get_characters():
 
 
 @app.get("/stories")
+
+
 async def get_stories():
     """Get available story templates"""
     return {
@@ -2326,6 +2388,8 @@ async def get_stories():
 
 
 @app.post("/echo/enhance-prompt")
+
+
 async def enhance_prompt_with_echo(request: dict):
     """Enhance prompt using Echo Brain AI"""
     original_prompt = request.get("prompt", "")
@@ -2345,6 +2409,8 @@ async def enhance_prompt_with_echo(request: dict):
 
 
 @app.post("/generate/integrated")
+
+
 async def generate_with_integrated_pipeline(
     request: AnimeGenerationRequest, db: Session = Depends(get_db)
 ):
@@ -2462,6 +2528,8 @@ async def generate_with_integrated_pipeline(
 
 
 @app.post("/generate/professional")
+
+
 async def generate_professional_anime(
     request: AnimeGenerationRequest, db: Session = Depends(get_db)
 ):
@@ -2586,6 +2654,8 @@ async def generate_professional_anime(
 
 
 @app.post("/generate/personal")
+
+
 async def generate_personal_creative(
     request: AnimeGenerationRequest,
     personal: PersonalCreativeRequest = PersonalCreativeRequest(),
@@ -2689,6 +2759,8 @@ async def generate_personal_creative(
 
 
 @app.get("/api/anime/jobs")
+
+
 async def get_all_jobs(
     db: Session = Depends(get_db),
     status: Optional[str] = None,
@@ -2753,6 +2825,8 @@ async def get_all_jobs(
 
 
 @app.get("/api/anime/jobs/{job_id}")
+
+
 async def get_job(job_id: int, db: Session = Depends(get_db)):
     """Get production job details - Main endpoint for frontend"""
     job = db.query(ProductionJob).filter(ProductionJob.id == job_id).first()
@@ -2810,6 +2884,8 @@ def check_and_update_job_timeout(job: ProductionJob, db: Session, timeout_minute
 
 
 @app.get("/api/anime/jobs/{job_id}/status")
+
+
 async def get_job_status(job_id: int, db: Session = Depends(get_db)):
     """Get production job status with real ComfyUI polling"""
     job = db.query(ProductionJob).filter(ProductionJob.id == job_id).first()
@@ -2865,7 +2941,7 @@ async def get_job_status(job_id: int, db: Session = Depends(get_db)):
                             with open(generated_image_path, "rb") as f:
                                 image_data = base64.b64encode(f.read()).decode("utf-8")
 
-                            qc_prompt = f"""
+                            qc_prompt = """
                             STRICT ANATOMICAL ANALYSIS: This should show: "{job.prompt}"
 
                             CRITICAL VALIDATION:
@@ -2963,7 +3039,7 @@ async def get_job_status(job_id: int, db: Session = Depends(get_db)):
                     else:
                         # No image found, mark as completed (backward compatibility)
                         job.status = "completed"
-                        logger.warning(f"⚠️  No image found for QC analysis, marking as completed")
+                        logger.warning("⚠️  No image found for QC analysis, marking as completed")
 
                 db.commit()
                 db.refresh(job)
@@ -3012,6 +3088,8 @@ async def get_job_status(job_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/api/anime/jobs/check-timeouts")
+
+
 async def check_all_timeouts(db: Session = Depends(get_db)):
     """Check all processing jobs for timeouts"""
     # Get all processing jobs
@@ -3034,6 +3112,8 @@ async def check_all_timeouts(db: Session = Depends(get_db)):
 
 
 @app.get("/api/anime/jobs/{job_id}/progress")
+
+
 async def get_job_progress(job_id: int, db: Session = Depends(get_db)):
     """Get real-time job progress from ComfyUI"""
     job = db.query(ProductionJob).filter(ProductionJob.id == job_id).first()
@@ -3139,6 +3219,8 @@ async def get_job_progress(job_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/quality/assess/{job_id}")
+
+
 async def assess_quality(job_id: int, db: Session = Depends(get_db)):
     """Assess quality of generated content using REAL computer vision"""
     job = db.query(ProductionJob).filter(ProductionJob.id == job_id).first()
@@ -3190,6 +3272,8 @@ async def assess_quality(job_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/personal/analysis")
+
+
 async def get_personal_analysis():
     """Get personal creative insights and recommendations"""
     return {
@@ -3216,6 +3300,8 @@ Base.metadata.create_all(bind=engine)
 
 # Static files and Frontend UI routes
 @app.get("/", response_class=HTMLResponse)
+
+
 async def frontend_interface():
     """Serve the main anime production frontend"""
     try:
@@ -3243,6 +3329,8 @@ async def frontend_interface():
 
 
 @app.get("/git", response_class=HTMLResponse)
+
+
 async def git_control_interface():
     """Serve the git control interface"""
     try:
@@ -3273,6 +3361,8 @@ async def git_control_interface():
 
 # Git Control API Endpoints
 @app.post("/api/anime/git/commit")
+
+
 async def commit_scene(commit_data: dict):
     """Commit current scene as new version"""
     try:
@@ -3299,6 +3389,8 @@ async def commit_scene(commit_data: dict):
 
 
 @app.post("/api/anime/git/branch")
+
+
 async def create_branch(branch_data: dict):
     """Create new creative branch"""
     try:
@@ -3324,6 +3416,8 @@ async def create_branch(branch_data: dict):
 
 
 @app.get("/api/anime/git/status")
+
+
 async def git_status():
     """Get current git status for project"""
     try:
@@ -3352,6 +3446,8 @@ async def git_status():
 
 
 @app.get("/api/anime/budget/daily")
+
+
 async def get_daily_budget():
     """Get current daily budget status"""
     return {
@@ -3379,6 +3475,8 @@ class StorylineMarkersRequest(BaseModel):
 
 
 @app.post("/api/anime/git/branches")
+
+
 async def create_git_branch(request: GitBranchRequest):
     """Create a new git branch with Echo Brain's storyline guidance"""
     try:
@@ -3408,6 +3506,8 @@ async def create_git_branch(request: GitBranchRequest):
 
 
 @app.get("/api/anime/git/branches/{project_id}")
+
+
 async def get_project_branches(project_id: int):
     """Get all git branches for a project"""
     try:
@@ -3427,6 +3527,8 @@ async def get_project_branches(project_id: int):
 
 
 @app.post("/api/anime/storyline/analyze/{project_id}")
+
+
 async def analyze_storyline(project_id: int, branch_name: str = "main"):
     """Get Echo Brain's analysis of storyline progression"""
     try:
@@ -3442,6 +3544,8 @@ async def analyze_storyline(project_id: int, branch_name: str = "main"):
 
 
 @app.post("/api/anime/storyline/markers")
+
+
 async def create_storyline_markers(request: StorylineMarkersRequest):
     """Create comprehensive editing markers for video production"""
     try:
@@ -3464,6 +3568,8 @@ async def create_storyline_markers(request: StorylineMarkersRequest):
 
 
 @app.get("/api/anime/git/status/{project_id}")
+
+
 async def get_git_status(project_id: int):
     """Get comprehensive git status for a project including Echo analysis"""
     try:
@@ -3511,6 +3617,8 @@ async def get_git_status(project_id: int):
 
 # Model and Quality Selection Endpoints
 @app.get("/api/anime/models")
+
+
 async def get_available_models():
     """Get available AI models for anime generation - scanning actual filesystem"""
     import glob
@@ -3593,6 +3701,8 @@ async def get_available_models():
 
 
 @app.get("/api/anime/quality-presets")
+
+
 async def get_quality_presets():
     """Get available quality presets for anime generation based on current workflow analysis"""
     # Current workflow analysis: Using 30 steps, CFG 8.0, 1024x1024
@@ -3654,6 +3764,8 @@ async def get_quality_presets():
 
 
 @app.post("/api/anime/config")
+
+
 async def update_configuration(config: dict):
     """Update model and quality configuration - actually modifying workflow files"""
     import json
@@ -3751,6 +3863,8 @@ async def update_configuration(config: dict):
 
 
 @app.post("/api/anime/generate/image")
+
+
 async def generate_anime_image(request: dict, db: Session = Depends(get_db)):
     """Generate a single anime IMAGE with PROJECT-AWARE asset management"""
     import json
@@ -3880,6 +3994,8 @@ async def generate_anime_image(request: dict, db: Session = Depends(get_db)):
 
 
 @app.get("/api/anime/images")
+
+
 async def list_generated_images(db: Session = Depends(get_db), limit: int = 50):
     """List all generated images with their paths"""
     jobs = (
@@ -3907,6 +4023,8 @@ async def list_generated_images(db: Session = Depends(get_db), limit: int = 50):
 
 @app.get("/api/anime/images/{job_id}/status")
 @app.post("/api/intent/classify", response_model=IntentClassificationResponse)
+
+
 async def classify_intent(request: IntentClassificationRequest):
     """
     Explicit intent classification that respects user's explicit type selection.
@@ -3980,6 +4098,8 @@ async def classify_intent(request: IntentClassificationRequest):
 
 
 @app.post("/api/workflow/route")
+
+
 async def route_workflow(classification: dict):
     """
     Route workflow based on classification results.
@@ -4116,6 +4236,8 @@ async def periodic_timeout_checker():
 
 # Start background timeout checker
 @app.on_event("startup")
+
+
 async def startup_event():
     """Start background tasks on app startup"""
     logger.info("Starting anime production API with quality control and timeout monitoring")
@@ -4141,6 +4263,8 @@ async def startup_event():
 
 # Quality Control Endpoints
 @app.post("/api/anime/quality/assess")
+
+
 async def assess_generated_content(file_path: str):
     """Assess quality of generated anime content"""
     if not QUALITY_CONTROL_AVAILABLE:
@@ -4199,6 +4323,8 @@ async def assess_generated_content(file_path: str):
 
 
 @app.post("/api/anime/quality/assess-current-image")
+
+
 async def assess_current_generated_image():
     """Assess the most recently generated image"""
     try:
@@ -4216,6 +4342,8 @@ async def assess_current_generated_image():
 
 
 @app.get("/api/anime/quality/standards")
+
+
 async def get_quality_standards():
     """Get current quality standards and thresholds"""
     return {
@@ -4242,6 +4370,8 @@ async def get_quality_standards():
 
 
 @app.get("/api/anime/quality/status")
+
+
 async def get_quality_system_status():
     """Get quality control system status"""
     if not QUALITY_CONTROL_AVAILABLE:

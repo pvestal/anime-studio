@@ -19,14 +19,15 @@ class ImageGenerationError(Exception):
     """Custom exception for image generation failures"""
 
 
-
 class ComfyUIClient:
     """Production-ready ComfyUI client with retries and error handling"""
+
 
     def __init__(self, base_url: str = "http://localhost:8188", max_retries: int = 3):
         self.base_url = base_url
         self.max_retries = max_retries
         self.retry_delays = [1, 2, 4]  # Exponential backoff
+
 
     async def submit_workflow(self, workflow: Dict[str, Any], job_id: int) -> Optional[str]:
         """
@@ -136,6 +137,7 @@ class ComfyUIClient:
             f"Job {job_id}: All {self.max_retries} attempts failed. Last error: {last_error}"
         )
         raise ImageGenerationError(f"Failed after {self.max_retries} attempts: {last_error}")
+
 
     async def check_job_status(self, prompt_id: str) -> Dict[str, Any]:
         """Check the status of a ComfyUI job"""

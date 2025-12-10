@@ -13,6 +13,7 @@ import numpy as np
 class CharacterConsistencyEngine:
     """Mock implementation matching test expectations"""
 
+
     def __init__(self):
         self.reference_embeddings = {}
         self.style_templates = {}
@@ -20,16 +21,19 @@ class CharacterConsistencyEngine:
         self.consistency_threshold = 0.85
         self.character_versions = {}
 
+
     def generate_embedding(self, image_or_path):
         """Generate embedding from image"""
         # Mock implementation returns random embedding
         return self._extract_face_features(image_or_path).tolist()
+
 
     def _extract_face_features(self, image_or_path):
         """Extract face features from image"""
         # Mock returns 512-dimensional vector
         np.random.seed(hash(str(image_or_path)) % 2**32)
         return np.random.randn(512)
+
 
     def calculate_consistency_score(
         self, embedding1: List[float], embedding2: List[float]
@@ -58,9 +62,11 @@ class CharacterConsistencyEngine:
         # Normalize to 0-1 range
         return max(0.0, min(1.0, (similarity + 1) / 2))
 
+
     def extract_style_template(self, image) -> Dict[str, Any]:
         """Extract style template from image"""
         return self._analyze_art_style(image)
+
 
     def _analyze_art_style(self, image) -> Dict[str, Any]:
         """Analyze art style characteristics"""
@@ -71,9 +77,11 @@ class CharacterConsistencyEngine:
             "detail_level": "medium",
         }
 
+
     def extract_color_palette(self, image) -> Dict[str, List[int]]:
         """Extract color palette from image"""
         return self._extract_dominant_colors(image)
+
 
     def _extract_dominant_colors(self, image) -> Dict[str, List[int]]:
         """Extract dominant colors for character features"""
@@ -83,6 +91,7 @@ class CharacterConsistencyEngine:
             "skin_tone": [250, 220, 190],
             "clothing_primary": [50, 50, 150],
         }
+
 
     def ensure_consistency(self, character_id: int, generation_params: Dict) -> Dict:
         """Modify generation parameters to ensure consistency"""
@@ -97,11 +106,13 @@ class CharacterConsistencyEngine:
 
         return modified_params
 
+
     def add_pose_to_library(self, character_id: int, pose_name: str, pose_data: Dict):
         """Add pose to character library"""
         if character_id not in self.pose_library:
             self.pose_library[character_id] = {}
         self.pose_library[character_id][pose_name] = pose_data
+
 
     def get_pose_from_library(self, character_id: int, pose_name: str) -> Optional[Dict]:
         """Retrieve pose from library"""
@@ -109,9 +120,11 @@ class CharacterConsistencyEngine:
             return self.pose_library[character_id].get(pose_name)
         return None
 
+
     def evaluate_consistency(self, score: float, threshold: float) -> bool:
         """Evaluate if score meets threshold"""
         return score >= threshold
+
 
     def batch_consistency_check(
         self, reference: List[float], candidates: List[List[float]]
@@ -123,15 +136,18 @@ class CharacterConsistencyEngine:
             scores.append(score)
         return scores
 
+
     def add_character_version(self, character_id: int, version_name: str, version_data: Dict):
         """Add character version for evolution tracking"""
         if character_id not in self.character_versions:
             self.character_versions[character_id] = {}
         self.character_versions[character_id][version_name] = version_data
 
+
     def get_character_versions(self, character_id: int) -> Dict:
         """Get all versions of a character"""
         return self.character_versions.get(character_id, {})
+
 
     def apply_consistency_to_workflow(self, workflow: Dict, character_id: int) -> Dict:
         """Apply consistency parameters to ComfyUI workflow"""
@@ -146,6 +162,7 @@ class CharacterConsistencyEngine:
 
         return modified_workflow
 
+
     def save_state(self, path: Path):
         """Save engine state to file"""
         # Convert integer keys to strings for JSON serialization
@@ -159,12 +176,15 @@ class CharacterConsistencyEngine:
         with open(path, "w") as f:
             json.dump(state, f, indent=2, default=str)
 
+
     def load_state(self, path: Path):
         """Load engine state from file"""
         with open(path, "r") as f:
             state = json.load(f)
 
         # Convert string keys back to integers if possible
+
+
         def convert_keys(d):
             result = {}
             for k, v in d.items():

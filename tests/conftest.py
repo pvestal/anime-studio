@@ -14,6 +14,8 @@ pytest_plugins = ("pytest_asyncio",)
 
 
 # Register custom markers
+
+
 def pytest_configure(config):
     """Register custom markers"""
     config.addinivalue_line("markers", "performance: mark test as a performance benchmark")
@@ -25,6 +27,8 @@ def pytest_configure(config):
 
 
 @pytest.fixture
+
+
 def mock_comfyui():
     """Mock ComfyUI API client"""
     mock = Mock()
@@ -51,6 +55,8 @@ def mock_comfyui():
 
 
 @pytest.fixture
+
+
 def mock_database():
     """Mock database connection"""
     mock_db = Mock()
@@ -74,6 +80,8 @@ def mock_database():
 
 
 @pytest.fixture
+
+
 def mock_echo_brain():
     """Mock Echo Brain service"""
     mock = AsyncMock()
@@ -96,6 +104,8 @@ def mock_echo_brain():
 
 
 @pytest.fixture
+
+
 def mock_apple_music():
     """Mock Apple Music service"""
     mock = Mock()
@@ -120,6 +130,8 @@ def mock_apple_music():
 
 
 @pytest.fixture
+
+
 def sample_project():
     """Sample project data"""
     return {
@@ -138,6 +150,8 @@ def sample_project():
 
 
 @pytest.fixture
+
+
 def sample_character():
     """Sample character data"""
     return {
@@ -154,6 +168,8 @@ def sample_character():
 
 
 @pytest.fixture
+
+
 def sample_generation_job():
     """Sample generation job data"""
     return {
@@ -170,6 +186,8 @@ def sample_generation_job():
 
 
 @pytest.fixture
+
+
 def sample_image():
     """Create a sample image array"""
     np.random.seed(42)
@@ -177,6 +195,8 @@ def sample_image():
 
 
 @pytest.fixture
+
+
 def sample_embedding():
     """Generate a sample embedding vector"""
     np.random.seed(42)
@@ -187,6 +207,8 @@ def sample_embedding():
 
 
 @pytest.fixture
+
+
 def temp_project_dir(tmp_path):
     """Create temporary project directory structure"""
     project_dir = tmp_path / "projects" / "test_project"
@@ -201,6 +223,8 @@ def temp_project_dir(tmp_path):
 
 
 @pytest.fixture
+
+
 def sample_workflow():
     """Sample ComfyUI workflow"""
     return {
@@ -228,12 +252,16 @@ def sample_workflow():
 
 
 @pytest.fixture
+
+
 def api_base_url():
     """Base URL for API tests"""
     return "http://localhost:8328/api/anime"
 
 
 @pytest.fixture
+
+
 def auth_headers():
     """Authentication headers for protected endpoints"""
     return {"Authorization": "Bearer test_token_12345", "Content-Type": "application/json"}
@@ -243,6 +271,8 @@ def auth_headers():
 
 
 @pytest.fixture
+
+
 def event_loop():
     """Create an instance of the default event loop for the test session"""
     loop = asyncio.get_event_loop_policy().new_event_loop()
@@ -254,26 +284,36 @@ def event_loop():
 
 
 @pytest.fixture
+
+
 def benchmark_timer():
     """Simple benchmark timer"""
     import time
 
     class Timer:
+
+
         def __init__(self):
             self.times = []
+
 
         def __enter__(self):
             self.start = time.time()
             return self
 
+
         def __exit__(self, *args):
             self.times.append(time.time() - self.start)
 
         @property
+
+
         def average(self):
             return sum(self.times) / len(self.times) if self.times else 0
 
         @property
+
+
         def total(self):
             return sum(self.times)
 
@@ -284,6 +324,8 @@ def benchmark_timer():
 
 
 @pytest.fixture
+
+
 async def mock_websocket():
     """Mock WebSocket connection"""
     ws = AsyncMock()

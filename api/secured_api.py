@@ -173,18 +173,22 @@ DB_CONFIG = {
 
 
 # Request validation
+
+
 class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=500)
     type: str = Field(default="image", pattern="^(image|video)$")
 
     @validator("prompt")
+
+
     def validate_prompt(cls, v):
         """Sanitize and validate prompt"""
         # Remove any SQL-like patterns
         dangerous_patterns = ["DROP", "DELETE", "INSERT", "UPDATE", "--", ";"]
         for pattern in dangerous_patterns:
             if pattern in v.upper():
-                raise ValueError(f"Invalid characters in prompt")
+                raise ValueError("Invalid characters in prompt")
         return v.strip()
 
 
@@ -213,7 +217,7 @@ def ensure_vram_available(required_mb: int = 8000) -> bool:
         logger.warning(f"Insufficient VRAM: {memory['free']}MB < {required_mb}MB required")
         return False
 
-    print(f"✓ Sufficient VRAM available")
+    print("✓ Sufficient VRAM available")
     return True
 
 
@@ -274,6 +278,8 @@ def submit_to_comfyui(prompt: str, job_id: str) -> bool:
 
 
 @app.get("/api/anime/health")
+
+
 async def health():
     """Comprehensive health check with system status (no auth required)"""
     try:
@@ -298,7 +304,7 @@ async def health():
     return {
         "status": "healthy",
         "service": "secured-anime-production",
-        "version": "3.0.0-bulletproof",
+        "version": "3.0.0-bulletproo",
         "timestamp": datetime.now().isoformat(),
         "components": {
             "comfyui": {
@@ -323,6 +329,8 @@ async def health():
 
 
 @app.post("/api/anime/generate")
+
+
 async def generate_anime(request: GenerateRequest, user_data: dict = Depends(require_auth)):
     """Generate anime image (requires authentication)"""
 
@@ -385,6 +393,8 @@ async def generate_anime(request: GenerateRequest, user_data: dict = Depends(req
 
 
 @app.get("/api/anime/generation/{job_id}/status")
+
+
 async def get_job_status(job_id: str, user_data: dict = Depends(optional_auth)):
     """Get job status with real ComfyUI progress tracking"""
 
@@ -417,6 +427,8 @@ async def get_job_status(job_id: str, user_data: dict = Depends(optional_auth)):
 
 
 @app.get("/api/anime/jobs")
+
+
 async def list_user_jobs(user_data: dict = Depends(require_auth)):
     """List user's jobs (requires authentication)"""
 
@@ -427,6 +439,8 @@ async def list_user_jobs(user_data: dict = Depends(require_auth)):
 
 
 @app.get("/api/anime/gallery")
+
+
 async def get_gallery(user_data: Optional[dict] = Depends(optional_auth)):
     """Get public gallery (authentication optional)"""
 
@@ -439,6 +453,8 @@ async def get_gallery(user_data: Optional[dict] = Depends(optional_auth)):
 
 # Admin endpoints
 @app.get("/api/anime/admin/stats")
+
+
 async def admin_stats(user_data: dict = Depends(require_auth)):
     """Admin statistics (requires admin role)"""
 
@@ -458,6 +474,8 @@ async def admin_stats(user_data: dict = Depends(require_auth)):
 
 # Phase-based Workflow Orchestration
 @app.post("/api/anime/orchestrate")
+
+
 async def orchestrate_production(request: dict):
     """Generate anime using simple working generator with GPU management"""
     global active_generation
@@ -524,6 +542,8 @@ async def orchestrate_production(request: dict):
 
 
 @app.get("/api/anime/phases")
+
+
 async def get_production_phases():
     """Get available production phases"""
     return {
@@ -539,7 +559,7 @@ async def get_production_phases():
                 "id": 2,
                 "name": "ANIMATION_LOOP",
                 "description": "Short loops",
-                "engine": "AnimateDiff",
+                "engine": "AnimateDif",
                 "output": "2-second loops",
             },
             {

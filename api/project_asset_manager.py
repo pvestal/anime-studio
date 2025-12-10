@@ -19,11 +19,13 @@ logger = logging.getLogger(__name__)
 class ProjectAssetManager:
     """Manages asset organization and project-specific file structure"""
 
+
     def __init__(self, project_id: int, db_session=None):
         self.project_id = project_id
         self.project_root = Path(f"/mnt/1TB-storage/anime-projects/project_{project_id}")
         self.db_session = db_session
         self.ensure_project_structure()
+
 
     def ensure_project_structure(self):
         """Create standard project directory structure"""
@@ -56,6 +58,7 @@ class ProjectAssetManager:
             }
             with open(metadata_file, "w") as f:
                 json.dump(initial_metadata, f, indent=2)
+
 
     def organize_generated_file(
         self,
@@ -141,6 +144,7 @@ class ProjectAssetManager:
         logger.info(f"Organized file: {source_path} -> {dest_path}")
         return str(dest_path)
 
+
     def get_character_references(self, character_name: str) -> List[str]:
         """Get all reference images for character consistency"""
         char_dir = self.project_root / "assets" / "characters" / character_name
@@ -160,6 +164,7 @@ class ProjectAssetManager:
 
         return [str(f) for f in reference_files]
 
+
     def get_project_style_guide(self) -> Dict:
         """Get project-specific style parameters"""
         metadata_file = self.project_root / "metadata" / "project_info.json"
@@ -168,6 +173,7 @@ class ProjectAssetManager:
                 project_data = json.load(f)
                 return project_data.get("style_guide", {})
         return {}
+
 
     def save_character_reference(
         self, character_name: str, reference_path: str, is_primary: bool = False
@@ -204,6 +210,7 @@ class ProjectAssetManager:
         logger.info(f"Saved character reference: {character_name} -> {dest_path}")
         return str(dest_path)
 
+
     def _calculate_file_hash(self, file_path: Path) -> str:
         """Calculate file hash for integrity checking"""
         hash_sha256 = hashlib.sha256()
@@ -211,6 +218,7 @@ class ProjectAssetManager:
             for chunk in iter(lambda: f.read(4096), b""):
                 hash_sha256.update(chunk)
         return hash_sha256.hexdigest()
+
 
     def _update_project_metadata(self, asset_metadata: Dict):
         """Update project metadata with new asset information"""
@@ -236,6 +244,7 @@ class ProjectAssetManager:
 
         with open(metadata_file, "w") as f:
             json.dump(project_data, f, indent=2)
+
 
     def _store_asset_in_db(self, metadata: Dict):
         """Store asset metadata in database"""
@@ -275,8 +284,10 @@ class ProjectAssetManager:
 class CharacterConsistencyManager:
     """Manages character consistency across generations"""
 
+
     def __init__(self, project_asset_manager: ProjectAssetManager):
         self.asset_manager = project_asset_manager
+
 
     def prepare_character_workflow(
         self, character_name: str, base_workflow: Dict, scene_context: Optional[Dict] = None
@@ -321,6 +332,7 @@ class CharacterConsistencyManager:
         # This would require more complex workflow modification
 
         return enhanced_workflow
+
 
     def _get_character_tags(self, character_name: str, style_guide: Dict) -> str:
         """Generate character-specific prompt tags"""

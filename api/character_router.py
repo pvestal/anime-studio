@@ -29,6 +29,8 @@ character_router = APIRouter(prefix="/api/anime", tags=["characters"])
 
 
 # Dependency for Echo Brain database
+
+
 def get_echo_brain_db():
     db = EchoBrainSessionLocal()
     try:
@@ -38,6 +40,8 @@ def get_echo_brain_db():
 
 
 @character_router.get("/characters", response_model=List[CharacterProfileResponse])
+
+
 async def list_characters(echo_db: Session = Depends(get_echo_brain_db)):
     """List all active characters from Echo Brain database"""
     characters = echo_db.query(CharacterProfile).filter(CharacterProfile.is_active).all()
@@ -45,6 +49,8 @@ async def list_characters(echo_db: Session = Depends(get_echo_brain_db)):
 
 
 @character_router.get("/characters/{character_id}", response_model=CharacterProfileResponse)
+
+
 async def get_character(character_id: int, echo_db: Session = Depends(get_echo_brain_db)):
     """Get specific character by ID"""
     character = (
@@ -58,6 +64,8 @@ async def get_character(character_id: int, echo_db: Session = Depends(get_echo_b
 
 
 @character_router.post("/characters", response_model=CharacterProfileResponse)
+
+
 async def create_character(
     character: CharacterProfileCreate, echo_db: Session = Depends(get_echo_brain_db)
 ):
@@ -80,6 +88,8 @@ async def create_character(
 
 
 @character_router.put("/characters/{character_id}", response_model=CharacterProfileResponse)
+
+
 async def update_character(
     character_id: int,
     character_update: CharacterProfileUpdate,
@@ -108,6 +118,8 @@ async def update_character(
 
 
 @character_router.delete("/characters/{character_id}")
+
+
 async def delete_character(character_id: int, echo_db: Session = Depends(get_echo_brain_db)):
     """Soft delete character (set is_active = False)"""
     character = (
@@ -127,6 +139,8 @@ async def delete_character(character_id: int, echo_db: Session = Depends(get_ech
 
 
 @character_router.post("/characters/{character_id}/generate")
+
+
 async def generate_character_image(
     character_id: int,
     generation_request: CharacterGenerationRequest,
@@ -171,6 +185,8 @@ async def generate_character_image(
 
 
 @character_router.get("/characters/{character_id}/prompt-preview")
+
+
 async def preview_character_prompt(
     character_id: int, additional_prompt: str = "", echo_db: Session = Depends(get_echo_brain_db)
 ):

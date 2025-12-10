@@ -64,6 +64,7 @@ class GenerationStatus(BaseModel):
 class EnhancedGenerationAPI:
     """Enhanced API with rich UX features"""
 
+
     def __init__(self):
         self.app = FastAPI(title="Enhanced Anime Generation API")
         self.ux_manager = UXEnhancementManager()
@@ -76,10 +77,13 @@ class EnhancedGenerationAPI:
 
         self._setup_routes()
 
+
     def _setup_routes(self):
         """Setup API routes with enhanced features"""
 
         @self.app.post("/api/generate/enhanced")
+
+
         async def generate_enhanced(
             request: EnhancedGenerationRequest, background_tasks: BackgroundTasks
         ):
@@ -108,6 +112,8 @@ class EnhancedGenerationAPI:
             }
 
         @self.app.websocket("/ws/generate/{job_id}")
+
+
         async def websocket_endpoint(websocket: WebSocket, job_id: str):
             """WebSocket endpoint for real-time updates"""
             await websocket.accept()
@@ -130,6 +136,8 @@ class EnhancedGenerationAPI:
                     del self.websocket_connections[job_id]
 
         @self.app.get("/api/generate/status/{job_id}")
+
+
         async def get_status(job_id: str):
             """Get generation status with rich details"""
             if job_id not in self.active_jobs:
@@ -138,6 +146,8 @@ class EnhancedGenerationAPI:
             return self.active_jobs[job_id]
 
         @self.app.post("/api/generate/batch")
+
+
         async def generate_batch(
             requests: List[EnhancedGenerationRequest], background_tasks: BackgroundTasks
         ):
@@ -168,6 +178,8 @@ class EnhancedGenerationAPI:
             }
 
         @self.app.get("/api/generate/queue")
+
+
         async def get_queue_status():
             """Get current queue status with visualization data"""
             queued = [j for j in self.active_jobs.values() if j.status == "queued"]
@@ -193,6 +205,7 @@ class EnhancedGenerationAPI:
                 "gpu_status": self.gpu_optimizer.get_gpu_stats().__dict__,
             }
 
+
     async def _process_generation(self, job_id: str, request: EnhancedGenerationRequest):
         """Process generation with enhanced UX features"""
         try:
@@ -202,6 +215,7 @@ class EnhancedGenerationAPI:
 
             # Setup WebSocket connection for updates
             websocket = self.websocket_connections.get(job_id)
+
 
             async def send_update(message: str):
                 if websocket:
@@ -320,6 +334,7 @@ class EnhancedGenerationAPI:
             # Cleanup
             self.ux_manager.cleanup_job(job_id)
 
+
     def _prepare_generation_params(self, request: EnhancedGenerationRequest) -> Dict[str, Any]:
         """Prepare generation parameters based on request"""
         # Get workflow configuration
@@ -342,6 +357,7 @@ class EnhancedGenerationAPI:
         }
 
         return params
+
 
     async def _execute_with_progress(
         self, job_id: str, params: Dict[str, Any], request: EnhancedGenerationRequest
@@ -379,6 +395,7 @@ class EnhancedGenerationAPI:
             output_paths.append(output_path)
 
         return output_paths
+
 
     async def _attempt_recovery(
         self,

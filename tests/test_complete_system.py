@@ -23,6 +23,7 @@ TIMEOUT = 60  # Maximum time for a generation
 class TestSystemHealth:
     """Test overall system health"""
 
+
     def test_comfyui_accessible(self):
         """Verify ComfyUI is running and accessible"""
         try:
@@ -35,6 +36,7 @@ class TestSystemHealth:
         except requests.exceptions.RequestException as e:
             pytest.fail(f"ComfyUI connection failed: {e}")
 
+
     def test_anime_api_accessible(self):
         """Verify Anime API is running and accessible"""
         try:
@@ -46,6 +48,7 @@ class TestSystemHealth:
             print(f"✅ Anime API healthy - {health.get('uptime', 'unknown')} uptime")
         except requests.exceptions.RequestException as e:
             pytest.fail(f"Anime API connection failed: {e}")
+
 
     def test_gpu_availability(self):
         """Check GPU is available for generation"""
@@ -67,6 +70,7 @@ class TestSystemHealth:
 
 class TestGenerationWorkflow:
     """Test complete generation workflow"""
+
 
     def test_simple_generation(self):
         """Test a simple image generation end-to-end"""
@@ -100,6 +104,7 @@ class TestGenerationWorkflow:
 
         print("✅ Simple generation completed successfully")
 
+
     def test_optimized_draft_mode(self):
         """Test optimized draft mode generation (should be <30 seconds)"""
         start_time = time.time()
@@ -125,6 +130,7 @@ class TestGenerationWorkflow:
         assert duration < 30, f"Draft mode took {duration:.1f}s, expected <30s"
 
         print(f"✅ Draft mode completed in {duration:.1f} seconds")
+
 
     def test_character_consistency(self):
         """Test character consistency between generations"""
@@ -160,6 +166,7 @@ class TestGenerationWorkflow:
 
         print("✅ Character consistency test passed")
 
+
     def test_error_handling(self):
         """Test error handling with invalid parameters"""
         # Test with invalid size
@@ -184,6 +191,7 @@ class TestGenerationWorkflow:
             # Check if auto-recovery happened
             result = response.json()
             print(f"✅ Auto-recovery applied: {result}")
+
 
     def _wait_for_job_completion(self, job_id: str, timeout: int = TIMEOUT) -> bool:
         """Wait for a job to complete"""
@@ -215,6 +223,7 @@ class TestGenerationWorkflow:
 class TestAPIEndpoints:
     """Test all API endpoints are working"""
 
+
     def test_health_endpoint(self):
         """Test health endpoint"""
         response = requests.get(f"{API_URL}/api/anime/health")
@@ -223,6 +232,7 @@ class TestAPIEndpoints:
         health = response.json()
         assert health["status"] == "healthy"
         print(f"✅ Health endpoint: {health}")
+
 
     def test_projects_endpoints(self):
         """Test project management endpoints"""
@@ -247,6 +257,7 @@ class TestAPIEndpoints:
         else:
             print("⚠️ Project endpoints not implemented yet")
 
+
     def test_character_endpoints(self):
         """Test character management endpoints"""
         response = requests.post(
@@ -260,13 +271,14 @@ class TestAPIEndpoints:
 
         if response.status_code == 200:
             response.json()
-            print(f"✅ Character endpoints working")
+            print("✅ Character endpoints working")
         else:
             print("⚠️ Character endpoints not implemented yet")
 
 
 class TestPerformance:
     """Test performance optimizations"""
+
 
     def test_generation_speed(self):
         """Verify generation speed improvements"""

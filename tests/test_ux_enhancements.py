@@ -23,12 +23,14 @@ from ux_enhancements import (ContextualProgressTracker, GenerationPhase, Preview
 class TestGenerationPhase:
     """Test generation phase enum"""
 
+
     def test_phase_progression(self):
         """Test that phases progress in correct order"""
         phases = list(GenerationPhase)
         for i, phase in enumerate(phases[:-1]):
             next_phase = phases[i + 1]
             assert phase.end_percent <= next_phase.start_percent
+
 
     def test_phase_messages(self):
         """Test that all phases have user-friendly messages"""
@@ -38,8 +40,10 @@ class TestGenerationPhase:
             assert phase.start_percent >= 0
             assert phase.end_percent <= 100
 
+
 class TestProgressUpdate:
     """Test progress update data structure"""
+
 
     def test_websocket_message_format(self):
         """Test WebSocket message serialization"""
@@ -63,14 +67,19 @@ class TestProgressUpdate:
         assert data["percentage"] == 25.0
         assert data["preview_image"] == "data:image/jpeg;base64,test"
 
+
 class TestPreviewGenerator:
     """Test preview image generation"""
 
     @pytest.fixture
+
+
     def preview_gen(self):
         return PreviewGenerator()
 
     @pytest.mark.asyncio
+
+
     async def test_generate_preview_from_latents(self, preview_gen, tmp_path):
         """Test preview generation from image file"""
         # Create a test image
@@ -91,12 +100,16 @@ class TestPreviewGenerator:
         assert len(decoded) > 0
 
     @pytest.mark.asyncio
+
+
     async def test_preview_with_missing_file(self, preview_gen):
         """Test preview generation with missing file"""
         preview = await preview_gen.generate_preview_from_latents("/nonexistent/file.jpg")
         assert preview is None
 
     @pytest.mark.asyncio
+
+
     async def test_progress_visualization(self, preview_gen):
         """Test progress bar visualization creation"""
         preview = await preview_gen.create_progress_visualization(
@@ -106,13 +119,17 @@ class TestPreviewGenerator:
 
         assert preview.startswith("data:image/jpeg;base64,")
 
+
 class TestContextualProgressTracker:
     """Test contextual progress tracking"""
 
     @pytest.fixture
+
+
     def tracker(self):
         preview_gen = PreviewGenerator()
         return ContextualProgressTracker(preview_gen)
+
 
     def test_start_job(self, tracker):
         """Test job initialization"""
@@ -121,6 +138,7 @@ class TestContextualProgressTracker:
         assert "job-123" in tracker.job_progress
         assert tracker.job_progress["job-123"]["total_steps"] == 30
         assert tracker.job_progress["job-123"]["current_step"] == 0
+
 
     def test_phase_tracking(self, tracker):
         """Test phase transition tracking"""
@@ -135,6 +153,7 @@ class TestContextualProgressTracker:
         # Check that phase time was tracked
         assert "LOADING_MODELS" in tracker.job_progress["job-456"]["phase_times"]
         assert tracker.job_progress["job-456"]["phase_times"]["LOADING_MODELS"] > 0
+
 
     def test_time_estimation(self, tracker):
         """Test remaining time estimation"""
@@ -152,6 +171,8 @@ class TestContextualProgressTracker:
         assert estimate > 0
 
     @pytest.mark.asyncio
+
+
     async def test_progress_update_creation(self, tracker):
         """Test creating rich progress updates"""
         tracker.start_job("job-999", total_steps=20)
@@ -168,6 +189,7 @@ class TestContextualProgressTracker:
         assert update.message == "Custom progress message"
         assert update.phase == GenerationPhase.GENERATING_LATENTS
 
+
     def test_phase_determination(self, tracker):
         """Test correct phase determination based on percentage"""
         assert tracker._determine_phase(3) == GenerationPhase.INITIALIZING
@@ -175,6 +197,7 @@ class TestContextualProgressTracker:
         assert tracker._determine_phase(30) == GenerationPhase.GENERATING_LATENTS
         assert tracker._determine_phase(60) == GenerationPhase.REFINING_DETAILS
         assert tracker._determine_phase(100) == GenerationPhase.COMPLETE
+
 
     def test_contextual_message_generation(self, tracker):
         """Test contextual message generation"""
@@ -184,14 +207,19 @@ class TestContextualProgressTracker:
         assert message
         assert len(message) > 10
 
+
 class TestSmartErrorRecovery:
     """Test smart error recovery system"""
 
     @pytest.fixture
+
+
     def recovery(self):
         return SmartErrorRecovery()
 
     @pytest.mark.asyncio
+
+
     async def test_memory_error_handling(self, recovery):
         """Test handling of out of memory errors"""
         error = Exception("CUDA out of memory")
@@ -207,6 +235,8 @@ class TestSmartErrorRecovery:
         assert len(response["suggestions"]) > 0
 
     @pytest.mark.asyncio
+
+
     async def test_model_error_handling(self, recovery):
         """Test handling of model not found errors"""
         error = Exception("Model not found: anime_v3")
@@ -220,6 +250,8 @@ class TestSmartErrorRecovery:
         assert "Use the default model" in response["suggestions"][0]
 
     @pytest.mark.asyncio
+
+
     async def test_timeout_error_handling(self, recovery):
         """Test handling of timeout errors"""
         error = Exception("Request timeout after 60 seconds")
@@ -233,6 +265,8 @@ class TestSmartErrorRecovery:
         assert response["auto_fix_params"]["timeout"] == 300
 
     @pytest.mark.asyncio
+
+
     async def test_auto_recovery_attempt(self, recovery):
         """Test automatic recovery with fixes"""
         error_response = {
@@ -244,6 +278,8 @@ class TestSmartErrorRecovery:
         original_request = {"width": 1024, "height": 1024, "prompt": "test"}
 
         # Mock retry function
+
+
         async def mock_retry(params):
             assert params["width"] == 512
             assert params["height"] == 512
@@ -257,6 +293,8 @@ class TestSmartErrorRecovery:
         assert result["success"] is True
 
     @pytest.mark.asyncio
+
+
     async def test_no_auto_recovery_when_disabled(self, recovery):
         """Test that auto-recovery respects the flag"""
         error_response = {
@@ -270,14 +308,19 @@ class TestSmartErrorRecovery:
 
         assert result is None
 
+
 class TestUXEnhancementManager:
     """Test the main UX enhancement manager"""
 
     @pytest.fixture
+
+
     def ux_manager(self):
         return UXEnhancementManager()
 
     @pytest.mark.asyncio
+
+
     async def test_track_generation(self, ux_manager):
         """Test generation tracking initialization"""
         mock_websocket = AsyncMock()
@@ -296,6 +339,8 @@ class TestUXEnhancementManager:
         mock_websocket.assert_called_once()
 
     @pytest.mark.asyncio
+
+
     async def test_progress_updates_via_websocket(self, ux_manager):
         """Test that progress updates are sent via WebSocket"""
         mock_websocket = AsyncMock()
@@ -322,6 +367,8 @@ class TestUXEnhancementManager:
         assert message_data["job_id"] == "job-123"
 
     @pytest.mark.asyncio
+
+
     async def test_error_handling_with_recovery(self, ux_manager):
         """Test error handling with auto-recovery"""
         mock_websocket = AsyncMock()
@@ -329,6 +376,7 @@ class TestUXEnhancementManager:
 
         error = Exception("CUDA out of memory")
         context = {"width": 1024, "height": 1024}
+
 
         async def mock_retry(params):
             assert params["width"] == 512  # Auto-fixed
@@ -345,6 +393,7 @@ class TestUXEnhancementManager:
         assert mock_websocket.call_count >= 2
         assert result["success"] is True
 
+
     def test_cleanup_job(self, ux_manager):
         """Test job cleanup"""
         ux_manager.websocket_connections["cleanup-job"] = Mock()
@@ -357,14 +406,18 @@ class TestUXEnhancementManager:
         assert "cleanup-job" not in ux_manager.progress_tracker.job_progress
         assert "cleanup-job" not in ux_manager.progress_tracker.start_times
 
+
 class TestIntegrationScenarios:
     """Test complete UX scenarios end-to-end"""
 
     @pytest.mark.asyncio
+
+
     async def test_successful_generation_flow(self):
         """Test a complete successful generation with progress updates"""
         manager = UXEnhancementManager()
         received_messages = []
+
 
         async def mock_websocket(message):
             received_messages.append(json.loads(message))
@@ -391,10 +444,13 @@ class TestIntegrationScenarios:
         manager.cleanup_job("success-job")
 
     @pytest.mark.asyncio
+
+
     async def test_error_recovery_flow(self):
         """Test error occurrence and recovery flow"""
         manager = UXEnhancementManager()
         received_messages = []
+
 
         async def mock_websocket(message):
             received_messages.append(json.loads(message))
@@ -406,6 +462,7 @@ class TestIntegrationScenarios:
         context = {"width": 2048, "height": 2048, "batch_size": 4}
 
         recovery_called = False
+
 
         async def mock_retry(params):
             nonlocal recovery_called

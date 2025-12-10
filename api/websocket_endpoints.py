@@ -25,6 +25,8 @@ def add_websocket_endpoints(app: FastAPI, jobs: Dict[str, dict], get_comfyui_job
     """
 
     @app.websocket("/ws/{job_id}")
+
+
     async def websocket_progress_endpoint(websocket: WebSocket, job_id: str):
         """
         WebSocket endpoint for real-time progress updates.
@@ -137,6 +139,8 @@ def add_websocket_endpoints(app: FastAPI, jobs: Dict[str, dict], get_comfyui_job
             await connection_manager.disconnect(websocket)
 
     @app.websocket("/ws/monitor")
+
+
     async def websocket_system_monitor(websocket: WebSocket):
         """
         WebSocket endpoint for system-wide monitoring.
@@ -201,6 +205,8 @@ def add_websocket_endpoints(app: FastAPI, jobs: Dict[str, dict], get_comfyui_job
             logger.error(f"System monitor WebSocket error: {e}")
 
     @app.get("/api/anime/websocket/status")
+
+
     async def websocket_status():
         """
         Get WebSocket connection status and statistics.

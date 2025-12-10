@@ -61,6 +61,8 @@ active_generation = None
 
 
 # Pydantic models for API requests
+
+
 class ProjectCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=1000)
@@ -90,18 +92,22 @@ class GenerateRequest(BaseModel):
     character_id: Optional[int] = None
 
     @validator("prompt")
+
+
     def validate_prompt(cls, v):
         """Sanitize and validate prompt"""
         # Remove any SQL-like patterns
         dangerous_patterns = ["DROP", "DELETE", "INSERT", "UPDATE", "--", ";"]
         for pattern in dangerous_patterns:
             if pattern in v.upper():
-                raise ValueError(f"Invalid characters in prompt")
+                raise ValueError("Invalid characters in prompt")
         return v.strip()
 
 
 # Application startup and shutdown
 @app.on_event("startup")
+
+
 async def startup_event():
     """Initialize database on startup"""
     try:
@@ -113,6 +119,8 @@ async def startup_event():
 
 
 @app.on_event("shutdown")
+
+
 async def shutdown_event():
     """Close database connections on shutdown"""
     try:
@@ -123,6 +131,8 @@ async def shutdown_event():
 
 
 # Existing GPU and ComfyUI functions (unchanged)
+
+
 async def check_gpu_availability() -> bool:
     """Check if GPU is available for new generation"""
     global active_generation
@@ -214,6 +224,8 @@ async def get_comfyui_job_status(prompt_id: str) -> Dict:
 
 # Database-driven API endpoints
 @app.get("/api/anime/health")
+
+
 async def health(db: Session = Depends(get_db)):
     """Comprehensive health check including database status"""
     try:
@@ -262,6 +274,8 @@ async def health(db: Session = Depends(get_db)):
 
 # Project CRUD endpoints
 @app.get("/api/anime/projects")
+
+
 async def list_projects(
     skip: int = 0,
     limit: int = 100,
@@ -293,6 +307,8 @@ async def list_projects(
 
 
 @app.post("/api/anime/projects")
+
+
 async def create_project(
     request: ProjectCreateRequest,
     db: Session = Depends(get_db),
@@ -332,6 +348,8 @@ async def create_project(
 
 
 @app.get("/api/anime/projects/{project_id}")
+
+
 async def get_project(
     project_id: int, db: Session = Depends(get_db), user_data: dict = Depends(optional_auth)
 ):
@@ -377,6 +395,8 @@ async def get_project(
 
 # Character CRUD endpoints
 @app.get("/api/anime/characters")
+
+
 async def list_characters(
     project_id: Optional[int] = None,
     skip: int = 0,
@@ -413,6 +433,8 @@ async def list_characters(
 
 
 @app.post("/api/anime/characters")
+
+
 async def create_character(
     request: CharacterCreateRequest,
     db: Session = Depends(get_db),
@@ -459,6 +481,8 @@ async def create_character(
 
 # Job status and progress endpoints
 @app.get("/api/anime/jobs/{job_id}/progress")
+
+
 async def get_job_progress(
     job_id: int, db: Session = Depends(get_db), user_data: dict = Depends(optional_auth)
 ):

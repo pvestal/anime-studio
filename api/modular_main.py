@@ -54,6 +54,8 @@ app.add_middleware(
 
 
 # Pydantic models
+
+
 class GenerationRequest(BaseModel):
     prompt: str
     project_name: Optional[str] = None
@@ -67,6 +69,8 @@ class ProjectCreate(BaseModel):
 
 
 # Database dependency
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -77,12 +81,16 @@ def get_db():
 
 # API Endpoints
 @app.get("/api/anime/health")
+
+
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "service": "modular-anime-production"}
 
 
 @app.get("/api/anime/projects")
+
+
 async def list_projects(db: Session = Depends(get_db)):
     """List all projects."""
     projects = db.query(AnimeProject).all()
@@ -98,6 +106,8 @@ async def list_projects(db: Session = Depends(get_db)):
 
 
 @app.post("/api/anime/projects")
+
+
 async def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     """Create a new project."""
 
@@ -116,6 +126,8 @@ async def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
 
 
 @app.post("/api/anime/generate")
+
+
 async def generate_anime(
     request: GenerationRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
 ):
@@ -232,6 +244,8 @@ async def process_job(job_id: int):
 
 
 @app.get("/api/anime/jobs/{job_id}")
+
+
 async def get_job_status(job_id: int, db: Session = Depends(get_db)):
     """Get job status."""
 
@@ -250,6 +264,8 @@ async def get_job_status(job_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/anime/jobs/{job_id}/output")
+
+
 async def get_job_output(job_id: int, db: Session = Depends(get_db)):
     """Get job output file path."""
 

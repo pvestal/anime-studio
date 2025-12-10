@@ -38,6 +38,8 @@ OUTPUT_BASE_PATH = "/mnt/1TB-storage/ComfyUI/output"
 
 
 # Request models
+
+
 class ImageRequest(BaseModel):
     prompt: str = Field(..., description="Text prompt for image generation")
     width: int = Field(512, ge=256, le=2048, description="Image width")
@@ -64,6 +66,8 @@ status_monitor = None
 
 
 @app.on_event("startup")
+
+
 async def startup_event():
     """Initialize all components"""
     global job_manager, workflow_generator, database_manager, comfyui_connector, status_monitor, file_manager
@@ -98,6 +102,8 @@ async def startup_event():
 
 
 @app.post("/api/anime/generate/image")
+
+
 async def generate_image(request: ImageRequest, background_tasks: BackgroundTasks):
     """Generate a single image"""
     try:
@@ -131,6 +137,8 @@ async def generate_image(request: ImageRequest, background_tasks: BackgroundTask
 
 
 @app.post("/api/anime/generate/video")
+
+
 async def generate_video(request: VideoRequest, background_tasks: BackgroundTasks):
     """Generate a video"""
     try:
@@ -164,6 +172,8 @@ async def generate_video(request: VideoRequest, background_tasks: BackgroundTask
 
 
 @app.get("/api/anime/jobs/{job_id}")
+
+
 async def get_job_status(job_id: int):
     """Get actual job status with ComfyUI verification"""
     try:
@@ -203,6 +213,8 @@ async def get_job_status(job_id: int):
 
 
 @app.get("/api/anime/jobs")
+
+
 async def list_jobs(status: Optional[str] = None, limit: int = 50):
     """List jobs with optional status filter"""
     try:
@@ -225,6 +237,8 @@ async def list_jobs(status: Optional[str] = None, limit: int = 50):
 
 
 @app.get("/api/anime/queue")
+
+
 async def get_queue_status():
     """Get ComfyUI queue status and job statistics"""
     try:
@@ -291,6 +305,8 @@ async def submit_job_to_comfyui(job_id: int, workflow: Dict[str, Any]):
 
 
 @app.on_event("shutdown")
+
+
 async def shutdown_event():
     """Clean shutdown of all components"""
     try:

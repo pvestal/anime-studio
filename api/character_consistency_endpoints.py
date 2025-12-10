@@ -31,6 +31,8 @@ try:
     from main import get_db
 except ImportError:
     # Fallback dependency definition
+
+
     def get_db():
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
@@ -48,6 +50,8 @@ except ImportError:
 
 
 @router.post("/generate/consistent", response_model=dict)
+
+
 async def generate_with_consistency(
     request: EnhancedGenerationRequest, db: Session = Depends(get_db)
 ):
@@ -66,6 +70,7 @@ async def generate_with_consistency(
             from sqlalchemy.ext.declarative import declarative_base
 
             Base = declarative_base()
+
 
             class ProductionJob(Base):
                 __tablename__ = "production_jobs"
@@ -188,6 +193,8 @@ async def generate_with_consistency(
 
 
 @router.post("/characters/{character_id}/versions", response_model=CharacterVersionResponse)
+
+
 async def create_character_version_endpoint(
     character_id: int, version_data: CharacterVersionCreate, db: Session = Depends(get_db)
 ):
@@ -243,6 +250,8 @@ async def create_character_version_endpoint(
 
 
 @router.get("/characters/{character_id}/versions", response_model=List[CharacterVersionResponse])
+
+
 async def get_character_versions(
     character_id: int, db: Session = Depends(get_db), include_non_canonical: bool = False
 ):
@@ -288,6 +297,8 @@ async def get_character_versions(
 
 
 @router.get("/characters/{character_id}/canonical-seed")
+
+
 async def get_canonical_seed(character_id: int, db: Session = Depends(get_db)):
     """Get the canonical seed for a character"""
     try:
@@ -315,6 +326,8 @@ async def get_canonical_seed(character_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/characters/{character_id}/analyze-consistency")
+
+
 async def analyze_character_consistency(
     character_id: int, generation_data: Dict[str, Any], db: Session = Depends(get_db)
 ):
@@ -334,6 +347,8 @@ async def analyze_character_consistency(
 
 
 @router.get("/jobs/{job_id}/consistency-info")
+
+
 async def get_job_consistency_info(job_id: int, db: Session = Depends(get_db)):
     """Get consistency information for a production job"""
     try:
@@ -375,6 +390,8 @@ async def get_job_consistency_info(job_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/workflow-templates")
+
+
 async def list_workflow_templates():
     """List available workflow templates"""
 

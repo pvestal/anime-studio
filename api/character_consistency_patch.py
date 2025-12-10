@@ -81,8 +81,10 @@ class ConsistencyAnalysisResult(BaseModel):
 class SeedManager:
     """Manages seed generation and storage for character consistency"""
 
+
     def __init__(self):
         self.seed_cache = {}
+
 
     def generate_deterministic_seed(self, character_name: str, prompt: str) -> int:
         """Generate deterministic seed based on character and prompt"""
@@ -90,6 +92,7 @@ class SeedManager:
         hash_object = hashlib.md5(combined.encode())
         # Convert first 8 bytes of hash to integer
         return int.from_bytes(hash_object.digest()[:8], byteorder="big")
+
 
     def get_character_canonical_seed(self, db_session, character_id: int) -> Optional[int]:
         """Get canonical seed for character from database"""
@@ -107,6 +110,7 @@ class SeedManager:
         ).fetchone()
 
         return result[0] if result else None
+
 
     def save_workflow_template(self, character_name: str, workflow: Dict[str, Any]) -> str:
         """Save workflow template to file system"""
@@ -129,8 +133,10 @@ class SeedManager:
 class CharacterConsistencyEngine:
     """Engine for managing character consistency across generations"""
 
+
     def __init__(self):
         self.seed_manager = SeedManager()
+
 
     def analyze_consistency(
         self, character_id: int, new_generation_data: Dict[str, Any], db_session
@@ -193,6 +199,7 @@ class CharacterConsistencyEngine:
             issues_detected=issues,
         )
 
+
     def _compare_workflows(self, workflow1: Optional[Dict], workflow2: Optional[Dict]) -> float:
         """Compare two workflows for similarity"""
         if workflow1 is None and workflow2 is None:
@@ -214,6 +221,8 @@ class CharacterConsistencyEngine:
 
 
 # Database helper functions
+
+
 def create_character_version(db_session, version_data: CharacterVersionCreate) -> int:
     """Create new character version in database"""
     from sqlalchemy import text

@@ -12,8 +12,10 @@ import pytest
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+
 class TestAPIImports:
     """Test that API modules can be imported"""
+
 
     def test_secured_api_imports(self):
         """Test secured_api can be imported"""
@@ -22,6 +24,7 @@ class TestAPIImports:
             assert secured_api is not None
         except ImportError as e:
             pytest.skip(f"Could not import secured_api: {e}")
+
 
     def test_models_import(self):
         """Test models can be imported"""
@@ -35,6 +38,7 @@ class TestAPIImports:
         except ImportError as e:
             pytest.skip(f"Could not import models: {e}")
 
+
     def test_websocket_manager_import(self):
         """Test websocket manager can be imported"""
         try:
@@ -44,8 +48,10 @@ class TestAPIImports:
         except ImportError as e:
             pytest.skip(f"Could not import websocket_manager: {e}")
 
+
 class TestOptimizationModules:
     """Test optimization modules"""
+
 
     def test_optimized_workflows_import(self):
         """Test optimized workflows can be imported"""
@@ -56,6 +62,7 @@ class TestOptimizationModules:
         except ImportError as e:
             pytest.skip(f"Could not import optimized_workflows: {e}")
 
+
     def test_generation_cache_import(self):
         """Test generation cache can be imported"""
         try:
@@ -64,6 +71,7 @@ class TestOptimizationModules:
             assert hasattr(generation_cache, 'GenerationCache')
         except ImportError as e:
             pytest.skip(f"Could not import generation_cache: {e}")
+
 
     def test_performance_monitor_import(self):
         """Test performance monitor can be imported"""
@@ -74,8 +82,10 @@ class TestOptimizationModules:
         except ImportError as e:
             pytest.skip(f"Could not import performance_monitor: {e}")
 
+
 class TestBasicFunctionality:
     """Test basic functionality without external dependencies"""
+
 
     def test_workflow_configuration(self):
         """Test workflow configurations are valid"""
@@ -98,6 +108,7 @@ class TestBasicFunctionality:
         except Exception as e:
             pytest.skip(f"Could not test workflows: {e}")
 
+
     def test_cache_initialization(self):
         """Test cache can be initialized"""
         try:
@@ -110,6 +121,7 @@ class TestBasicFunctionality:
 
         except Exception as e:
             pytest.skip(f"Could not test cache: {e}")
+
 
     def test_models_structure(self):
         """Test database models have expected structure"""

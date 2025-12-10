@@ -43,12 +43,16 @@ class JobStatus(BaseModel):
 
 
 @app.get("/health")
+
+
 async def health():
     """Health check endpoint"""
     return {"status": "healthy", "service": "working-anime-api"}
 
 
 @app.post("/api/anime/generate")
+
+
 async def generate(request: GenerateRequest):
     """Generate anime content with proper VRAM management"""
 
@@ -125,6 +129,8 @@ async def generate(request: GenerateRequest):
 
 
 @app.get("/api/anime/generation/{job_id}/status")
+
+
 async def get_status(job_id: str):
     """Get real job status"""
 
@@ -168,6 +174,8 @@ async def get_status(job_id: str):
 
 
 @app.get("/api/anime/jobs")
+
+
 async def list_jobs():
     """List all jobs"""
     return list(jobs.values())

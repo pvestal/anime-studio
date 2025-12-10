@@ -5,7 +5,6 @@ This script modifies the main.py file to include the new endpoints
 """
 
 
-
 def integrate_consistency_system():
     """Integrate the character consistency system into main.py"""
 

@@ -164,6 +164,8 @@ class Episode(Base):
 
 
 # Supporting models for character consistency
+
+
 class CharacterAnchor(Base):
     """Character anchors for consistency"""
 

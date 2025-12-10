@@ -18,11 +18,15 @@ import websocket
 sys.path.insert(0, '/opt/tower-anime-production/api')
 
 @pytest.fixture
+
+
 def api_url():
     """Base API URL for testing"""
     return "http://localhost:8329"
 
 @pytest.fixture
+
+
 def mock_comfyui():
     """Mock ComfyUI for testing"""
     with patch('enhanced_generation_api.requests') as mock_requests:
@@ -32,8 +36,10 @@ def mock_comfyui():
         mock_requests.post.return_value = mock_response
         yield mock_requests
 
+
 class TestEnhancedGenerationFlow:
     """Test enhanced generation user flows"""
+
 
     def test_simple_generation_request(self, api_url, mock_comfyui):
         """Test a simple generation request"""
@@ -59,6 +65,7 @@ class TestEnhancedGenerationFlow:
 
         return data["job_id"]
 
+
     def test_status_endpoint(self, api_url):
         """Test status retrieval"""
         # Create a job first
@@ -80,6 +87,7 @@ class TestEnhancedGenerationFlow:
         assert status["status"] in ["queued", "processing", "completed", "failed"]
         assert "progress" in status
         assert "message" in status
+
 
     def test_batch_generation(self, api_url):
         """Test batch generation with multiple requests"""
@@ -106,6 +114,7 @@ class TestEnhancedGenerationFlow:
         assert len(data["job_ids"]) == 3
         assert data["total_jobs"] == 3
 
+
     def test_queue_status(self, api_url):
         """Test queue status endpoint"""
         response = requests.get(f"{api_url}/api/generate/queue")
@@ -118,6 +127,7 @@ class TestEnhancedGenerationFlow:
         assert "completed_today" in queue_data
         assert "average_time_seconds" in queue_data
         assert "gpu_status" in queue_data
+
 
     def test_websocket_connection(self, api_url):
         """Test WebSocket connection for real-time updates"""
@@ -133,8 +143,10 @@ class TestEnhancedGenerationFlow:
 
         received_messages = []
 
+
         def on_message(ws, message):
             received_messages.append(json.loads(message))
+
 
         def on_error(ws, error):
             print(f"WebSocket error: {error}")
@@ -159,8 +171,10 @@ class TestEnhancedGenerationFlow:
 
         ws.close()
 
+
 class TestErrorRecoveryFlow:
     """Test error recovery scenarios"""
+
 
     def test_auto_recovery_on_memory_error(self, api_url):
         """Test automatic recovery when out of memory"""
@@ -190,6 +204,7 @@ class TestErrorRecoveryFlow:
         if status["status"] == "recovering":
             assert status["recovery_attempted"] is True
 
+
     def test_no_recovery_when_disabled(self, api_url):
         """Test that recovery doesn't happen when disabled"""
         response = requests.post(
@@ -217,8 +232,10 @@ class TestErrorRecoveryFlow:
         if status["status"] == "failed":
             assert status.get("recovery_attempted", False) is False
 
+
 class TestUserPreferences:
     """Test user preference handling"""
+
 
     def test_preview_preference(self, api_url):
         """Test preview enable/disable preference"""
@@ -247,6 +264,7 @@ class TestUserPreferences:
 
         assert response.status_code == 200
 
+
     def test_batch_variations(self, api_url):
         """Test generating variations with seed offsets"""
         response = requests.post(
@@ -271,8 +289,10 @@ class TestUserPreferences:
         # Would eventually have 4 output paths
         # assert len(status["output_paths"]) == 4
 
+
 class TestPerformanceMetrics:
     """Test performance tracking and metrics"""
+
 
     def test_generation_timing(self, api_url):
         """Test that generation timing is tracked"""
@@ -306,6 +326,7 @@ class TestPerformanceMetrics:
             duration = time.time() - start_time
             # Draft mode should be fast
             assert duration < 30, f"Draft mode took {duration}s, expected <30s"
+
 
     def test_queue_metrics(self, api_url):
         """Test queue metrics calculation"""
