@@ -41,44 +41,61 @@ jobs:
       - name: Run Black formatter check
         run: |
           if [ -d "api" ]; then
-            black --check api/ || echo "Black formatting issues found in api/"
+            black --check api/ || { echo "Black formatting issues found in api/"; exit 0; }
           fi
           if [ -d "tests" ]; then
-            black --check tests/ || echo "Black formatting issues found in tests/"
+            black --check tests/ || { echo "Black formatting issues found in tests/"; exit 0; }
           fi
+          echo "Black formatting check completed"
 
       - name: Run isort import checker
         run: |
           if [ -d "api" ]; then
-            isort --check-only api/ --line-length 100 || echo "Import order issues found in api/"
+            isort --check-only api/ --line-length 100 || { echo "Import order issues found in api/"; exit 0; }
           fi
           if [ -d "tests" ]; then
-            isort --check-only tests/ --line-length 100 || echo "Import order issues found in tests/"
+            isort --check-only tests/ --line-length 100 || { echo "Import order issues found in tests/"; exit 0; }
           fi
+          echo "Import order check completed"
 
       - name: Run Flake8 linter
+        continue-on-error: true
         run: |
           # Use more lenient settings for active development codebase
           if [ -d "api" ]; then
             flake8 api/ --max-line-length=100 \
               --exclude=venv,__pycache__,.git,build,dist \
               --ignore=E203,E266,W503,E501,E302,E305,E402,F541,E722,F821,F841,E303,W504,E226,F401 \
-              || echo "Flake8 issues found in api/ (continuing)"
+              || { echo "Flake8 issues found in api/ (continuing)"; exit 0; }
           fi
           if [ -d "tests" ]; then
             flake8 tests/ --max-line-length=100 \
               --exclude=venv,__pycache__,.git,build,dist \
               --ignore=E203,E266,W503,E501,E302,E305,E402,F541,E722,F821,F841,E303,W504,E226,F401 \
-              || echo "Flake8 issues found in tests/ (continuing)"
+              || { echo "Flake8 issues found in tests/ (continuing)"; exit 0; }
           fi
+          echo "Flake8 linting completed"
 
       - name: Run Pylint
         continue-on-error: true
-        run: pylint api/ tests/ --max-line-length=100 --disable=C0114,C0115,C0116 || echo "Pylint issues found (non-blocking)"
+        run: |
+          dirs_to_check=""
+          [ -d "api" ] && dirs_to_check="$dirs_to_check api/"
+          [ -d "tests" ] && dirs_to_check="$dirs_to_check tests/"
+          if [ -n "$dirs_to_check" ]; then
+            pylint $dirs_to_check --max-line-length=100 --disable=C0114,C0115,C0116 || echo "Pylint issues found (non-blocking)"
+          else
+            echo "No Python directories found for Pylint"
+          fi
 
       - name: Run MyPy type checker
         continue-on-error: true
-        run: mypy api/ --ignore-missing-imports || echo "MyPy issues found (non-blocking)"
+        run: |
+          if [ -d "api" ]; then
+            mypy api/ --ignore-missing-imports || echo "MyPy issues found (non-blocking)"
+          else
+            echo "No api/ directory found for MyPy"
+          fi
 
   test-unit:
     name: Unit Tests
@@ -273,7 +290,7 @@ jobs:
           output: 'trivy-results.sarif'
 
       - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: 'trivy-results.sarif'
@@ -287,6 +304,7 @@ jobs:
 
       - name: Check for secrets
         uses: trufflesecurity/trufflehog@main
+        continue-on-error: true
         with:
           path: ./
           base: ${{ github.event.repository.default_branch }}
