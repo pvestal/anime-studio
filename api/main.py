@@ -81,9 +81,7 @@ except ImportError as e:
         quality_orchestrator = None
 
 # Database Setup
-DATABASE_URL = (
-    "postgresql://patrick:tower_echo_brain_secret_key_2025@localhost/anime_production?options=-csearch_path%3Danime_api,public"
-)
+DATABASE_URL = "postgresql://patrick:tower_echo_brain_secret_key_2025@localhost/anime_production?options=-csearch_path%3Danime_api,public"
 
 # ComfyUI Configuration
 COMFYUI_URL = "http://localhost:8188"
@@ -117,7 +115,6 @@ if CONSISTENCY_AVAILABLE:
 class AnimeProject(Base):
     __tablename__ = "projects"
 
-
     id = Column(Integer, primary_key=True, index=True)
     name = Column(
         String, index=True
@@ -139,7 +136,6 @@ class AnimeProject(Base):
 
 class ProductionJob(Base):
     __tablename__ = "production_jobs"
-
 
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer)
