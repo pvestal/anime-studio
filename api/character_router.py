@@ -13,16 +13,23 @@ from sqlalchemy.orm import Session, sessionmaker
 
 # Import character models and schemas
 sys.path.append("/tmp")
-from character_studio_patch import (CharacterGenerationRequest, CharacterProfile,
-                                    CharacterProfileCreate, CharacterProfileResponse,
-                                    CharacterProfileUpdate, build_character_prompt)
+from character_studio_patch import (
+    CharacterGenerationRequest,
+    CharacterProfile,
+    CharacterProfileCreate,
+    CharacterProfileResponse,
+    CharacterProfileUpdate,
+    build_character_prompt,
+)
 
 # Database setup for Echo Brain
 ECHO_BRAIN_DATABASE_URL = (
     "postgresql://patrick:tower_echo_brain_secret_key_2025@192.168.50.135/echo_brain"
 )
 echo_brain_engine = create_engine(ECHO_BRAIN_DATABASE_URL)
-EchoBrainSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=echo_brain_engine)
+EchoBrainSessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, bind=echo_brain_engine
+)
 
 # Create router
 character_router = APIRouter(prefix="/api/anime", tags=["characters"])
@@ -40,18 +47,20 @@ def get_echo_brain_db():
 
 
 @character_router.get("/characters", response_model=List[CharacterProfileResponse])
-
-
 async def list_characters(echo_db: Session = Depends(get_echo_brain_db)):
     """List all active characters from Echo Brain database"""
-    characters = echo_db.query(CharacterProfile).filter(CharacterProfile.is_active).all()
+    characters = (
+        echo_db.query(CharacterProfile).filter(CharacterProfile.is_active).all()
+    )
     return characters
 
 
-@character_router.get("/characters/{character_id}", response_model=CharacterProfileResponse)
-
-
-async def get_character(character_id: int, echo_db: Session = Depends(get_echo_brain_db)):
+@character_router.get(
+    "/characters/{character_id}", response_model=CharacterProfileResponse
+)
+async def get_character(
+    character_id: int, echo_db: Session = Depends(get_echo_brain_db)
+):
     """Get specific character by ID"""
     character = (
         echo_db.query(CharacterProfile)
@@ -64,8 +73,6 @@ async def get_character(character_id: int, echo_db: Session = Depends(get_echo_b
 
 
 @character_router.post("/characters", response_model=CharacterProfileResponse)
-
-
 async def create_character(
     character: CharacterProfileCreate, echo_db: Session = Depends(get_echo_brain_db)
 ):
@@ -87,9 +94,9 @@ async def create_character(
     return db_character
 
 
-@character_router.put("/characters/{character_id}", response_model=CharacterProfileResponse)
-
-
+@character_router.put(
+    "/characters/{character_id}", response_model=CharacterProfileResponse
+)
 async def update_character(
     character_id: int,
     character_update: CharacterProfileUpdate,
@@ -118,9 +125,9 @@ async def update_character(
 
 
 @character_router.delete("/characters/{character_id}")
-
-
-async def delete_character(character_id: int, echo_db: Session = Depends(get_echo_brain_db)):
+async def delete_character(
+    character_id: int, echo_db: Session = Depends(get_echo_brain_db)
+):
     """Soft delete character (set is_active = False)"""
     character = (
         echo_db.query(CharacterProfile)
@@ -139,8 +146,6 @@ async def delete_character(character_id: int, echo_db: Session = Depends(get_ech
 
 
 @character_router.post("/characters/{character_id}/generate")
-
-
 async def generate_character_image(
     character_id: int,
     generation_request: CharacterGenerationRequest,
@@ -185,10 +190,10 @@ async def generate_character_image(
 
 
 @character_router.get("/characters/{character_id}/prompt-preview")
-
-
 async def preview_character_prompt(
-    character_id: int, additional_prompt: str = "", echo_db: Session = Depends(get_echo_brain_db)
+    character_id: int,
+    additional_prompt: str = "",
+    echo_db: Session = Depends(get_echo_brain_db),
 ):
     """Preview the enhanced prompt that would be generated for a character"""
     character = (

@@ -106,7 +106,9 @@ if CONSISTENCY_AVAILABLE:
     print(f"✅ Character consistency system integrated into {main_py_path}")
     print(f"✅ Backup saved at {backup_path}")
     print("\nNew endpoints available:")
-    print("- POST /api/anime/generate/consistent - Enhanced generation with seed tracking")
+    print(
+        "- POST /api/anime/generate/consistent - Enhanced generation with seed tracking"
+    )
     print("- POST /api/anime/characters/{id}/versions - Create character version")
     print("- GET /api/anime/characters/{id}/versions - Get character versions")
     print("- GET /api/anime/characters/{id}/canonical-seed - Get canonical seed")
@@ -139,4 +141,6 @@ if __name__ == "__main__":
     print("🚀 Integrating Character Consistency System...")
     integrate_consistency_system()
     test_database_integration()
-    print("\n✨ Integration complete! Restart the anime production service to use new features.")
+    print(
+        "\n✨ Integration complete! Restart the anime production service to use new features."
+    )

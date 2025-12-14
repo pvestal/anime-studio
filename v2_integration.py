@@ -39,7 +39,7 @@ class V2DatabaseManager:
     def connect(self):
         """Initialize database connection pool"""
         try:
-            self.pool = psycopg2.pool.SimpleConnectionPool(
+            self.pool = pool.SimpleConnectionPool(
                 1, 10, **DB_CONFIG
             )
             logger.info("Database pool initialized")

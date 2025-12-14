@@ -51,7 +51,9 @@ async def generate_project_aware_image(
 
     try:
         # Get base workflow
-        workflow_path = "/opt/tower-anime-production/workflows/comfyui/single_image.json"
+        workflow_path = (
+            "/opt/tower-anime-production/workflows/comfyui/single_image.json"
+        )
         with open(workflow_path, "r") as f:
             base_workflow = json.load(f)
 
@@ -62,7 +64,9 @@ async def generate_project_aware_image(
             )
 
             # Update the prompt with character consistency tags
-            enhanced_prompt = enhance_prompt_for_character(prompt, character_name, asset_manager)
+            enhanced_prompt = enhance_prompt_for_character(
+                prompt, character_name, asset_manager
+            )
         else:
             enhanced_workflow = base_workflow
             enhanced_prompt = prompt
@@ -94,7 +98,11 @@ async def generate_project_aware_image(
 
         # Generate image using production function
         generation_result = await generate_anime_image_production(
-            prompt=enhanced_prompt, quality=quality, style=style, job_id=job_id, db=db_session
+            prompt=enhanced_prompt,
+            quality=quality,
+            style=style,
+            job_id=job_id,
+            db=db_session,
         )
 
         if not generation_result["success"]:

@@ -15,6 +15,7 @@ import redis
 import requests
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
 # Import modular components
 from models import AnimeProject, Base, ProductionJob
 from pydantic import BaseModel
@@ -24,7 +25,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from workflows import get_simple_image_workflow, get_video_workflow
 
 # Configuration
-DATABASE_URL = "postgresql://patrick:tower_echo_brain_secret_key_2025@localhost/anime_production"
+DATABASE_URL = (
+    "postgresql://patrick:tower_echo_brain_secret_key_2025@localhost/anime_production"
+)
 REDIS_URL = "redis://localhost:6379"
 COMFYUI_URL = "http://localhost:8188"
 OUTPUT_DIR = Path("/mnt/1TB-storage/ComfyUI/output")
@@ -81,16 +84,12 @@ def get_db():
 
 # API Endpoints
 @app.get("/api/anime/health")
-
-
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "service": "modular-anime-production"}
 
 
 @app.get("/api/anime/projects")
-
-
 async def list_projects(db: Session = Depends(get_db)):
     """List all projects."""
     projects = db.query(AnimeProject).all()
@@ -106,8 +105,6 @@ async def list_projects(db: Session = Depends(get_db)):
 
 
 @app.post("/api/anime/projects")
-
-
 async def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     """Create a new project."""
 
@@ -122,14 +119,18 @@ async def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_project)
 
-    return {"id": db_project.id, "name": db_project.name, "message": "Project created successfully"}
+    return {
+        "id": db_project.id,
+        "name": db_project.name,
+        "message": "Project created successfully",
+    }
 
 
 @app.post("/api/anime/generate")
-
-
 async def generate_anime(
-    request: GenerationRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
+    request: GenerationRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
 ):
     """Generate anime image or video."""
 
@@ -187,7 +188,9 @@ async def process_job(job_id: int):
 
         # Generate based on type
         if job.job_type == "image":
-            workflow = get_simple_image_workflow(job.prompt, job.metadata_.get("negative_prompt"))
+            workflow = get_simple_image_workflow(
+                job.prompt, job.metadata_.get("negative_prompt")
+            )
         else:
             workflow = get_video_workflow(job.prompt)
 
@@ -244,8 +247,6 @@ async def process_job(job_id: int):
 
 
 @app.get("/api/anime/jobs/{job_id}")
-
-
 async def get_job_status(job_id: int, db: Session = Depends(get_db)):
     """Get job status."""
 
@@ -264,8 +265,6 @@ async def get_job_status(job_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/api/anime/jobs/{job_id}/output")
-
-
 async def get_job_output(job_id: int, db: Session = Depends(get_db)):
     """Get job output file path."""
 

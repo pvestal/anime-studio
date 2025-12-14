@@ -22,14 +22,14 @@ class ImageGenerationError(Exception):
 class ComfyUIClient:
     """Production-ready ComfyUI client with retries and error handling"""
 
-
     def __init__(self, base_url: str = "http://localhost:8188", max_retries: int = 3):
         self.base_url = base_url
         self.max_retries = max_retries
         self.retry_delays = [1, 2, 4]  # Exponential backoff
 
-
-    async def submit_workflow(self, workflow: Dict[str, Any], job_id: int) -> Optional[str]:
+    async def submit_workflow(
+        self, workflow: Dict[str, Any], job_id: int
+    ) -> Optional[str]:
         """
         Submit workflow to ComfyUI with proper error handling and retries
 
@@ -85,21 +85,31 @@ class ComfyUIClient:
                         if "error" in result:
                             error_detail = result.get("error", {})
                             error_msg = error_detail.get("message", "Unknown error")
-                            logger.error(f"Job {job_id}: ComfyUI workflow error: {error_msg}")
+                            logger.error(
+                                f"Job {job_id}: ComfyUI workflow error: {error_msg}"
+                            )
 
                             # Check if it's a recoverable error
                             if "no_prompt" in str(error_detail.get("type", "")):
                                 # Workflow format issue - don't retry
-                                raise ImageGenerationError(f"Workflow format error: {error_msg}")
+                                raise ImageGenerationError(
+                                    f"Workflow format error: {error_msg}"
+                                )
                             else:
                                 # Other error - retry
-                                raise ImageGenerationError(f"ComfyUI processing error: {error_msg}")
+                                raise ImageGenerationError(
+                                    f"ComfyUI processing error: {error_msg}"
+                                )
 
                         # Extract prompt_id
                         prompt_id = result.get("prompt_id")
                         if not prompt_id:
-                            logger.error(f"Job {job_id}: No prompt_id in response: {result}")
-                            raise ImageGenerationError("ComfyUI did not return a prompt_id")
+                            logger.error(
+                                f"Job {job_id}: No prompt_id in response: {result}"
+                            )
+                            raise ImageGenerationError(
+                                "ComfyUI did not return a prompt_id"
+                            )
 
                         # Success!
                         logger.info(
@@ -136,8 +146,9 @@ class ComfyUIClient:
         logger.error(
             f"Job {job_id}: All {self.max_retries} attempts failed. Last error: {last_error}"
         )
-        raise ImageGenerationError(f"Failed after {self.max_retries} attempts: {last_error}")
-
+        raise ImageGenerationError(
+            f"Failed after {self.max_retries} attempts: {last_error}"
+        )
 
     async def check_job_status(self, prompt_id: str) -> Dict[str, Any]:
         """Check the status of a ComfyUI job"""
@@ -159,7 +170,9 @@ class ComfyUIClient:
                             return {"status": "pending", "progress": 0.0}
 
                 # Check history for completion
-                async with session.get(f"{self.base_url}/history/{prompt_id}") as response:
+                async with session.get(
+                    f"{self.base_url}/history/{prompt_id}"
+                ) as response:
                     history = await response.json()
 
                     if prompt_id in history:
@@ -193,7 +206,11 @@ class ComfyUIClient:
 
 
 async def generate_anime_image_production(
-    prompt: str, quality: str = "high", style: str = "anime", job_id: int = None, db=None
+    prompt: str,
+    quality: str = "high",
+    style: str = "anime",
+    job_id: int = None,
+    db=None,
 ) -> Dict[str, Any]:
     """
     Production-ready image generation with full error handling
@@ -233,7 +250,11 @@ async def generate_anime_image_production(
             "_meta": {"title": "Negative Prompt"},
         },
         "4": {
-            "inputs": {"width": settings["width"], "height": settings["height"], "batch_size": 1},
+            "inputs": {
+                "width": settings["width"],
+                "height": settings["height"],
+                "batch_size": 1,
+            },
             "class_type": "EmptyLatentImage",
             "_meta": {"title": "Latent Image"},
         },
@@ -259,7 +280,10 @@ async def generate_anime_image_production(
             "_meta": {"title": "VAE Decode"},
         },
         "7": {
-            "inputs": {"filename_prefix": f"anime_{quality}_{job_id or seed}", "images": ["6", 0]},
+            "inputs": {
+                "filename_prefix": f"anime_{quality}_{job_id or seed}",
+                "images": ["6", 0],
+            },
             "class_type": "SaveImage",
             "_meta": {"title": "Save Image"},
         },

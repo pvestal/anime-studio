@@ -6,6 +6,7 @@ Fixes the broken job status API and provides actual working progress tracking
 """
 
 import logging
+
 # Import our modular components
 import sys
 from typing import Any, Dict, Optional
@@ -15,8 +16,14 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 sys.path.append("/opt/tower-anime-production")
-from modules import (ComfyUIConnector, DatabaseManager, FileManager, JobManager, StatusMonitor,
-                     WorkflowGenerator)
+from modules import (
+    ComfyUIConnector,
+    DatabaseManager,
+    FileManager,
+    JobManager,
+    StatusMonitor,
+    WorkflowGenerator,
+)
 from modules.job_manager import JobStatus, JobType
 
 # Configure logging
@@ -66,8 +73,6 @@ status_monitor = None
 
 
 @app.on_event("startup")
-
-
 async def startup_event():
     """Initialize all components"""
     global job_manager, workflow_generator, database_manager, comfyui_connector, status_monitor, file_manager
@@ -102,8 +107,6 @@ async def startup_event():
 
 
 @app.post("/api/anime/generate/image")
-
-
 async def generate_image(request: ImageRequest, background_tasks: BackgroundTasks):
     """Generate a single image"""
     try:
@@ -137,8 +140,6 @@ async def generate_image(request: ImageRequest, background_tasks: BackgroundTask
 
 
 @app.post("/api/anime/generate/video")
-
-
 async def generate_video(request: VideoRequest, background_tasks: BackgroundTasks):
     """Generate a video"""
     try:
@@ -172,8 +173,6 @@ async def generate_video(request: VideoRequest, background_tasks: BackgroundTask
 
 
 @app.get("/api/anime/jobs/{job_id}")
-
-
 async def get_job_status(job_id: int):
     """Get actual job status with ComfyUI verification"""
     try:
@@ -213,8 +212,6 @@ async def get_job_status(job_id: int):
 
 
 @app.get("/api/anime/jobs")
-
-
 async def list_jobs(status: Optional[str] = None, limit: int = 50):
     """List jobs with optional status filter"""
     try:
@@ -237,8 +234,6 @@ async def list_jobs(status: Optional[str] = None, limit: int = 50):
 
 
 @app.get("/api/anime/queue")
-
-
 async def get_queue_status():
     """Get ComfyUI queue status and job statistics"""
     try:
@@ -282,7 +277,9 @@ async def submit_job_to_comfyui(job_id: int, workflow: Dict[str, Any]):
 
             if prompt_id:
                 # Update job with ComfyUI ID
-                job_manager.update_job_status(job_id, JobStatus.PROCESSING, comfyui_id=prompt_id)
+                job_manager.update_job_status(
+                    job_id, JobStatus.PROCESSING, comfyui_id=prompt_id
+                )
 
                 # Get job type for monitoring
                 job = job_manager.get_job(job_id)
@@ -295,7 +292,9 @@ async def submit_job_to_comfyui(job_id: int, workflow: Dict[str, Any]):
             else:
                 # Submission failed
                 job_manager.update_job_status(
-                    job_id, JobStatus.FAILED, error_message="Failed to submit to ComfyUI"
+                    job_id,
+                    JobStatus.FAILED,
+                    error_message="Failed to submit to ComfyUI",
                 )
                 logger.error(f"❌ Job {job_id} failed to submit to ComfyUI")
 
@@ -305,8 +304,6 @@ async def submit_job_to_comfyui(job_id: int, workflow: Dict[str, Any]):
 
 
 @app.on_event("shutdown")
-
-
 async def shutdown_event():
     """Clean shutdown of all components"""
     try:
@@ -318,4 +315,6 @@ async def shutdown_event():
 
 
 if __name__ == "__main__":
-    uvicorn.run("main_modular:app", host="0.0.0.0", port=8328, reload=False, log_level="info")
+    uvicorn.run(
+        "main_modular:app", host="0.0.0.0", port=8328, reload=False, log_level="info"
+    )

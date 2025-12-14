@@ -32,7 +32,6 @@ class GenerationPhase(Enum):
     SAVING = ("Saving your creation", 95, 100)
     COMPLETE = ("Generation complete!", 100, 100)
 
-
     def __init__(self, message: str, start_percent: int, end_percent: int):
         self.message = message
         self.start_percent = start_percent
@@ -40,8 +39,6 @@ class GenerationPhase(Enum):
 
 
 @dataclass
-
-
 class ProgressUpdate:
     """Rich progress update with contextual information"""
 
@@ -54,7 +51,6 @@ class ProgressUpdate:
     preview_image: Optional[str] = None  # Base64 encoded preview
     estimated_time_remaining: Optional[float] = None
     metadata: Dict[str, Any] = None
-
 
     def to_websocket_message(self) -> str:
         """Convert to WebSocket message format"""
@@ -77,11 +73,9 @@ class ProgressUpdate:
 class PreviewGenerator:
     """Generates real-time preview images during generation"""
 
-
     def __init__(self, comfyui_output_dir: str = "/mnt/1TB-storage/ComfyUI/output/"):
         self.output_dir = Path(comfyui_output_dir)
         self.preview_cache = {}
-
 
     async def generate_preview_from_latents(
         self, latents_path: Optional[str] = None, target_size: tuple = (256, 256)
@@ -104,7 +98,6 @@ class PreviewGenerator:
         except Exception as e:
             logger.error(f"Failed to generate preview: {e}")
             return None
-
 
     async def create_progress_visualization(
         self, percentage: float, phase: GenerationPhase, size: tuple = (256, 64)
@@ -139,12 +132,10 @@ class PreviewGenerator:
 class ContextualProgressTracker:
     """Tracks generation progress with contextual messages"""
 
-
     def __init__(self, preview_generator: PreviewGenerator):
         self.preview_generator = preview_generator
         self.job_progress = {}
         self.start_times = {}
-
 
     def start_job(self, job_id: str, total_steps: int = 20):
         """Initialize tracking for a new job"""
@@ -157,7 +148,6 @@ class ContextualProgressTracker:
         }
         self.start_times[job_id] = time.time()
 
-
     def update_phase(self, job_id: str, phase: GenerationPhase):
         """Update the current phase of generation"""
         if job_id in self.job_progress:
@@ -169,11 +159,12 @@ class ContextualProgressTracker:
                     self.job_progress[job_id]["phase_times"][phase_key] = 0
                 self.job_progress[job_id]["phase_times"][
                     phase_key
-                ] += time.time() - self.job_progress[job_id].get("phase_start", time.time())
+                ] += time.time() - self.job_progress[job_id].get(
+                    "phase_start", time.time()
+                )
 
             self.job_progress[job_id]["phase"] = phase
             self.job_progress[job_id]["phase_start"] = time.time()
-
 
     def estimate_time_remaining(self, job_id: str) -> Optional[float]:
         """Estimate remaining time based on progress"""
@@ -192,7 +183,6 @@ class ContextualProgressTracker:
         remaining_steps = total_steps - current_step
 
         return avg_time_per_step * remaining_steps
-
 
     async def create_progress_update(
         self,
@@ -215,7 +205,9 @@ class ContextualProgressTracker:
         # Generate preview if available
         preview_image = None
         if preview_path:
-            preview_image = await self.preview_generator.generate_preview_from_latents(preview_path)
+            preview_image = await self.preview_generator.generate_preview_from_latents(
+                preview_path
+            )
         elif percentage > 25:  # Generate progress visualization after 25%
             preview_image = await self.preview_generator.create_progress_visualization(
                 percentage, phase
@@ -245,7 +237,6 @@ class ContextualProgressTracker:
             },
         )
 
-
     def _determine_phase(self, percentage: float) -> GenerationPhase:
         """Determine the current phase based on percentage"""
         # Special case for exactly 100%
@@ -257,8 +248,9 @@ class ContextualProgressTracker:
                 return phase
         return GenerationPhase.COMPLETE
 
-
-    def _generate_contextual_message(self, phase: GenerationPhase, percentage: float) -> str:
+    def _generate_contextual_message(
+        self, phase: GenerationPhase, percentage: float
+    ) -> str:
         """Generate a contextual message based on phase and progress"""
         messages = {
             GenerationPhase.INITIALIZING: [
@@ -295,7 +287,10 @@ class ContextualProgressTracker:
                 "Saving your masterpiece...",
                 "Organizing generated assets...",
             ],
-            GenerationPhase.COMPLETE: ["Your character is ready!", "Generation successful!"],
+            GenerationPhase.COMPLETE: [
+                "Your character is ready!",
+                "Generation successful!",
+            ],
         }
 
         phase_messages = messages.get(phase, ["Processing..."])
@@ -306,7 +301,6 @@ class ContextualProgressTracker:
 
 class SmartErrorRecovery:
     """Intelligent error recovery with user-friendly suggestions"""
-
 
     def __init__(self):
         self.error_patterns = {
@@ -326,8 +320,9 @@ class SmartErrorRecovery:
             "connection": ["restart_service", "check_network", "use_fallback"],
         }
 
-
-    async def handle_error(self, error: Exception, context: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_error(
+        self, error: Exception, context: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Handle errors intelligently with recovery suggestions"""
         error_str = str(error).lower()
 
@@ -338,7 +333,6 @@ class SmartErrorRecovery:
 
         # Default error handling
         return await self._handle_generic_error(error, context)
-
 
     async def _handle_memory_error(
         self, error: Exception, context: Dict[str, Any]
@@ -375,7 +369,6 @@ class SmartErrorRecovery:
             "retry_with_fix": True,
         }
 
-
     async def _handle_model_error(
         self, error: Exception, context: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -395,7 +388,6 @@ class SmartErrorRecovery:
             "retry_with_fix": True,
         }
 
-
     async def _handle_prompt_error(
         self, error: Exception, context: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -412,7 +404,6 @@ class SmartErrorRecovery:
             "auto_fix_params": {"sanitize_prompt": True},
             "retry_with_fix": True,
         }
-
 
     async def _handle_timeout_error(
         self, error: Exception, context: Dict[str, Any]
@@ -431,7 +422,6 @@ class SmartErrorRecovery:
             "retry_with_fix": True,
         }
 
-
     async def _handle_connection_error(
         self, error: Exception, context: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -448,7 +438,6 @@ class SmartErrorRecovery:
             "auto_fix_params": {},
             "retry_with_fix": False,
         }
-
 
     async def _handle_generic_error(
         self, error: Exception, context: Dict[str, Any]
@@ -467,7 +456,6 @@ class SmartErrorRecovery:
             "retry_with_fix": False,
         }
 
-
     async def attempt_auto_recovery(
         self,
         error_response: Dict[str, Any],
@@ -484,7 +472,9 @@ class SmartErrorRecovery:
         # Apply auto-fix parameters
         fixed_request = {**original_request, **error_response["auto_fix_params"]}
 
-        logger.info(f"Attempting auto-recovery with fixes: {error_response['auto_fix_params']}")
+        logger.info(
+            f"Attempting auto-recovery with fixes: {error_response['auto_fix_params']}"
+        )
 
         try:
             # Retry with fixed parameters
@@ -498,16 +488,17 @@ class SmartErrorRecovery:
 class UXEnhancementManager:
     """Main manager for all UX enhancements"""
 
-
     def __init__(self):
         self.preview_generator = PreviewGenerator()
         self.progress_tracker = ContextualProgressTracker(self.preview_generator)
         self.error_recovery = SmartErrorRecovery()
         self.websocket_connections = {}  # job_id -> websocket connection
 
-
     async def track_generation(
-        self, job_id: str, websocket_send: Optional[Callable] = None, total_steps: int = 20
+        self,
+        job_id: str,
+        websocket_send: Optional[Callable] = None,
+        total_steps: int = 20,
     ):
         """Track generation progress with rich updates"""
         self.progress_tracker.start_job(job_id, total_steps)
@@ -517,7 +508,6 @@ class UXEnhancementManager:
 
         # Send initial update
         await self._send_progress_update(job_id, 0)
-
 
     async def update_progress(
         self,
@@ -537,7 +527,6 @@ class UXEnhancementManager:
 
         return update
 
-
     async def handle_generation_error(
         self,
         job_id: str,
@@ -550,7 +539,9 @@ class UXEnhancementManager:
 
         # Send error update via WebSocket
         if job_id in self.websocket_connections:
-            error_message = json.dumps({"type": "error", "job_id": job_id, **error_response})
+            error_message = json.dumps(
+                {"type": "error", "job_id": job_id, **error_response}
+            )
             await self.websocket_connections[job_id](error_message)
 
         # Attempt auto-recovery if available
@@ -576,11 +567,9 @@ class UXEnhancementManager:
 
         return error_response
 
-
     async def _send_progress_update(self, job_id: str, step: int):
         """Internal method to send progress updates"""
         await self.update_progress(job_id, step)
-
 
     def cleanup_job(self, job_id: str):
         """Clean up resources for a completed job"""

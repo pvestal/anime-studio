@@ -11,7 +11,13 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    HTTPException,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from pydantic import BaseModel, Field
 from ux_enhancements import GenerationPhase, UXEnhancementManager
 
@@ -27,21 +33,27 @@ class EnhancedGenerationRequest(BaseModel):
 
     prompt: str = Field(..., description="Generation prompt")
     negative_prompt: Optional[str] = Field(None, description="Negative prompt")
-    mode: str = Field("balanced", description="Generation mode: draft, balanced, quality")
+    mode: str = Field(
+        "balanced", description="Generation mode: draft, balanced, quality"
+    )
     width: Optional[int] = Field(768, description="Image width")
     height: Optional[int] = Field(768, description="Image height")
     seed: Optional[int] = Field(-1, description="Random seed")
 
     # UX preferences
     enable_preview: bool = Field(True, description="Enable real-time preview")
-    enable_auto_recovery: bool = Field(True, description="Enable automatic error recovery")
+    enable_auto_recovery: bool = Field(
+        True, description="Enable automatic error recovery"
+    )
     progress_detail_level: str = Field(
         "detailed", description="Progress detail: minimal, normal, detailed"
     )
 
     # Batch options
     batch_size: Optional[int] = Field(1, description="Number of variations to generate")
-    variations_seed_offset: Optional[int] = Field(1, description="Seed offset for variations")
+    variations_seed_offset: Optional[int] = Field(
+        1, description="Seed offset for variations"
+    )
 
 
 class GenerationStatus(BaseModel):
@@ -64,7 +76,6 @@ class GenerationStatus(BaseModel):
 class EnhancedGenerationAPI:
     """Enhanced API with rich UX features"""
 
-
     def __init__(self):
         self.app = FastAPI(title="Enhanced Anime Generation API")
         self.ux_manager = UXEnhancementManager()
@@ -77,13 +88,10 @@ class EnhancedGenerationAPI:
 
         self._setup_routes()
 
-
     def _setup_routes(self):
         """Setup API routes with enhanced features"""
 
         @self.app.post("/api/generate/enhanced")
-
-
         async def generate_enhanced(
             request: EnhancedGenerationRequest, background_tasks: BackgroundTasks
         ):
@@ -112,8 +120,6 @@ class EnhancedGenerationAPI:
             }
 
         @self.app.websocket("/ws/generate/{job_id}")
-
-
         async def websocket_endpoint(websocket: WebSocket, job_id: str):
             """WebSocket endpoint for real-time updates"""
             await websocket.accept()
@@ -122,7 +128,9 @@ class EnhancedGenerationAPI:
             # Send initial status
             if job_id in self.active_jobs:
                 status = self.active_jobs[job_id]
-                await websocket.send_json({"type": "status", "data": status.model_dump()})
+                await websocket.send_json(
+                    {"type": "status", "data": status.model_dump()}
+                )
 
             try:
                 # Keep connection alive and handle incoming messages
@@ -136,8 +144,6 @@ class EnhancedGenerationAPI:
                     del self.websocket_connections[job_id]
 
         @self.app.get("/api/generate/status/{job_id}")
-
-
         async def get_status(job_id: str):
             """Get generation status with rich details"""
             if job_id not in self.active_jobs:
@@ -146,8 +152,6 @@ class EnhancedGenerationAPI:
             return self.active_jobs[job_id]
 
         @self.app.post("/api/generate/batch")
-
-
         async def generate_batch(
             requests: List[EnhancedGenerationRequest], background_tasks: BackgroundTasks
         ):
@@ -178,13 +182,15 @@ class EnhancedGenerationAPI:
             }
 
         @self.app.get("/api/generate/queue")
-
-
         async def get_queue_status():
             """Get current queue status with visualization data"""
             queued = [j for j in self.active_jobs.values() if j.status == "queued"]
-            processing = [j for j in self.active_jobs.values() if j.status == "processing"]
-            completed = [j for j in self.active_jobs.values() if j.status == "completed"]
+            processing = [
+                j for j in self.active_jobs.values() if j.status == "processing"
+            ]
+            completed = [
+                j for j in self.active_jobs.values() if j.status == "completed"
+            ]
             failed = [j for j in self.active_jobs.values() if j.status == "failed"]
 
             # Calculate average processing time
@@ -193,7 +199,9 @@ class EnhancedGenerationAPI:
                 duration = (job.updated_at - job.created_at).total_seconds()
                 completed_times.append(duration)
 
-            avg_time = sum(completed_times) / len(completed_times) if completed_times else 0
+            avg_time = (
+                sum(completed_times) / len(completed_times) if completed_times else 0
+            )
 
             return {
                 "queue_length": len(queued),
@@ -205,8 +213,9 @@ class EnhancedGenerationAPI:
                 "gpu_status": self.gpu_optimizer.get_gpu_stats().__dict__,
             }
 
-
-    async def _process_generation(self, job_id: str, request: EnhancedGenerationRequest):
+    async def _process_generation(
+        self, job_id: str, request: EnhancedGenerationRequest
+    ):
         """Process generation with enhanced UX features"""
         try:
             # Update status to processing
@@ -215,7 +224,6 @@ class EnhancedGenerationAPI:
 
             # Setup WebSocket connection for updates
             websocket = self.websocket_connections.get(job_id)
-
 
             async def send_update(message: str):
                 if websocket:
@@ -229,12 +237,16 @@ class EnhancedGenerationAPI:
                 job_id=job_id,
                 websocket_send=send_update if request.enable_preview else None,
                 total_steps=(
-                    20 if request.mode == "balanced" else (8 if request.mode == "draft" else 30)
+                    20
+                    if request.mode == "balanced"
+                    else (8 if request.mode == "draft" else 30)
                 ),
             )
 
             # Check cache first
-            cache_key = f"{request.prompt}_{request.width}_{request.height}_{request.mode}"
+            cache_key = (
+                f"{request.prompt}_{request.width}_{request.height}_{request.mode}"
+            )
             cached_result = self.cache.get_cached_output(cache_key)
 
             if cached_result:
@@ -313,8 +325,13 @@ class EnhancedGenerationAPI:
             logger.error(traceback.format_exc())
 
             # Try auto-recovery if enabled
-            if request.enable_auto_recovery and not self.active_jobs[job_id].recovery_attempted:
-                await self._attempt_recovery(job_id, request, "error", {"error": str(e)})
+            if (
+                request.enable_auto_recovery
+                and not self.active_jobs[job_id].recovery_attempted
+            ):
+                await self._attempt_recovery(
+                    job_id, request, "error", {"error": str(e)}
+                )
             else:
                 # Mark as failed
                 self.active_jobs[job_id].status = "failed"
@@ -334,8 +351,9 @@ class EnhancedGenerationAPI:
             # Cleanup
             self.ux_manager.cleanup_job(job_id)
 
-
-    def _prepare_generation_params(self, request: EnhancedGenerationRequest) -> Dict[str, Any]:
+    def _prepare_generation_params(
+        self, request: EnhancedGenerationRequest
+    ) -> Dict[str, Any]:
         """Prepare generation parameters based on request"""
         # Get workflow configuration
         if request.mode == "draft":
@@ -357,7 +375,6 @@ class EnhancedGenerationAPI:
         }
 
         return params
-
 
     async def _execute_with_progress(
         self, job_id: str, params: Dict[str, Any], request: EnhancedGenerationRequest
@@ -395,7 +412,6 @@ class EnhancedGenerationAPI:
             output_paths.append(output_path)
 
         return output_paths
-
 
     async def _attempt_recovery(
         self,

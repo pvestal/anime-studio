@@ -1,0 +1,198 @@
+{
+  "name": "Character Consistency with IPAdapter FaceID Plus",
+  "description": "Professional character consistency workflow using IPAdapter FaceID Plus and LoRA",
+  "author": "Tower Anime Production",
+  "version": "1.0",
+  "workflow": {
+    "1": {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": {
+        "ckpt_name": "realisticVision_v51.safetensors"
+      },
+      "_meta": {
+        "title": "Base Model Loader"
+      }
+    },
+    "2": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "reference_face.png",
+        "upload": "image"
+      },
+      "_meta": {
+        "title": "Load Character Reference"
+      }
+    },
+    "3": {
+      "class_type": "InsightFaceLoader",
+      "inputs": {
+        "provider": "CPU"
+      },
+      "_meta": {
+        "title": "InsightFace Loader"
+      }
+    },
+    "4": {
+      "class_type": "IPAdapterModelLoader",
+      "inputs": {
+        "ipadapter_file": "ip-adapter-plus_sd15.bin"
+      },
+      "_meta": {
+        "title": "IPAdapter Model"
+      }
+    },
+    "5": {
+      "class_type": "CLIPVisionLoader",
+      "inputs": {
+        "clip_name": "SD1.5/pytorch_model.bin"
+      },
+      "_meta": {
+        "title": "CLIP Vision Model"
+      }
+    },
+    "6": {
+      "class_type": "LoraLoader",
+      "inputs": {
+        "lora_name": "character_lora.safetensors",
+        "strength_model": 0.7,
+        "strength_clip": 0.7,
+        "model": ["1", 0],
+        "clip": ["1", 1]
+      },
+      "_meta": {
+        "title": "Character LoRA"
+      }
+    },
+    "7": {
+      "class_type": "IPAdapterApplyFaceID",
+      "inputs": {
+        "weight": 0.8,
+        "weight_v2": 0.8,
+        "combine_embeds": "concat",
+        "start_at": 0.0,
+        "end_at": 1.0,
+        "embeds_scaling": "V only",
+        "model": ["6", 0],
+        "ipadapter": ["4", 0],
+        "image": ["2", 0],
+        "clip_vision": ["5", 0],
+        "insightface": ["3", 0],
+        "attn_mask": null
+      },
+      "_meta": {
+        "title": "Apply IPAdapter FaceID"
+      }
+    },
+    "8": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "beautiful japanese woman yukicharacter, elegant red evening dress, standing in luxury restaurant, professional photography, detailed face, same person as reference",
+        "clip": ["6", 1]
+      },
+      "_meta": {
+        "title": "Positive Prompt"
+      }
+    },
+    "9": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "different person, inconsistent face, deformed, ugly, bad anatomy, blurry, low quality, watermark, text, multiple people, twins, clone",
+        "clip": ["6", 1]
+      },
+      "_meta": {
+        "title": "Negative Prompt"
+      }
+    },
+    "10": {
+      "class_type": "EmptyLatentImage",
+      "inputs": {
+        "width": 768,
+        "height": 768,
+        "batch_size": 1
+      },
+      "_meta": {
+        "title": "Latent Image"
+      }
+    },
+    "11": {
+      "class_type": "KSampler",
+      "inputs": {
+        "seed": 42,
+        "seed_mode": "fixed",
+        "steps": 30,
+        "cfg": 7.5,
+        "sampler_name": "dpmpp_2m",
+        "scheduler": "karras",
+        "denoise": 1.0,
+        "model": ["7", 0],
+        "positive": ["8", 0],
+        "negative": ["9", 0],
+        "latent_image": ["10", 0]
+      },
+      "_meta": {
+        "title": "Sampler"
+      }
+    },
+    "12": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": ["11", 0],
+        "vae": ["1", 2]
+      },
+      "_meta": {
+        "title": "VAE Decoder"
+      }
+    },
+    "13": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "filename_prefix": "character_consistent",
+        "images": ["12", 0]
+      },
+      "_meta": {
+        "title": "Save Image"
+      }
+    }
+  },
+  "metadata": {
+    "requirements": {
+      "custom_nodes": [
+        "ComfyUI_IPAdapter_plus",
+        "ComfyUI-InsightFace"
+      ],
+      "models": {
+        "checkpoints": ["realisticVision_v51.safetensors"],
+        "ipadapter": ["ip-adapter-plus_sd15.bin"],
+        "clip_vision": ["SD1.5/pytorch_model.bin"],
+        "loras": ["character_lora.safetensors"]
+      }
+    },
+    "parameters": {
+      "ipadapter_weight": {
+        "default": 0.8,
+        "min": 0.0,
+        "max": 1.0,
+        "description": "Controls face consistency strength"
+      },
+      "lora_strength": {
+        "default": 0.7,
+        "min": 0.0,
+        "max": 1.0,
+        "description": "Controls character style strength"
+      },
+      "cfg_scale": {
+        "default": 7.5,
+        "min": 1.0,
+        "max": 20.0,
+        "description": "Prompt adherence strength"
+      }
+    },
+    "best_practices": [
+      "Use square reference images centered on face",
+      "Keep IPAdapter weight around 0.8 for balance",
+      "Increase steps to 30+ for better quality",
+      "Use character trigger word in all prompts",
+      "Train LoRA on 15-30 diverse reference images"
+    ]
+  }
+}

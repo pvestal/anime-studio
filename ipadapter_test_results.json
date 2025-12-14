@@ -1,0 +1,37 @@
+[
+  {
+    "prompt": "beautiful japanese woman, wearing elegant red evening dress, in luxury restaurant, professional photography",
+    "category": "clothing",
+    "seed": 42,
+    "prompt_id": "08082410-60b9-42fd-8a73-302bf5028cdf",
+    "timestamp": "2025-12-12T03:33:26.770489"
+  },
+  {
+    "prompt": "beautiful japanese woman, wearing blue business suit, in modern office, professional photography",
+    "category": "clothing",
+    "seed": 43,
+    "prompt_id": "c3ce1420-2009-4c11-966a-57520d15a918",
+    "timestamp": "2025-12-12T03:33:28.787586"
+  },
+  {
+    "prompt": "beautiful japanese woman, wearing casual t-shirt and jeans, in coffee shop, professional photography",
+    "category": "clothing",
+    "seed": 44,
+    "prompt_id": "4223b4ec-8110-4933-9c75-c3dbd77a8876",
+    "timestamp": "2025-12-12T03:33:30.816919"
+  },
+  {
+    "prompt": "beautiful japanese woman, wearing traditional kimono, in japanese garden, professional photography",
+    "category": "clothing",
+    "seed": 45,
+    "prompt_id": "7c336ccb-ac18-4324-bac6-668ca804bc70",
+    "timestamp": "2025-12-12T03:33:32.832879"
+  },
+  {
+    "prompt": "beautiful japanese woman, wearing black cocktail dress, at art gallery, professional photography",
+    "category": "clothing",
+    "seed": 46,
+    "prompt_id": "d0f18483-6756-4d2f-8ce5-78cd9b0d7ca5",
+    "timestamp": "2025-12-12T03:33:34.854282"
+  }
+]

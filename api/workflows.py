@@ -6,7 +6,9 @@ Extracted from main.py to reduce file size.
 import time
 
 
-def get_simple_image_workflow(prompt: str, negative_prompt: str = None, seed: int = None) -> dict:
+def get_simple_image_workflow(
+    prompt: str, negative_prompt: str = None, seed: int = None
+) -> dict:
     """Get a simple image generation workflow."""
 
     if not negative_prompt:
@@ -39,14 +41,23 @@ def get_simple_image_workflow(prompt: str, negative_prompt: str = None, seed: in
             "inputs": {"width": 512, "height": 768, "batch_size": 1},
             "class_type": "EmptyLatentImage",
         },
-        "6": {"inputs": {"text": prompt, "clip": ["4", 1]}, "class_type": "CLIPTextEncode"},
+        "6": {
+            "inputs": {"text": prompt, "clip": ["4", 1]},
+            "class_type": "CLIPTextEncode",
+        },
         "7": {
             "inputs": {"text": negative_prompt, "clip": ["4", 1]},
             "class_type": "CLIPTextEncode",
         },
-        "8": {"inputs": {"samples": ["3", 0], "vae": ["4", 2]}, "class_type": "VAEDecode"},
+        "8": {
+            "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
+            "class_type": "VAEDecode",
+        },
         "9": {
-            "inputs": {"filename_prefix": f"anime_{int(time.time())}", "images": ["8", 0]},
+            "inputs": {
+                "filename_prefix": f"anime_{int(time.time())}",
+                "images": ["8", 0],
+            },
             "class_type": "SaveImage",
         },
     }

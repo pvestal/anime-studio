@@ -81,10 +81,8 @@ class ConsistencyAnalysisResult(BaseModel):
 class SeedManager:
     """Manages seed generation and storage for character consistency"""
 
-
     def __init__(self):
         self.seed_cache = {}
-
 
     def generate_deterministic_seed(self, character_name: str, prompt: str) -> int:
         """Generate deterministic seed based on character and prompt"""
@@ -93,8 +91,9 @@ class SeedManager:
         # Convert first 8 bytes of hash to integer
         return int.from_bytes(hash_object.digest()[:8], byteorder="big")
 
-
-    def get_character_canonical_seed(self, db_session, character_id: int) -> Optional[int]:
+    def get_character_canonical_seed(
+        self, db_session, character_id: int
+    ) -> Optional[int]:
         """Get canonical seed for character from database"""
         from sqlalchemy import text
 
@@ -111,8 +110,9 @@ class SeedManager:
 
         return result[0] if result else None
 
-
-    def save_workflow_template(self, character_name: str, workflow: Dict[str, Any]) -> str:
+    def save_workflow_template(
+        self, character_name: str, workflow: Dict[str, Any]
+    ) -> str:
         """Save workflow template to file system"""
         template_dir = "/mnt/1TB-storage/ComfyUI/workflows/patrick_characters"
         safe_name = "".join(
@@ -133,10 +133,8 @@ class SeedManager:
 class CharacterConsistencyEngine:
     """Engine for managing character consistency across generations"""
 
-
     def __init__(self):
         self.seed_manager = SeedManager()
-
 
     def analyze_consistency(
         self, character_id: int, new_generation_data: Dict[str, Any], db_session
@@ -171,7 +169,9 @@ class CharacterConsistencyEngine:
         latest_version = versions[0]
 
         # Seed consistency check
-        seed_score = 100.0 if new_generation_data.get("seed") == latest_version.seed else 50.0
+        seed_score = (
+            100.0 if new_generation_data.get("seed") == latest_version.seed else 50.0
+        )
 
         # Workflow similarity (basic JSON comparison)
         workflow_score = self._compare_workflows(
@@ -185,7 +185,9 @@ class CharacterConsistencyEngine:
         issues = []
 
         if seed_score < 100:
-            recommendations.append("Consider using the canonical character seed for consistency")
+            recommendations.append(
+                "Consider using the canonical character seed for consistency"
+            )
 
         if workflow_score < 80:
             issues.append("Workflow differs significantly from previous generations")
@@ -199,8 +201,9 @@ class CharacterConsistencyEngine:
             issues_detected=issues,
         )
 
-
-    def _compare_workflows(self, workflow1: Optional[Dict], workflow2: Optional[Dict]) -> float:
+    def _compare_workflows(
+        self, workflow1: Optional[Dict], workflow2: Optional[Dict]
+    ) -> float:
         """Compare two workflows for similarity"""
         if workflow1 is None and workflow2 is None:
             return 100.0
@@ -255,7 +258,9 @@ def create_character_version(db_session, version_data: CharacterVersionCreate) -
             "lora_path": version_data.lora_path,
             "embedding_path": version_data.embedding_path,
             "comfyui_workflow": (
-                json.dumps(version_data.comfyui_workflow) if version_data.comfyui_workflow else None
+                json.dumps(version_data.comfyui_workflow)
+                if version_data.comfyui_workflow
+                else None
             ),
             "workflow_template_path": version_data.workflow_template_path,
             "generation_parameters": (
@@ -298,7 +303,9 @@ def update_production_job_with_consistency_data(
             "job_id": job_id,
             "seed": seed,
             "character_id": character_id,
-            "workflow_snapshot": json.dumps(workflow_snapshot) if workflow_snapshot else None,
+            "workflow_snapshot": (
+                json.dumps(workflow_snapshot) if workflow_snapshot else None
+            ),
         },
     )
     db_session.commit()

@@ -61,10 +61,9 @@ async def get_processor() -> IntelligentJobProcessor:
 
 
 @router.post("/jobs/submit")
-
-
 async def submit_job_with_recovery(
-    request: JobSubmissionRequest, processor: IntelligentJobProcessor = Depends(get_processor)
+    request: JobSubmissionRequest,
+    processor: IntelligentJobProcessor = Depends(get_processor),
 ) -> Dict[str, Any]:
     """
     Submit a job with intelligent error recovery
@@ -104,8 +103,6 @@ async def submit_job_with_recovery(
 
 
 @router.get("/jobs/{job_id}/status")
-
-
 async def get_job_status_with_recovery(
     job_id: int, processor: IntelligentJobProcessor = Depends(get_processor)
 ) -> Dict[str, Any]:
@@ -134,8 +131,6 @@ async def get_job_status_with_recovery(
 
 
 @router.post("/jobs/{job_id}/retry")
-
-
 async def retry_failed_job(
     job_id: int,
     request: JobRecoveryRequest,
@@ -157,7 +152,10 @@ async def retry_failed_job(
 
         # Check if job is in a state that can be retried
         current_status = job_status.get("status")
-        if current_status not in ["failed", "timeout", "cancelled"] and not request.force_retry:
+        if (
+            current_status not in ["failed", "timeout", "cancelled"]
+            and not request.force_retry
+        ):
             raise HTTPException(
                 status_code=400,
                 detail=f"Job is in '{current_status}' state and cannot be retried. Use force_retry=true to override.",
@@ -187,8 +185,6 @@ async def retry_failed_job(
 
 
 @router.post("/jobs/retry-failed")
-
-
 async def retry_multiple_failed_jobs(
     max_jobs: int = 5, processor: IntelligentJobProcessor = Depends(get_processor)
 ) -> Dict[str, Any]:
@@ -214,8 +210,6 @@ async def retry_multiple_failed_jobs(
 
 
 @router.get("/statistics")
-
-
 async def get_recovery_statistics(
     processor: IntelligentJobProcessor = Depends(get_processor),
 ) -> RecoveryStatistics:
@@ -246,8 +240,6 @@ async def get_recovery_statistics(
 
 
 @router.get("/statistics/detailed")
-
-
 async def get_detailed_statistics(
     processor: IntelligentJobProcessor = Depends(get_processor),
 ) -> Dict[str, Any]:
@@ -271,12 +263,12 @@ async def get_detailed_statistics(
 
     except Exception as e:
         logger.error(f"Failed to get detailed statistics: {e}")
-        raise HTTPException(status_code=500, detail=f"Detailed statistics failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Detailed statistics failed: {str(e)}"
+        )
 
 
 @router.post("/emergency-stop")
-
-
 async def emergency_stop(
     processor: IntelligentJobProcessor = Depends(get_processor),
 ) -> Dict[str, Any]:
@@ -304,8 +296,6 @@ async def emergency_stop(
 
 
 @router.delete("/cleanup")
-
-
 async def cleanup_old_data(
     hours: int = 24, processor: IntelligentJobProcessor = Depends(get_processor)
 ) -> Dict[str, Any]:
@@ -335,8 +325,6 @@ async def cleanup_old_data(
 
 
 @router.get("/health")
-
-
 async def health_check(
     processor: IntelligentJobProcessor = Depends(get_processor),
 ) -> Dict[str, Any]:

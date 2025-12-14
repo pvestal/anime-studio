@@ -20,20 +20,20 @@ job_queue = AnimeJobQueue()
 
 
 @router.post("/jobs")
-
-
 async def create_redis_job(project_id: str, job_type: str, params: dict = {}):
     """Create a new job in Redis queue"""
     try:
         job_id = job_queue.add_job(project_id, job_type, params)
-        return {"job_id": job_id, "status": "queued", "message": "Job added to Redis queue"}
+        return {
+            "job_id": job_id,
+            "status": "queued",
+            "message": "Job added to Redis queue",
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/jobs/{job_id}")
-
-
 async def get_redis_job_status(job_id: str):
     """Get job status from Redis"""
     try:
@@ -82,8 +82,6 @@ async def get_redis_job_status(job_id: str):
 
 
 @router.post("/jobs/{job_id}/progress")
-
-
 async def update_redis_job_progress(job_id: str, progress: int, status: str = None):
     """Update job progress"""
     try:
@@ -94,8 +92,6 @@ async def update_redis_job_progress(job_id: str, progress: int, status: str = No
 
 
 @router.get("/queue/status")
-
-
 async def get_queue_status():
     """Get Redis queue statistics"""
     try:

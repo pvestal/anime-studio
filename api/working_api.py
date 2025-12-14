@@ -43,16 +43,12 @@ class JobStatus(BaseModel):
 
 
 @app.get("/health")
-
-
 async def health():
     """Health check endpoint"""
     return {"status": "healthy", "service": "working-anime-api"}
 
 
 @app.post("/api/anime/generate")
-
-
 async def generate(request: GenerateRequest):
     """Generate anime content with proper VRAM management"""
 
@@ -68,7 +64,10 @@ async def generate(request: GenerateRequest):
             "inputs": {"ckpt_name": "counterfeit_v3.safetensors"},
             "class_type": "CheckpointLoaderSimple",
         },
-        "2": {"inputs": {"text": request.prompt, "clip": ["1", 1]}, "class_type": "CLIPTextEncode"},
+        "2": {
+            "inputs": {"text": request.prompt, "clip": ["1", 1]},
+            "class_type": "CLIPTextEncode",
+        },
         "3": {
             "inputs": {"text": "blurry, low quality", "clip": ["1", 1]},
             "class_type": "CLIPTextEncode",
@@ -92,7 +91,10 @@ async def generate(request: GenerateRequest):
             "inputs": {"width": 512, "height": 512, "batch_size": 1},
             "class_type": "EmptyLatentImage",
         },
-        "6": {"inputs": {"samples": ["4", 0], "vae": ["1", 2]}, "class_type": "VAEDecode"},
+        "6": {
+            "inputs": {"samples": ["4", 0], "vae": ["1", 2]},
+            "class_type": "VAEDecode",
+        },
         "7": {
             "inputs": {"filename_prefix": f"anime_{job_id}", "images": ["6", 0]},
             "class_type": "SaveImage",
@@ -104,7 +106,9 @@ async def generate(request: GenerateRequest):
         async with aiohttp.ClientSession() as session:
             payload = {"prompt": workflow, "client_id": job_id}
 
-            async with session.post("http://localhost:8188/prompt", json=payload) as resp:
+            async with session.post(
+                "http://localhost:8188/prompt", json=payload
+            ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     prompt_id = data.get("prompt_id")
@@ -122,15 +126,15 @@ async def generate(request: GenerateRequest):
                     return {"job_id": job_id, "status": "submitted"}
                 else:
                     error = await resp.text()
-                    raise HTTPException(status_code=resp.status, detail=f"ComfyUI error: {error}")
+                    raise HTTPException(
+                        status_code=resp.status, detail=f"ComfyUI error: {error}"
+                    )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/anime/generation/{job_id}/status")
-
-
 async def get_status(job_id: str):
     """Get real job status"""
 
@@ -143,7 +147,9 @@ async def get_status(job_id: str):
     if job.get("prompt_id"):
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(f"http://localhost:8188/history/{job['prompt_id']}") as resp:
+                async with session.get(
+                    f"http://localhost:8188/history/{job['prompt_id']}"
+                ) as resp:
                     if resp.status == 200:
                         history = await resp.json()
                         if job["prompt_id"] in history:
@@ -174,8 +180,6 @@ async def get_status(job_id: str):
 
 
 @app.get("/api/anime/jobs")
-
-
 async def list_jobs():
     """List all jobs"""
     return list(jobs.values())

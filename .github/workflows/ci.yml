@@ -39,6 +39,7 @@ jobs:
           pip install flake8 black isort pylint mypy
 
       - name: Run Black formatter check
+        continue-on-error: true
         run: |
           if [ -d "api" ]; then
             black --check api/ || { echo "Black formatting issues found in api/"; exit 0; }

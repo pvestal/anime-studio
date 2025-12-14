@@ -31,7 +31,6 @@ class ConnectionManager:
     - Error handling and reconnection support
     """
 
-
     def __init__(self, redis_host: str = "localhost", redis_port: int = 6379):
         # Dictionary of job_id -> set of WebSocket connections
         self.connections: Dict[str, Set[WebSocket]] = {}
@@ -40,7 +39,9 @@ class ConnectionManager:
         # Redis for pub/sub if needed
         self.redis_client = None
         try:
-            self.redis_client = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+            self.redis_client = redis.Redis(
+                host=redis_host, port=redis_port, decode_responses=True
+            )
             self.redis_client.ping()
             logger.info("Redis connection established for WebSocket pub/sub")
         except Exception as e:
@@ -54,8 +55,9 @@ class ConnectionManager:
             "password": "tower_echo_brain_secret_key_2025",
         }
 
-
-    async def connect(self, websocket: WebSocket, job_id: str, user_info: Optional[dict] = None):
+    async def connect(
+        self, websocket: WebSocket, job_id: str, user_info: Optional[dict] = None
+    ):
         """
         Connect a WebSocket client to job progress updates.
 
@@ -97,7 +99,6 @@ class ConnectionManager:
             },
         )
 
-
     async def disconnect(self, websocket: WebSocket):
         """
         Disconnect a WebSocket client with proper cleanup.
@@ -122,7 +123,6 @@ class ConnectionManager:
 
             logger.info(f"WebSocket disconnected from job {job_id}")
 
-
     async def send_to_connection(self, websocket: WebSocket, message: dict):
         """
         Send message to a specific WebSocket connection with error handling.
@@ -137,7 +137,6 @@ class ConnectionManager:
             logger.error(f"Failed to send message to WebSocket: {e}")
             # Clean up failed connection
             await self.disconnect(websocket)
-
 
     async def broadcast_to_job(self, job_id: str, message: dict):
         """
@@ -173,7 +172,6 @@ class ConnectionManager:
             logger.info(
                 f"Cleaned up {len(disconnected_connections)} disconnected WebSockets for job {job_id}"
             )
-
 
     async def send_progress_update(
         self,
@@ -224,10 +222,11 @@ class ConnectionManager:
         # Publish to Redis for other services if available
         if self.redis_client:
             try:
-                self.redis_client.publish(f"anime_progress:{job_id}", json.dumps(progress_data))
+                self.redis_client.publish(
+                    f"anime_progress:{job_id}", json.dumps(progress_data)
+                )
             except Exception as e:
                 logger.warning(f"Failed to publish to Redis: {e}")
-
 
     async def sync_progress_to_db(
         self,
@@ -280,18 +279,20 @@ class ConnectionManager:
             )
 
             cursor.execute(
-                update_query, (status, metadata_update, error, output_path, status, job_id_int)
+                update_query,
+                (status, metadata_update, error, output_path, status, job_id_int),
             )
 
             conn.commit()
             cursor.close()
             conn.close()
 
-            logger.debug(f"Database progress synced for job {job_id}: {progress}% ({status})")
+            logger.debug(
+                f"Database progress synced for job {job_id}: {progress}% ({status})"
+            )
 
         except Exception as e:
             logger.error(f"Failed to sync progress to database for job {job_id}: {e}")
-
 
     async def get_job_connections_count(self, job_id: str) -> int:
         """
@@ -304,7 +305,6 @@ class ConnectionManager:
             Number of active connections
         """
         return len(self.connections.get(job_id, set()))
-
 
     async def get_all_connections_info(self) -> dict:
         """
@@ -319,7 +319,10 @@ class ConnectionManager:
         # Get connection details
         connection_details = {}
         for job_id, connections in self.connections.items():
-            connection_details[job_id] = {"connection_count": len(connections), "connections": []}
+            connection_details[job_id] = {
+                "connection_count": len(connections),
+                "connections": [],
+            }
 
             for websocket in connections:
                 if websocket in self.connection_metadata:
@@ -338,7 +341,6 @@ class ConnectionManager:
             "connection_details": connection_details,
             "timestamp": datetime.now().isoformat(),
         }
-
 
     async def cleanup_stale_connections(self, timeout_seconds: int = 300):
         """
@@ -363,7 +365,6 @@ class ConnectionManager:
 
         if stale_connections:
             logger.info(f"Cleaned up {len(stale_connections)} stale connections")
-
 
     async def ping_all_connections(self):
         """

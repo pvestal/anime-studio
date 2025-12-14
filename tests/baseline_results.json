@@ -1,0 +1,24 @@
+{
+  "timestamp": "2025-12-10T22:51:31.789325",
+  "tests": [
+    {
+      "test": "Short Loop (1s, 24 frames)",
+      "error": "ComfyUI error: 400",
+      "success": false
+    },
+    {
+      "test": "Medium Video (5s, 120 frames)",
+      "error": "ComfyUI error: 400",
+      "success": false
+    }
+  ],
+  "summary": {
+    "vram_used_mb": 5792,
+    "vram_free_mb": 6119,
+    "vram_total_mb": 11911,
+    "vram_utilization": 48.6,
+    "total_tests": 2,
+    "successful_tests": 0,
+    "success_rate": 0.0
+  }
+}

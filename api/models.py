@@ -3,9 +3,18 @@ Database models for anime production system.
 Updated to match existing database schema in public schema.
 """
 
-
-from sqlalchemy import (ARRAY, JSON, Boolean, Column, DateTime, ForeignKey, Integer, LargeBinary,
-                        String, Text)
+from sqlalchemy import (
+    ARRAY,
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -28,12 +37,18 @@ class Project(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     # Relationships
-    jobs = relationship("ProductionJob", back_populates="project", cascade="all, delete-orphan")
-    characters = relationship("Character", back_populates="project", cascade="all, delete-orphan")
+    jobs = relationship(
+        "ProductionJob", back_populates="project", cascade="all, delete-orphan"
+    )
+    characters = relationship(
+        "Character", back_populates="project", cascade="all, delete-orphan"
+    )
     story_bibles = relationship(
         "StoryBible", back_populates="project", cascade="all, delete-orphan"
     )
-    episodes = relationship("Episode", back_populates="project", cascade="all, delete-orphan")
+    episodes = relationship(
+        "Episode", back_populates="project", cascade="all, delete-orphan"
+    )
 
 
 class Character(Base):

@@ -106,23 +106,17 @@ def close_database():
 
 # Event listeners for connection monitoring
 @event.listens_for(engine, "connect")
-
-
 def set_sqlite_pragma(dbapi_connection, connection_record):
     """Set connection parameters if needed"""
 
 
 @event.listens_for(engine, "checkout")
-
-
 def receive_checkout(dbapi_connection, connection_record, connection_proxy):
     """Log when connections are checked out (for debugging)"""
     logger.debug("Connection checked out from pool")
 
 
 @event.listens_for(engine, "checkin")
-
-
 def receive_checkin(dbapi_connection, connection_record):
     """Log when connections are returned to pool (for debugging)"""
     logger.debug("Connection returned to pool")
@@ -135,8 +129,6 @@ class DatabaseHealth:
     """Database health check utilities"""
 
     @staticmethod
-
-
     def check_connection() -> bool:
         """Check if database is accessible"""
         try:
@@ -150,14 +142,14 @@ class DatabaseHealth:
             return False
 
     @staticmethod
-
-
     def get_connection_info() -> dict:
         """Get database connection information"""
         try:
             pool = engine.pool
             return {
-                "status": "healthy" if DatabaseHealth.check_connection() else "unhealthy",
+                "status": (
+                    "healthy" if DatabaseHealth.check_connection() else "unhealthy"
+                ),
                 "database": DB_CONFIG["database"],
                 "host": DB_CONFIG["host"],
                 "pool_size": pool.size(),
