@@ -2,42 +2,32 @@
 """Secured Anime Production API with Authentication and Rate Limiting"""
 
 import asyncio
-import json
 import logging
 import os
 import subprocess
 import sys
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import httpx
-import psutil
 import uvicorn
 from fastapi import (
     Depends,
     FastAPI,
-    Header,
     HTTPException,
     WebSocket,
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field, validator
-
-from v2_integration import (
-    complete_job_with_quality,
-    create_tracked_job,
-    reproduce_job,
-    v2_integration,
-)
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field, field_validator
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from auth_middleware import optional_auth, rate_limit, require_auth
+from auth_middleware import optional_auth, require_auth
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -95,7 +85,7 @@ async def check_gpu_availability() -> bool:
                 return True
 
             return False
-    except:
+    except Exception:
         # If can't check, assume available to avoid blocking
         active_generation = None
         return True
@@ -170,22 +160,37 @@ async def get_comfyui_job_status(prompt_id: str) -> Dict:
                                 filename = output["gifs"][0]["filename"]
                                 # Handle both flat and organized paths
                                 if filename.startswith("projects/"):
-                                    output_path = (
-                                        f"/mnt/1TB-storage/ComfyUI/output/{filename}"
-                                    )
+                                    output_path = filename
                                 else:
-                                    output_path = (
-                                        f"/mnt/1TB-storage/ComfyUI/output/{filename}"
-                                    )
+                                    output_path = filename
 
+                                # For video files, return relative path
                                 return {
                                     "status": "completed",
                                     "progress": 100,
                                     "output_path": output_path,
                                     "estimated_remaining": 0,
+                                    "file_type": "video" if filename.endswith(".mp4") else "image"
                                 }
 
-            # If not found anywhere, assume failed after timeout
+            # If not found anywhere, check if output file exists
+            # (ComfyUI might have cleared history but file still exists)
+            import os
+            # Try with both prompt_id and job_id (since filename uses job_id)
+            expected_paths = [
+                f"/mnt/1TB-storage/ComfyUI/output/anime_{prompt_id}_00001_.png",
+                # Also check job_id pattern if different
+            ]
+            for expected_path in expected_paths:
+                if os.path.exists(expected_path):
+                    return {
+                        "status": "completed",
+                        "progress": 100,
+                        "output_path": expected_path,
+                        "estimated_remaining": 0,
+                    }
+
+            # Truly not found
             return {
                 "status": "failed",
                 "progress": 0,
@@ -211,15 +216,33 @@ DB_CONFIG = {
 class GenerateRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=500)
     type: str = Field(default="image", pattern="^(image|video)$")
+    # Video-specific parameters
+    frames: int = Field(default=48, ge=24, le=120)  # 1-5 seconds at 24fps
+    fps: int = Field(default=24, ge=8, le=30)
+    width: int = Field(default=512, ge=256, le=1024)
+    height: int = Field(default=512, ge=256, le=1024)
+    # Quality settings
+    steps: int = Field(default=15, ge=8, le=30)
+    cfg: float = Field(default=8.0, ge=3.0, le=15.0)
+    seed: int = Field(default=-1, ge=-1, le=2147483647)
+    negative_prompt: str = Field(default="worst quality, low quality, blurry", max_length=300)
 
-    @validator("prompt")
+
+class MusicVideoRequest(BaseModel):
+    """Request model for generating video with Apple Music track"""
+    track: dict = Field(..., description="Apple Music track metadata")
+    settings: dict = Field(..., description="Video generation settings")
+    prompt: str = Field(..., min_length=1, max_length=500)
+
+    @field_validator("prompt")
+    @classmethod
     def validate_prompt(cls, v):
         """Sanitize and validate prompt"""
         # Remove any SQL-like patterns
         dangerous_patterns = ["DROP", "DELETE", "INSERT", "UPDATE", "--", ";"]
         for pattern in dangerous_patterns:
             if pattern in v.upper():
-                raise ValueError(f"Invalid characters in prompt")
+                raise ValueError("Invalid characters in prompt")
         return v.strip()
 
 
@@ -228,7 +251,7 @@ def get_gpu_memory() -> dict:
     try:
         result = subprocess.run(
             [
-                "nvidia-smi",
+                "/usr/bin/nvidia-smi",
                 "--query-gpu=memory.free,memory.total",
                 "--format=csv,nounits,noheader",
             ],
@@ -243,7 +266,7 @@ def get_gpu_memory() -> dict:
         return {"free": 0, "total": 0, "used": 0}
 
 
-def ensure_vram_available(required_mb: int = 8000) -> bool:
+def ensure_vram_available(required_mb: int = 4000) -> bool:
     """Ensure sufficient VRAM is available"""
     memory = get_gpu_memory()
     logger.info(f"Current VRAM: {memory['free']}MB free / {memory['total']}MB total")
@@ -254,8 +277,144 @@ def ensure_vram_available(required_mb: int = 8000) -> bool:
         )
         return False
 
-    print(f"✓ Sufficient VRAM available")
+    print("✓ Sufficient VRAM available")
     return True
+
+
+async def submit_video_to_comfyui(
+    prompt: str,
+    job_id: str,
+    frames: int = 48,
+    fps: int = 24,
+    width: int = 512,
+    height: int = 512,
+    steps: int = 15,
+    cfg: float = 8.0,
+    negative_prompt: str = "worst quality, low quality, blurry",
+    seed: int = None
+) -> bool:
+    """Submit video generation job to ComfyUI with AnimateDiff"""
+    try:
+        # Use provided seed or generate one
+        if seed is None or seed <= 0:
+            seed = int(time.time())
+
+        # Enhance negative prompt for video generation
+        enhanced_negative = f"{negative_prompt}, static, still image, jpeg artifacts, bad anatomy, deformed"
+
+        # Professional AnimateDiff workflow with optimized settings
+        workflow = {
+            "1": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {
+                    "text": prompt,
+                    "clip": ["4", 1]
+                }
+            },
+            "2": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {
+                    "text": enhanced_negative,
+                    "clip": ["4", 1]
+                }
+            },
+            "3": {
+                "class_type": "KSampler",
+                "inputs": {
+                    "seed": seed,
+                    "steps": steps,
+                    "cfg": cfg,
+                    "sampler_name": "dpmpp_2m",
+                    "scheduler": "karras",
+                    "denoise": 1.0,
+                    "model": ["12", 0],  # AnimateDiff-wrapped model
+                    "positive": ["1", 0],
+                    "negative": ["2", 0],
+                    "latent_image": ["5", 0]
+                }
+            },
+            "4": {
+                "class_type": "CheckpointLoaderSimple",
+                "inputs": {
+                    "ckpt_name": "counterfeit_v3.safetensors"
+                }
+            },
+            "5": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {
+                    "width": width,
+                    "height": height,
+                    "batch_size": frames
+                }
+            },
+            "6": {
+                "class_type": "VAEDecode",
+                "inputs": {
+                    "samples": ["3", 0],
+                    "vae": ["4", 2]
+                }
+            },
+            "7": {
+                "class_type": "VHS_VideoCombine",
+                "inputs": {
+                    "images": ["6", 0],
+                    "frame_rate": fps,
+                    "loop_count": 0,
+                    "filename_prefix": f"projects/video/anime_video_{job_id}",
+                    "format": "video/h264-mp4",
+                    "pix_fmt": "yuv420p",
+                    "crf": 18,
+                    "save_metadata": True,
+                    "pingpong": False,
+                    "save_output": True
+                }
+            },
+            "10": {
+                "class_type": "ADE_LoadAnimateDiffModel",
+                "inputs": {
+                    "model_name": "mm-Stabilized_high.pth"
+                }
+            },
+            "11": {
+                "class_type": "ADE_ApplyAnimateDiffModelSimple",
+                "inputs": {
+                    "motion_model": ["10", 0]
+                }
+            },
+            "12": {
+                "class_type": "ADE_UseEvolvedSampling",
+                "inputs": {
+                    "model": ["4", 0],
+                    "beta_schedule": "autoselect",
+                    "m_models": ["11", 0]
+                }
+            }
+        }
+
+        # Submit to ComfyUI using httpx for async support
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                "http://localhost:8188/prompt",
+                json={"prompt": workflow}
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                prompt_id = result.get("prompt_id")
+                logger.info(f"ComfyUI video job submitted: {prompt_id}")
+
+                # Store prompt_id in global jobs dict for tracking
+                if job_id in jobs:
+                    jobs[job_id]["comfyui_prompt_id"] = prompt_id
+
+                return True
+            else:
+                logger.error(f"ComfyUI video submission failed {response.status_code}: {response.text}")
+                return False
+
+    except Exception as e:
+        logger.error(f"Error submitting video to ComfyUI: {e}")
+        return False
 
 
 def submit_to_comfyui(prompt: str, job_id: str) -> bool:
@@ -315,9 +474,17 @@ def submit_to_comfyui(prompt: str, job_id: str) -> bool:
         )
 
         if response.status_code == 200:
+            result = response.json()
+            prompt_id = result.get("prompt_id")
+            logger.info(f"ComfyUI job submitted: {prompt_id}")
+
+            # Store prompt_id in global jobs dict for tracking
+            if job_id in jobs:
+                jobs[job_id]["comfyui_prompt_id"] = prompt_id
+
             return True
         else:
-            logger.error(f"ComfyUI returned status {response.status_code}")
+            logger.error(f"ComfyUI returned status {response.status_code}: {response.text}")
             return False
 
     except Exception as e:
@@ -338,7 +505,7 @@ async def health():
             queue_data = (
                 comfyui_response.json() if comfyui_response.status_code == 200 else {}
             )
-    except:
+    except Exception:
         comfyui_status = "unavailable"
         queue_data = {}
 
@@ -381,42 +548,157 @@ async def health():
     }
 
 
+@app.get("/api/anime/status")
+async def status_check():
+    """Service status endpoint"""
+    gpu_memory = get_gpu_memory()
+
+    return {
+        "service": "anime-production",
+        "status": "operational",
+        "version": "2.0.0",
+        "timestamp": datetime.now().isoformat(),
+        "gpu": {
+            "vram_free_mb": gpu_memory.get("free", 0),
+            "vram_total_mb": gpu_memory.get("total", 0),
+            "utilization": round((1 - gpu_memory.get("free", 0) / max(gpu_memory.get("total", 1), 1)) * 100, 1)
+        },
+        "active_jobs": len([j for j in jobs.values() if j.get("status") == "processing"]),
+        "total_jobs": len(jobs)
+    }
+
+
+@app.post("/api/anime/generate/video")
+async def generate_video(
+    request: GenerateRequest, user_data: dict = Depends(optional_auth)
+):
+    """Generate anime video using AnimateDiff (public endpoint)"""
+    try:
+        # Rate limiting per user
+        user_email = user_data.get("email", "unknown") if user_data else "anonymous"
+        logger.info(f"Video generation request from user: {user_email}")
+
+        # Check GPU availability with stricter requirements for video
+        if not ensure_vram_available(4000):  # Video needs more VRAM but 4GB should be enough
+            raise HTTPException(
+                status_code=503,
+                detail="Insufficient GPU resources for video generation. Please try again later.",
+            )
+
+        # Check if GPU is busy with another generation
+        gpu_available = await check_gpu_availability()
+        if not gpu_available:
+            raise HTTPException(
+                status_code=503,
+                detail="GPU is currently busy with another generation. Please wait.",
+            )
+
+        # Create video generation job
+        job_id = str(uuid.uuid4())
+        logger.info(f"Created video job ID: {job_id}")
+
+        # Store job BEFORE submitting to ComfyUI
+        jobs[job_id] = {
+            "id": job_id,
+            "prompt": request.prompt,
+            "type": "video",
+            "status": "processing",
+            "created_at": time.time(),
+            "user": user_email,
+            "output_path": None,
+            "error": None,
+            "frames": getattr(request, 'frames', 48),
+            "fps": getattr(request, 'fps', 24),
+            "duration": getattr(request, 'frames', 48) / getattr(request, 'fps', 24),
+        }
+
+        # Submit video generation to ComfyUI with request parameters
+        success = await submit_video_to_comfyui(
+            prompt=request.prompt,
+            job_id=job_id,
+            frames=request.frames,
+            fps=request.fps,
+            width=request.width,
+            height=request.height,
+            steps=request.steps,
+            cfg=request.cfg,
+            negative_prompt=request.negative_prompt,
+            seed=request.seed if request.seed > 0 else int(time.time())
+        )
+        logger.info(f"ComfyUI video submission success: {success}")
+
+        if not success:
+            jobs[job_id]["status"] = "failed"
+            jobs[job_id]["error"] = "Failed to submit video generation to ComfyUI"
+            raise HTTPException(status_code=500, detail="Failed to submit video generation job")
+
+        logger.info(f"Video job {job_id} created for user {user_email}: {request.prompt[:50]}...")
+
+        return {
+            "job_id": job_id,
+            "status": "processing",
+            "estimated_time": 120,  # 2 minutes for video
+            "message": f"Video generation started for {user_email}",
+            "type": "video"
+        }
+
+    except Exception as e:
+        logger.error(f"Video generate endpoint error: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
 @app.post("/api/anime/generate")
 async def generate_anime(
-    request: GenerateRequest, user_data: dict = Depends(require_auth)
+    request: GenerateRequest, user_data: dict = Depends(optional_auth)
 ):
-    """Generate anime image (requires authentication)"""
+    """Generate anime image (public endpoint)"""
 
-    # Rate limiting per user
-    user_email = user_data.get("email", "unknown")
+    try:
+        # Rate limiting per user
+        user_email = user_data.get("email", "unknown") if user_data else "anonymous"
+        logger.info(f"Generate request from user: {user_email}")
 
-    # Check VRAM availability
-    if not ensure_vram_available(8000):
-        raise HTTPException(
-            status_code=503,
-            detail="Insufficient GPU resources. Please try again later.",
-        )
+        # Check VRAM availability
+        if not ensure_vram_available(4000):
+            raise HTTPException(
+                status_code=503,
+                detail="Insufficient GPU resources. Please try again later.",
+            )
 
-    # Create job
-    job_id = str(uuid.uuid4())
+        # Create job
+        job_id = str(uuid.uuid4())
+        logger.info(f"Created job ID: {job_id}")
 
-    # Submit to ComfyUI
-    success = submit_to_comfyui(request.prompt, job_id)
+        # Store job BEFORE submitting to ComfyUI so it can be updated
+        jobs[job_id] = {
+            "id": job_id,
+            "prompt": request.prompt,
+            "type": getattr(request, 'type', 'image'),
+            "status": "processing",
+            "created_at": time.time(),
+            "user": user_email,
+            "output_path": None,
+            "error": None,
+        }
 
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to submit generation job")
+        # Submit to ComfyUI
+        success = submit_to_comfyui(request.prompt, job_id)
+        logger.info(f"ComfyUI submission success: {success}")
 
-    # Store job with user info
-    jobs[job_id] = {
-        "id": job_id,
-        "prompt": request.prompt,
-        "type": request.type,
-        "status": "processing",
-        "created_at": time.time(),
-        "user": user_email,
-        "output_path": None,
-        "error": None,
-    }
+        if not success:
+            jobs[job_id]["status"] = "failed"
+            jobs[job_id]["error"] = "Failed to submit to ComfyUI"
+            raise HTTPException(status_code=500, detail="Failed to submit generation job")
+
+        logger.info(f"Job {job_id} created successfully")
+
+    except Exception as e:
+        logger.error(f"Generate endpoint error: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
     logger.info(f"Job {job_id} created for user {user_email}: {request.prompt[:50]}...")
 
@@ -424,17 +706,27 @@ async def generate_anime(
     import threading
 
     def check_completion():
-        time.sleep(3)  # Typical generation time
+        # Check periodically for completion
         output_path = f"/mnt/1TB-storage/ComfyUI/output/anime_{job_id}_00001_.png"
 
-        if os.path.exists(output_path):
-            jobs[job_id]["status"] = "completed"
-            jobs[job_id]["output_path"] = output_path
-            logger.info(f"Job {job_id} completed")
-        else:
-            jobs[job_id]["status"] = "failed"
-            jobs[job_id]["error"] = "Generation failed"
-            logger.error(f"Job {job_id} failed - output not found")
+        for attempt in range(20):  # Check for up to 60 seconds (20 * 3s)
+            time.sleep(3)
+
+            if os.path.exists(output_path):
+                jobs[job_id]["status"] = "completed"
+                jobs[job_id]["output_path"] = output_path
+                jobs[job_id]["progress"] = 100
+                logger.info(f"Job {job_id} completed after {(attempt + 1) * 3} seconds")
+                return
+
+            # Update progress based on time elapsed
+            progress = min(90, (attempt + 1) * 4)  # Max 90% until completed
+            jobs[job_id]["progress"] = progress
+
+        # If still not found after 60 seconds, mark as failed
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = "Generation timed out"
+        logger.error(f"Job {job_id} failed - output not found after 60 seconds")
 
     threading.Thread(target=check_completion).start()
 
@@ -444,6 +736,162 @@ async def generate_anime(
         "estimated_time": 3,
         "message": f"Generation started for {user_email}",
     }
+
+
+@app.post("/api/anime/generate-with-music")
+async def generate_with_music(
+    request: MusicVideoRequest, user_data: dict = Depends(optional_auth)
+):
+    """Generate anime video synchronized with Apple Music track"""
+
+    try:
+        user_email = user_data.get("email", "unknown") if user_data else "anonymous"
+        logger.info(f"Music video generation request from user: {user_email}")
+
+        # Extract track info
+        track = request.track
+        settings = request.settings
+
+        # Check VRAM availability (video needs more)
+        if not ensure_vram_available(6000):
+            raise HTTPException(
+                status_code=503,
+                detail="Insufficient GPU resources for video generation. Please try again later.",
+            )
+
+        # Create job
+        job_id = str(uuid.uuid4())
+        logger.info(f"Created music video job ID: {job_id}")
+
+        # Download music preview if available
+        music_file = None
+        if track.get("previewUrl"):
+            try:
+                # Download preview to temp location
+                music_file = f"/tmp/music_{job_id}.m4a"
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(track["previewUrl"])
+                    with open(music_file, "wb") as f:
+                        f.write(response.content)
+                logger.info(f"Downloaded music preview for job {job_id}")
+            except Exception as e:
+                logger.error(f"Failed to download music preview: {e}")
+                music_file = None
+
+        # Store job
+        jobs[job_id] = {
+            "id": job_id,
+            "prompt": request.prompt,
+            "type": "video",
+            "status": "processing",
+            "created_at": time.time(),
+            "user": user_email,
+            "track_name": track.get("name", "Unknown"),
+            "artist_name": track.get("artistName", "Unknown"),
+            "duration": settings.get("duration", 5),
+            "music_file": music_file,
+            "output_path": None,
+            "error": None,
+            "progress": 0,
+        }
+
+        # Create enhanced prompt with music context
+        enhanced_prompt = f"{request.prompt}, synchronized to music: {track.get('name', '')} by {track.get('artistName', '')}"
+
+        # Calculate frames based on duration
+        fps = settings.get("fps", 24)
+        duration = min(5, settings.get("duration", 5))  # Max 5 seconds
+        frames = duration * fps
+
+        # Submit video generation to ComfyUI
+        video_request = GenerateRequest(
+            prompt=enhanced_prompt,
+            type="video",
+            frames=frames,
+            fps=fps,
+            width=settings.get("resolution", "512x512").split("x")[0],
+            height=settings.get("resolution", "512x512").split("x")[1],
+            steps=20,  # Higher quality for music videos
+            cfg=8.5,
+        )
+
+        success = submit_to_comfyui(enhanced_prompt, job_id, request_type="video", frames=frames)
+
+        if not success:
+            jobs[job_id]["status"] = "failed"
+            jobs[job_id]["error"] = "Failed to submit to ComfyUI"
+            raise HTTPException(status_code=500, detail="Failed to submit generation job")
+
+        logger.info(f"Music video job {job_id} submitted successfully")
+
+        # Start monitoring in background
+        import threading
+
+        def monitor_music_video():
+            # Output will be a video file
+            output_path = f"/mnt/1TB-storage/ComfyUI/output/anime_{job_id}_00001.mp4"
+
+            for attempt in range(40):  # Check for up to 120 seconds (40 * 3s)
+                time.sleep(3)
+
+                if os.path.exists(output_path):
+                    jobs[job_id]["status"] = "completed"
+                    jobs[job_id]["output_path"] = output_path
+                    jobs[job_id]["progress"] = 100
+
+                    # If we have music, combine with ffmpeg
+                    if music_file and os.path.exists(music_file):
+                        try:
+                            final_output = f"/mnt/1TB-storage/ComfyUI/output/anime_music_{job_id}.mp4"
+                            cmd = [
+                                "ffmpeg", "-i", output_path, "-i", music_file,
+                                "-c:v", "copy", "-c:a", "aac", "-shortest",
+                                "-y", final_output
+                            ]
+                            subprocess.run(cmd, check=True, capture_output=True)
+                            jobs[job_id]["output_path"] = final_output
+                            logger.info(f"Combined video with music for job {job_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to combine with music: {e}")
+
+                    logger.info(f"Music video job {job_id} completed after {(attempt + 1) * 3} seconds")
+                    return
+
+                # Update progress
+                progress = min(95, (attempt + 1) * 2.5)
+                jobs[job_id]["progress"] = progress
+
+            # Timeout
+            jobs[job_id]["status"] = "failed"
+            jobs[job_id]["error"] = "Generation timed out"
+            logger.error(f"Music video job {job_id} timed out")
+
+        threading.Thread(target=monitor_music_video).start()
+
+        # Send initial WebSocket update
+        if job_id in websocket_connections:
+            await websocket_connections[job_id].send_json({
+                "job_id": job_id,
+                "status": "processing",
+                "progress": 0,
+                "track_name": track.get("name"),
+                "artist_name": track.get("artistName"),
+            })
+
+        return {
+            "job_id": job_id,
+            "status": "processing",
+            "estimated_time": duration * 15,  # Rough estimate
+            "track_name": track.get("name"),
+            "artist_name": track.get("artistName"),
+            "message": f"Music video generation started for {user_email}",
+        }
+
+    except Exception as e:
+        logger.error(f"Music video generation error: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 
 @app.get("/api/anime/generation/{job_id}/status")
@@ -460,7 +908,7 @@ async def get_job_status(job_id: str, user_data: dict = Depends(optional_auth)):
         raise HTTPException(status_code=403, detail="Access denied")
 
     # Check real-time status from ComfyUI
-    comfyui_id = job.get("comfyui_id", job_id)
+    comfyui_id = job.get("comfyui_prompt_id", job.get("comfyui_id", job_id))
     real_status = await get_comfyui_job_status(comfyui_id)
 
     if real_status:
@@ -479,13 +927,17 @@ async def get_job_status(job_id: str, user_data: dict = Depends(optional_auth)):
 
 
 @app.get("/api/anime/jobs")
-async def list_user_jobs(user_data: dict = Depends(require_auth)):
-    """List user's jobs (requires authentication)"""
+async def list_user_jobs(user_data: dict = Depends(optional_auth)):
+    """List user's jobs (public endpoint)"""
 
-    user_email = user_data.get("email")
-    user_jobs = [job for job in jobs.values() if job["user"] == user_email]
-
-    return {"jobs": user_jobs, "count": len(user_jobs), "user": user_email}
+    user_email = user_data.get("email", "anonymous") if user_data else "anonymous"
+    if user_email == "anonymous":
+        # Return all jobs for anonymous users
+        return {"jobs": list(jobs.values()), "count": len(jobs), "user": user_email}
+    else:
+        # Return user-specific jobs for authenticated users
+        user_jobs = [job for job in jobs.values() if job["user"] == user_email]
+        return {"jobs": user_jobs, "count": len(user_jobs), "user": user_email}
 
 
 @app.get("/api/anime/gallery")
@@ -699,6 +1151,59 @@ async def send_progress_update(
             # Remove failed connection
             if job_id in websocket_connections:
                 del websocket_connections[job_id]
+
+
+@app.get("/api/anime/video/{job_id}")
+async def serve_generated_video(job_id: str):
+    """Serve generated video file"""
+    import os
+    from pathlib import Path
+
+    # Check for video files in the structured directory
+    video_paths = [
+        f"/mnt/1TB-storage/ComfyUI/output/projects/video/anime_video_{job_id}.mp4",
+        f"/mnt/1TB-storage/ComfyUI/output/anime_video_{job_id}.mp4",
+        f"/mnt/1TB-storage/ComfyUI/output/projects/video/anime_video_{job_id}_00001_.mp4",
+    ]
+
+    for video_path in video_paths:
+        if os.path.exists(video_path):
+            return FileResponse(
+                video_path,
+                media_type="video/mp4",
+                filename=f"anime_video_{job_id}.mp4"
+            )
+
+    # Check job record for output path
+    if job_id in jobs and jobs[job_id].get("output_path"):
+        output_path = jobs[job_id]["output_path"]
+        full_path = f"/mnt/1TB-storage/ComfyUI/output/{output_path}"
+
+        if os.path.exists(full_path):
+            return FileResponse(
+                full_path,
+                media_type="video/mp4",
+                filename=f"anime_video_{job_id}.mp4"
+            )
+
+    raise HTTPException(status_code=404, detail="Video not found")
+
+
+@app.get("/api/anime/image/{job_id}")
+async def serve_generated_image(job_id: str):
+    """Serve generated image file"""
+    import os
+
+    image_path = f"/mnt/1TB-storage/ComfyUI/output/anime_{job_id}_00001_.png"
+
+    if os.path.exists(image_path):
+        return FileResponse(
+            image_path,
+            media_type="image/png",
+            filename=f"anime_{job_id}.png"
+        )
+    else:
+        raise HTTPException(status_code=404, detail="Image not found")
 
 
 if __name__ == "__main__":

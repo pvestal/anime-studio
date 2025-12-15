@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apple Music Integration Test - Tower</title>
+    <script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background: #f0f0f0;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 5px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .playlists {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .playlist-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .playlist-card:hover {
+            transform: scale(1.05);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .playlist-card img {
+            width: 100%;
+            border-radius: 5px;
+        }
+        .tracks {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+        }
+        .track-item {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .track-item:last-child {
+            border-bottom: none;
+        }
+        .preview-button {
+            padding: 5px 10px;
+            font-size: 12px;
+            background: #28a745;
+        }
+        #log {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎵 Tower Apple Music Integration Test</h1>
+
+    <div id="status" class="status info">Ready to connect...</div>
+
+    <div>
+        <button id="connectBtn" onclick="connectAppleMusic()">Connect Apple Music</button>
+        <button id="refreshBtn" onclick="loadPlaylists()" disabled>Refresh Playlists</button>
+        <button id="testSyncBtn" onclick="testAnimeSync()" disabled>Test Anime Sync</button>
+    </div>
+
+    <div id="playlists" class="playlists"></div>
+    <div id="tracks" class="tracks" style="display:none;"></div>
+
+    <h3>Debug Log:</h3>
+    <div id="log"></div>
+
+    <script>
+        let music = null;
+        let musicUserToken = null;
+        let developerToken = null;
+        let selectedPlaylistTracks = [];
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${time}] ${message}<br>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        async function connectAppleMusic() {
+            const statusDiv = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+
+            connectBtn.disabled = true;
+            statusDiv.className = 'status info';
+            statusDiv.textContent = 'Loading MusicKit...';
+
+            try {
+                // Step 1: Get developer token from Tower Auth
+                log('Fetching developer token from Tower Auth...');
+                const tokenResponse = await fetch('http://localhost:8088/api/auth/apple-music/developer-token');
+                const tokenData = await tokenResponse.json();
+                developerToken = tokenData.token;
+                log(`Got developer token (team: ${tokenData.team_id})`);
+
+                // Step 2: Configure MusicKit
+                log('Configuring MusicKit...');
+                await MusicKit.configure({
+                    developerToken: developerToken,
+                    app: {
+                        name: 'Tower Anime Production',
+                        build: '1.0.0'
+                    }
+                });
+
+                music = MusicKit.getInstance();
+                log('MusicKit configured successfully');
+
+                // Step 3: Authorize user
+                statusDiv.textContent = 'Please authorize Apple Music access...';
+                log('Requesting user authorization...');
+
+                musicUserToken = await music.authorize();
+
+                if (musicUserToken) {
+                    log(`User authorized! Token: ${musicUserToken.substring(0, 20)}...`);
+
+                    // Step 4: Store token in Tower auth
+                    log('Storing token in Tower auth...');
+                    const storeResponse = await fetch('http://localhost:8088/api/auth/apple-music/store-token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            musicUserToken: musicUserToken,
+                            provider: 'apple_music'
+                        })
+                    });
+
+                    const storeData = await storeResponse.json();
+                    if (storeData.session_id) {
+                        // Store session ID for future requests
+                        sessionStorage.setItem('tower_session_id', storeData.session_id);
+                        log(`Session created: ${storeData.session_id}`);
+                    }
+
+                    statusDiv.className = 'status success';
+                    statusDiv.textContent = '✅ Successfully connected to Apple Music!';
+
+                    document.getElementById('refreshBtn').disabled = false;
+                    document.getElementById('testSyncBtn').disabled = false;
+
+                    // Load playlists automatically
+                    await loadPlaylists();
+                }
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+                statusDiv.className = 'status error';
+                statusDiv.textContent = `❌ Failed: ${error.message}`;
+                connectBtn.disabled = false;
+            }
+        }
+
+        async function loadPlaylists() {
+            if (!musicUserToken) {
+                alert('Please connect to Apple Music first');
+                return;
+            }
+
+            const playlistsDiv = document.getElementById('playlists');
+            playlistsDiv.innerHTML = '<p>Loading playlists...</p>';
+
+            try {
+                log('Fetching playlists from backend...');
+
+                // Call our backend with the user token
+                const response = await fetch('http://localhost:8315/api/apple-music/playlists', {
+                    headers: {
+                        'Music-User-Token': musicUserToken
+                    }
+                });
+
+                const data = await response.json();
+                log(`Received ${data.playlists?.length || 0} playlists`);
+
+                if (data.playlists && data.playlists.length > 0) {
+                    playlistsDiv.innerHTML = '<h2>Your Playlists:</h2>';
+
+                    data.playlists.forEach(playlist => {
+                        const card = document.createElement('div');
+                        card.className = 'playlist-card';
+                        card.onclick = () => loadPlaylistTracks(playlist);
+
+                        const artwork = playlist.attributes?.artwork?.url
+                            ?.replace('{w}', '200')
+                            .replace('{h}', '200');
+
+                        card.innerHTML = `
+                            ${artwork ? `<img src="${artwork}" alt="${playlist.attributes.name}">` : ''}
+                            <h3>${playlist.attributes.name}</h3>
+                            <p>${playlist.attributes.trackCount || 0} tracks</p>
+                        `;
+
+                        playlistsDiv.appendChild(card);
+                    });
+                } else {
+                    playlistsDiv.innerHTML = '<p>No playlists found. Do you have any playlists in your Apple Music library?</p>';
+                }
+            } catch (error) {
+                log(`Failed to load playlists: ${error.message}`, 'error');
+                playlistsDiv.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+            }
+        }
+
+        async function loadPlaylistTracks(playlist) {
+            const tracksDiv = document.getElementById('tracks');
+            tracksDiv.style.display = 'block';
+            tracksDiv.innerHTML = '<p>Loading tracks...</p>';
+
+            try {
+                log(`Loading tracks for playlist: ${playlist.attributes.name}`);
+
+                const response = await fetch(`http://localhost:8315/api/apple-music/playlist/${playlist.id}/tracks`, {
+                    headers: {
+                        'Music-User-Token': musicUserToken
+                    }
+                });
+
+                const data = await response.json();
+                selectedPlaylistTracks = data.tracks || [];
+
+                log(`Loaded ${selectedPlaylistTracks.length} tracks`);
+
+                if (selectedPlaylistTracks.length > 0) {
+                    tracksDiv.innerHTML = `<h3>Tracks from "${playlist.attributes.name}":</h3>`;
+
+                    selectedPlaylistTracks.slice(0, 10).forEach(track => {
+                        const trackDiv = document.createElement('div');
+                        trackDiv.className = 'track-item';
+
+                        const previewUrl = track.attributes?.previews?.[0]?.url;
+
+                        trackDiv.innerHTML = `
+                            <div>
+                                <strong>${track.attributes.name}</strong><br>
+                                <small>${track.attributes.artistName} • ${track.attributes.albumName}</small>
+                            </div>
+                            ${previewUrl ? `<button class="preview-button" onclick="playPreview('${previewUrl}')">Preview</button>` : ''}
+                        `;
+
+                        tracksDiv.appendChild(trackDiv);
+                    });
+
+                    if (selectedPlaylistTracks.length > 10) {
+                        tracksDiv.innerHTML += `<p><em>...and ${selectedPlaylistTracks.length - 10} more tracks</em></p>`;
+                    }
+                } else {
+                    tracksDiv.innerHTML = '<p>No tracks found in this playlist</p>';
+                }
+            } catch (error) {
+                log(`Failed to load tracks: ${error.message}`, 'error');
+                tracksDiv.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+            }
+        }
+
+        function playPreview(url) {
+            const audio = new Audio(url);
+            audio.play();
+            log(`Playing preview: ${url}`);
+        }
+
+        async function testAnimeSync() {
+            if (selectedPlaylistTracks.length === 0) {
+                alert('Please select a playlist first');
+                return;
+            }
+
+            log('Testing anime sync with selected playlist...');
+
+            // In a real implementation, this would:
+            // 1. Select a track from the playlist
+            // 2. Send it to the anime sync endpoint
+            // 3. Generate an anime video with that music
+
+            const track = selectedPlaylistTracks[0];
+            log(`Would sync anime with: ${track.attributes.name} by ${track.attributes.artistName}`);
+
+            alert(`Ready to sync anime with:\n"${track.attributes.name}" by ${track.attributes.artistName}\n\nThis would generate an anime video with this track!`);
+        }
+
+        // Check for existing session on load
+        window.addEventListener('load', async () => {
+            log('Checking for existing Apple Music session...');
+
+            try {
+                const sessionId = sessionStorage.getItem('tower_session_id');
+                const headers = {};
+                if (sessionId) {
+                    headers['X-Session-Id'] = sessionId;
+                }
+
+                const response = await fetch('http://localhost:8088/api/auth/apple-music/status', {
+                    headers: headers
+                });
+                const data = await response.json();
+
+                if (data.authenticated && data.musicUserToken) {
+                    log('Found existing session, reconnecting...');
+                    musicUserToken = data.musicUserToken;
+                    document.getElementById('status').className = 'status success';
+                    document.getElementById('status').textContent = '✅ Reconnected to Apple Music';
+                    document.getElementById('refreshBtn').disabled = false;
+                    document.getElementById('testSyncBtn').disabled = false;
+
+                    // Try loading MusicKit if not loaded
+                    if (typeof MusicKit === 'undefined') {
+                        log('Loading MusicKit.js...');
+                        const script = document.createElement('script');
+                        script.src = 'https://js-cdn.music.apple.com/musickit/v3/musickit.js';
+                        script.onload = async () => {
+                            log('MusicKit loaded, configuring...');
+                            // Get developer token
+                            const tokenResponse = await fetch('http://localhost:8088/api/auth/apple-music/developer-token');
+                            const tokenData = await tokenResponse.json();
+
+                            await MusicKit.configure({
+                                developerToken: tokenData.token,
+                                app: {
+                                    name: 'Tower Anime Production',
+                                    build: '1.0.0'
+                                }
+                            });
+
+                            music = MusicKit.getInstance();
+                            await loadPlaylists();
+                        };
+                        document.head.appendChild(script);
+                    } else {
+                        await loadPlaylists();
+                    }
+                } else {
+                    log('No existing session found');
+                }
+            } catch (error) {
+                log('No existing session available');
+            }
+        });
+    </script>
+</body>
+</html>

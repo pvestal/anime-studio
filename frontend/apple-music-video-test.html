@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apple Music Video Sync - Tower</title>
+    <script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .step {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .step h2 {
+            color: #667eea;
+            margin-top: 0;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover:not(:disabled) {
+            background: #5a67d8;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .playlist-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .playlist-card, .track-item {
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: transform 0.2s;
+            border: 2px solid #e2e8f0;
+        }
+        .playlist-card:hover, .track-item:hover {
+            transform: scale(1.05);
+            border-color: #667eea;
+        }
+        .playlist-card img {
+            width: 100%;
+            border-radius: 3px;
+        }
+        .track-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 10px 0;
+        }
+        .track-item.selected {
+            background: #e6f3ff;
+            border-color: #667eea;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e2e8f0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            transition: width 0.3s;
+        }
+        #log {
+            margin-top: 20px;
+            padding: 10px;
+            background: #1a202c;
+            color: #00ff00;
+            border-radius: 5px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .success { background: #c6f6d5; color: #22543d; }
+        .error { background: #fed7d7; color: #742a2a; }
+        .info { background: #bee3f8; color: #2c5282; }
+        .video-result {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .video-result video {
+            max-width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 Apple Music → 🎌 Anime Video Generator</h1>
+
+        <div id="status" class="status info">Ready to connect to Apple Music...</div>
+
+        <!-- Step 1: Connect -->
+        <div class="step" id="step1">
+            <h2>Step 1: Connect Apple Music</h2>
+            <button id="connectBtn" onclick="connectAppleMusic()">Sign in with Apple Music</button>
+        </div>
+
+        <!-- Step 2: Select Playlist -->
+        <div class="step" id="step2" style="display:none;">
+            <h2>Step 2: Select Playlist</h2>
+            <div id="playlists" class="playlist-grid"></div>
+        </div>
+
+        <!-- Step 3: Select Track -->
+        <div class="step" id="step3" style="display:none;">
+            <h2>Step 3: Select Track & Generate</h2>
+            <div id="selectedPlaylist"></div>
+            <div id="tracks"></div>
+            <button id="generateBtn" onclick="generateVideo()" disabled>Generate Anime Video</button>
+        </div>
+
+        <!-- Generation Progress -->
+        <div class="step" id="progress" style="display:none;">
+            <h2>Generating Your Anime Video</h2>
+            <div id="progressInfo"></div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressBar" style="width:0%"></div>
+            </div>
+            <div id="progressText">0% Complete</div>
+        </div>
+
+        <!-- Result -->
+        <div class="video-result" id="result" style="display:none;">
+            <h2>✨ Your Anime Music Video is Ready!</h2>
+            <video id="resultVideo" controls></video>
+            <br>
+            <button onclick="downloadVideo()">Download Video</button>
+            <button onclick="reset()">Create Another</button>
+        </div>
+
+        <div id="log"></div>
+    </div>
+
+    <script>
+        let music = null;
+        let musicUserToken = null;
+        let selectedPlaylist = null;
+        let selectedTrack = null;
+        let currentJob = null;
+        let ws = null;
+
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML = `[${time}] ${message}<br>` + logDiv.innerHTML;
+            console.log(message);
+        }
+
+        async function connectAppleMusic() {
+            const btn = document.getElementById('connectBtn');
+            btn.disabled = true;
+            btn.textContent = 'Connecting...';
+
+            try {
+                // Get developer token
+                log('Fetching developer token from Tower Auth...');
+                const tokenResponse = await fetch('http://localhost:8088/api/auth/apple-music/developer-token');
+                const tokenData = await tokenResponse.json();
+                log(`Got token for team: ${tokenData.team_id}`);
+
+                // Configure MusicKit
+                log('Configuring MusicKit...');
+                await MusicKit.configure({
+                    developerToken: tokenData.token,
+                    app: {
+                        name: 'Tower Anime Production',
+                        build: '1.0.0'
+                    }
+                });
+
+                music = MusicKit.getInstance();
+
+                // Authorize user
+                log('Requesting Apple Music authorization...');
+                musicUserToken = await music.authorize();
+
+                if (musicUserToken) {
+                    log('User authorized successfully!');
+
+                    // Store token
+                    await fetch('http://localhost:8088/api/auth/apple-music/authorize', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            user_token: musicUserToken,
+                            user_id: 'patrick'
+                        })
+                    });
+
+                    document.getElementById('status').className = 'status success';
+                    document.getElementById('status').textContent = '✅ Connected to Apple Music!';
+
+                    document.getElementById('step2').style.display = 'block';
+                    await loadPlaylists();
+                }
+            } catch (error) {
+                log(`Error: ${error.message}`);
+                document.getElementById('status').className = 'status error';
+                document.getElementById('status').textContent = `❌ Failed: ${error.message}`;
+                btn.disabled = false;
+                btn.textContent = 'Sign in with Apple Music';
+            }
+        }
+
+        async function loadPlaylists() {
+            log('Loading your playlists...');
+            const playlistsDiv = document.getElementById('playlists');
+            playlistsDiv.innerHTML = '<p>Loading...</p>';
+
+            try {
+                const response = await fetch('http://localhost:8315/api/apple-music/playlists', {
+                    headers: {
+                        'Music-User-Token': musicUserToken
+                    }
+                });
+
+                const data = await response.json();
+                log(`Loaded ${data.playlists?.length || 0} playlists`);
+
+                playlistsDiv.innerHTML = '';
+                data.playlists?.forEach(playlist => {
+                    const card = document.createElement('div');
+                    card.className = 'playlist-card';
+                    card.onclick = () => selectPlaylist(playlist);
+
+                    const artwork = playlist.attributes?.artwork?.url
+                        ?.replace('{w}', '150')
+                        .replace('{h}', '150');
+
+                    card.innerHTML = `
+                        ${artwork ? `<img src="${artwork}" alt="${playlist.attributes.name}">` : ''}
+                        <h4>${playlist.attributes.name}</h4>
+                        <small>${playlist.attributes.trackCount || 0} tracks</small>
+                    `;
+                    playlistsDiv.appendChild(card);
+                });
+            } catch (error) {
+                log(`Failed to load playlists: ${error.message}`);
+                playlistsDiv.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+            }
+        }
+
+        async function selectPlaylist(playlist) {
+            selectedPlaylist = playlist;
+            log(`Selected playlist: ${playlist.attributes.name}`);
+
+            document.getElementById('selectedPlaylist').innerHTML = `
+                <h3>${playlist.attributes.name}</h3>
+                <button onclick="document.getElementById('step2').style.display='block';document.getElementById('step3').style.display='none';">
+                    Change Playlist
+                </button>
+            `;
+
+            document.getElementById('step2').style.display = 'none';
+            document.getElementById('step3').style.display = 'block';
+
+            // Load tracks
+            const tracksDiv = document.getElementById('tracks');
+            tracksDiv.innerHTML = '<p>Loading tracks...</p>';
+
+            try {
+                const response = await fetch(`http://localhost:8315/api/apple-music/playlist/${playlist.id}/tracks`, {
+                    headers: {
+                        'Music-User-Token': musicUserToken
+                    }
+                });
+
+                const data = await response.json();
+                log(`Loaded ${data.tracks?.length || 0} tracks`);
+
+                tracksDiv.innerHTML = '<h4>Select a track:</h4>';
+                data.tracks?.slice(0, 20).forEach(track => {
+                    const item = document.createElement('div');
+                    item.className = 'track-item';
+                    item.onclick = () => selectTrack(track, item);
+                    item.innerHTML = `
+                        <div>
+                            <strong>${track.attributes.name}</strong><br>
+                            <small>${track.attributes.artistName} • ${track.attributes.albumName}</small>
+                        </div>
+                        <span>${formatDuration(track.attributes.durationInMillis)}</span>
+                    `;
+                    tracksDiv.appendChild(item);
+                });
+            } catch (error) {
+                log(`Failed to load tracks: ${error.message}`);
+                tracksDiv.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+            }
+        }
+
+        function selectTrack(track, element) {
+            // Clear previous selection
+            document.querySelectorAll('.track-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            element.classList.add('selected');
+
+            selectedTrack = track;
+            log(`Selected track: ${track.attributes.name} by ${track.attributes.artistName}`);
+
+            document.getElementById('generateBtn').disabled = false;
+        }
+
+        async function generateVideo() {
+            if (!selectedTrack) {
+                alert('Please select a track');
+                return;
+            }
+
+            document.getElementById('generateBtn').disabled = true;
+            document.getElementById('progress').style.display = 'block';
+
+            const progressInfo = document.getElementById('progressInfo');
+            progressInfo.innerHTML = `
+                <p><strong>Track:</strong> ${selectedTrack.attributes.name}</p>
+                <p><strong>Artist:</strong> ${selectedTrack.attributes.artistName}</p>
+            `;
+
+            // Connect WebSocket for progress
+            connectWebSocket();
+
+            try {
+                log('Starting video generation...');
+                const response = await fetch('http://localhost:8328/api/anime/generate-with-music', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        track: {
+                            id: selectedTrack.id,
+                            name: selectedTrack.attributes.name,
+                            artistName: selectedTrack.attributes.artistName,
+                            albumName: selectedTrack.attributes.albumName,
+                            duration: selectedTrack.attributes.durationInMillis,
+                            previewUrl: selectedTrack.attributes.previews?.[0]?.url
+                        },
+                        settings: {
+                            style: 'anime',
+                            duration: 3,  // 3 seconds for demo
+                            resolution: '512x512',
+                            fps: 24
+                        },
+                        prompt: `Beautiful anime music video, ${selectedTrack.attributes.name}, dynamic, emotional, high quality`
+                    })
+                });
+
+                const job = await response.json();
+                currentJob = job;
+                log(`Generation job started: ${job.job_id}`);
+
+                // Start polling for status
+                pollJobStatus(job.job_id);
+
+            } catch (error) {
+                log(`Generation failed: ${error.message}`);
+                alert('Failed to start generation: ' + error.message);
+                document.getElementById('generateBtn').disabled = false;
+                document.getElementById('progress').style.display = 'none';
+            }
+        }
+
+        function connectWebSocket() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                return;
+            }
+
+            ws = new WebSocket('ws://localhost:8328/ws/progress');
+
+            ws.onopen = () => {
+                log('WebSocket connected for progress updates');
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (currentJob && data.job_id === currentJob.job_id) {
+                    updateProgress(data.progress || 0);
+
+                    if (data.status === 'completed' && data.output_url) {
+                        showResult(data.output_url);
+                    } else if (data.status === 'failed') {
+                        alert('Generation failed: ' + (data.error || 'Unknown error'));
+                        reset();
+                    }
+                }
+            };
+
+            ws.onerror = (error) => {
+                log('WebSocket error: ' + error);
+            };
+        }
+
+        async function pollJobStatus(jobId) {
+            const checkStatus = async () => {
+                try {
+                    const response = await fetch(`http://localhost:8328/api/anime/generation/${jobId}/status`);
+                    const status = await response.json();
+
+                    updateProgress(status.progress || 0);
+
+                    if (status.status === 'completed' && status.output_path) {
+                        showResult(status.output_path);
+                    } else if (status.status === 'failed') {
+                        alert('Generation failed: ' + (status.error || 'Unknown error'));
+                        reset();
+                    } else {
+                        setTimeout(checkStatus, 2000);  // Check again in 2 seconds
+                    }
+                } catch (error) {
+                    log('Status check error: ' + error.message);
+                    setTimeout(checkStatus, 2000);
+                }
+            };
+
+            setTimeout(checkStatus, 2000);
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('progressText').textContent = percent + '% Complete';
+        }
+
+        function showResult(outputPath) {
+            log('Video generation complete!');
+            document.getElementById('progress').style.display = 'none';
+            document.getElementById('result').style.display = 'block';
+
+            // Convert file path to URL
+            const videoUrl = outputPath.replace('/mnt/1TB-storage/ComfyUI/output/', '/output/');
+            document.getElementById('resultVideo').src = `http://localhost:8328${videoUrl}`;
+        }
+
+        function downloadVideo() {
+            const video = document.getElementById('resultVideo');
+            const a = document.createElement('a');
+            a.href = video.src;
+            a.download = `anime_${selectedTrack.attributes.name.replace(/\s+/g, '_')}.mp4`;
+            a.click();
+        }
+
+        function reset() {
+            document.getElementById('generateBtn').disabled = false;
+            document.getElementById('progress').style.display = 'none';
+            document.getElementById('result').style.display = 'none';
+            updateProgress(0);
+            currentJob = null;
+        }
+
+        function formatDuration(ms) {
+            if (!ms) return '0:00';
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+        }
+
+        // Check for existing session on load
+        window.addEventListener('load', async () => {
+            log('Checking for existing Apple Music session...');
+            try {
+                const response = await fetch('http://localhost:8088/api/auth/apple-music/status');
+                const data = await response.json();
+
+                if (data.authorized) {
+                    log('Found existing session, attempting to reconnect...');
+                    // We'd need to reinitialize MusicKit here with stored token
+                    // For now, user needs to reconnect
+                    document.getElementById('status').textContent = 'Previous session found. Please reconnect.';
+                }
+            } catch (error) {
+                log('No existing session found');
+            }
+        });
+    </script>
+</body>
+</html>
