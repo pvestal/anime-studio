@@ -1,0 +1,22 @@
+{
+  "gate": "Gate 1: Asset Readiness & Style Consistency",
+  "pass": false,
+  "start_time": "2025-12-15T21:27:10.201617",
+  "end_time": "2025-12-15T21:27:10.392626",
+  "duration_seconds": 0.191009,
+  "tests": {
+    "asset_completeness": {
+      "pass": false,
+      "results": {
+        "kai_character": false
+      }
+    },
+    "style_consistency": {
+      "pass": false,
+      "results": {
+        "/home/patrick/ComfyUI/output/anime_a9afbef3-19c2-4f4b-8768-e71a941737c1_00001_.png": 0.5583881139755249,
+        "/home/patrick/ComfyUI/output/anime_a1ecac56-ccfe-4d52-a3e5-a254917e37ae_00001_.png": 0.5441376566886902
+      }
+    }
+  }
+}

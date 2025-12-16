@@ -1,0 +1,48 @@
+{
+  "gate": "Gate 2: Frame Generation Quality",
+  "pass": false,
+  "start_time": "2025-12-15T21:08:28.067944",
+  "end_time": "2025-12-15T21:08:33.353290",
+  "duration_seconds": 5.285346,
+  "character_name": "Kai Nakamura",
+  "prompt": "anime male character, dark hair, serious expression, detective coat, urban setting",
+  "frame_count": 3,
+  "passed_frames": 0,
+  "failed_frames": 3,
+  "frames": {
+    "/home/patrick/ComfyUI/output/anime_07100f1a-cdde-4188-8b7a-2069610f6a17_00001_.png": {
+      "frame_id": "anime_07100f1a-cdde-4188-8b7a-2069610f6a17_00001_.png",
+      "character_fidelity_score": 0.8895529906177178,
+      "artifact_detection_score": 1.0,
+      "prompt_adherence_score": 0.3834365904331207,
+      "overall_quality": 0.7576631936836128,
+      "passed": false,
+      "issues": [
+        "Prompt adherence low (0.383)"
+      ]
+    },
+    "/home/patrick/ComfyUI/output/anime_154ccef1-9e49-4ad5-ba81-08ffa8e7ed7b_00001_.png": {
+      "frame_id": "anime_154ccef1-9e49-4ad5-ba81-08ffa8e7ed7b_00001_.png",
+      "character_fidelity_score": 0.6881749276663269,
+      "artifact_detection_score": 1.0,
+      "prompt_adherence_score": 0.38121283054351807,
+      "overall_quality": 0.6897959194032817,
+      "passed": false,
+      "issues": [
+        "Character fidelity low (0.688)",
+        "Prompt adherence low (0.381)"
+      ]
+    },
+    "/home/patrick/ComfyUI/output/anime_c5842473-a637-460f-8e21-078da0ad0488_00001_.png": {
+      "frame_id": "anime_c5842473-a637-460f-8e21-078da0ad0488_00001_.png",
+      "character_fidelity_score": 0.8966913026680532,
+      "artifact_detection_score": 1.0,
+      "prompt_adherence_score": 0.3690030872821808,
+      "overall_quality": 0.7552314633167446,
+      "passed": false,
+      "issues": [
+        "Prompt adherence low (0.369)"
+      ]
+    }
+  }
+}

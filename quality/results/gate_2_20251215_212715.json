@@ -1,0 +1,59 @@
+{
+  "gate": "Gate 2: Frame Generation Quality",
+  "pass": true,
+  "start_time": "2025-12-15T21:27:10.392909",
+  "end_time": "2025-12-15T21:27:15.534503",
+  "duration_seconds": 5.141594,
+  "character_name": "Kai Nakamura",
+  "prompt": "anime detective turning in rainy alley, dark coat, serious expression, cinematic lighting",
+  "frame_count": 5,
+  "passed_frames": 5,
+  "failed_frames": 0,
+  "frames": {
+    "/home/patrick/ComfyUI/output/anime_a9afbef3-19c2-4f4b-8768-e71a941737c1_00001_.png": {
+      "frame_id": "anime_a9afbef3-19c2-4f4b-8768-e71a941737c1_00001_.png",
+      "character_fidelity_score": 0.7925704097580031,
+      "artifact_detection_score": 1.0,
+      "prompt_adherence_score": 0.36035630106925964,
+      "overall_quality": 0.7176422369424209,
+      "passed": true,
+      "issues": []
+    },
+    "/home/patrick/ComfyUI/output/anime_a1ecac56-ccfe-4d52-a3e5-a254917e37ae_00001_.png": {
+      "frame_id": "anime_a1ecac56-ccfe-4d52-a3e5-a254917e37ae_00001_.png",
+      "character_fidelity_score": 0.6256282892205834,
+      "artifact_detection_score": 1.0,
+      "prompt_adherence_score": 0.36933213472366333,
+      "overall_quality": 0.6649868079814155,
+      "passed": true,
+      "issues": []
+    },
+    "/home/patrick/ComfyUI/output/anime_b778bb29-1b3f-47ab-a134-2aad7ee93ede_00001_.png": {
+      "frame_id": "anime_b778bb29-1b3f-47ab-a134-2aad7ee93ede_00001_.png",
+      "character_fidelity_score": 0.6473647240884912,
+      "artifact_detection_score": 1.0,
+      "prompt_adherence_score": 0.37146347761154175,
+      "overall_quality": 0.6729427339000109,
+      "passed": true,
+      "issues": []
+    },
+    "/home/patrick/ComfyUI/output/anime_349a85ca-075b-46d2-b783-c58568aa6322_00001_.png": {
+      "frame_id": "anime_349a85ca-075b-46d2-b783-c58568aa6322_00001_.png",
+      "character_fidelity_score": 0.6099025039252445,
+      "artifact_detection_score": 1.0,
+      "prompt_adherence_score": 0.3924044966697693,
+      "overall_quality": 0.6674356668650047,
+      "passed": true,
+      "issues": []
+    },
+    "/home/patrick/ComfyUI/output/anime_fd5ef113-207c-4d0f-9c42-ef565a0b9500_00001_.png": {
+      "frame_id": "anime_fd5ef113-207c-4d0f-9c42-ef565a0b9500_00001_.png",
+      "character_fidelity_score": 0.7672251140876382,
+      "artifact_detection_score": 1.0,
+      "prompt_adherence_score": 0.36284539103507996,
+      "overall_quality": 0.7100235017075728,
+      "passed": true,
+      "issues": []
+    }
+  }
+}

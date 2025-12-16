@@ -1,0 +1,62 @@
+{
+  "gate": "Gate 3: Temporal Consistency & Motion Smoothness",
+  "pass": false,
+  "start_time": "2025-12-15T21:35:12.342727",
+  "end_time": "2025-12-15T21:35:17.640981",
+  "duration_seconds": 5.298254,
+  "sequence": {
+    "name": "kai_turning_sequence",
+    "frame_count": 5,
+    "frames": [
+      "anime_ef96dd9a-8baf-4a3c-8bc9-d3b25e7f92b3_00001_.png",
+      "anime_7e7c59c9-1304-4d0c-b34c-1b342dffc546_00001_.png",
+      "anime_ace69d48-c00a-4f12-aca4-530500ad9c65_00001_.png",
+      "anime_c095b023-b851-4775-a211-60ccdf0a3826_00001_.png",
+      "anime_e56d8144-87ba-46d3-a0d7-3511793eca53_00001_.png"
+    ]
+  },
+  "quality_metrics": {
+    "sequence_id": "kai_turning_sequence",
+    "frame_count": 5,
+    "flicker_score": 0.276196369426765,
+    "motion_smoothness_score": 0.7672836780548096,
+    "temporal_consistency_score": 0.3052604997847336,
+    "overall_score": 0.4495801824221028,
+    "passed": false,
+    "issues": [
+      "Temporal consistency low (0.305)",
+      "Motion not smooth (0.767)",
+      "Flicker detected (0.276)"
+    ]
+  },
+  "detailed_analysis": {
+    "temporal_consistency": {
+      "temporal_consistency": 0.3052604997847336,
+      "consistency_scores": [
+        0.31677385720847306,
+        0.305126881630011,
+        0.3229448908736852,
+        0.276196369426765
+      ],
+      "frame_pairs_analyzed": 4
+    },
+    "motion_smoothness": {
+      "motion_smoothness": 0.7672836780548096,
+      "motion_scores": [
+        0.7521424293518066,
+        0.8011757135391235,
+        0.7485328912734985
+      ],
+      "motion_variance": 373.2513427734375,
+      "flow_magnitudes": [
+        386.13623046875,
+        368.2328186035156,
+        339.247314453125
+      ]
+    }
+  },
+  "video_analysis": {
+    "video_created": false,
+    "reason": "Video creation failed"
+  }
+}

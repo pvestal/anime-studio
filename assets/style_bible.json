@@ -1,0 +1,15 @@
+{
+  "color_palette": [
+    "#2C3E50",
+    "#E74C3C",
+    "#3498DB",
+    "#F39C12"
+  ],
+  "line_style": "clean_manga",
+  "character_proportions": {
+    "head_to_body": 1.8,
+    "eye_size": "large"
+  },
+  "lighting_style": "dramatic_shadows",
+  "version": "1.0"
+}

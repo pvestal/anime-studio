@@ -1,0 +1,14 @@
+{
+  "project_id": "cyberpunk_goblin_slayer",
+  "template": "cyberpunk_action",
+  "created_at": "2025-12-15T00:00:00Z",
+  "migrated_at": "2025-12-16T00:23:26.078015",
+  "isolation": {
+    "echo_learning": "project-specific",
+    "character_references": "project-specific",
+    "thresholds": "project-specific",
+    "genre_library_access": [
+      "cyberpunk"
+    ]
+  }
+}

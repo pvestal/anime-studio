@@ -1,0 +1,348 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AnimeProjectState",
+  "description": "Single source of truth for anime production project state",
+  "type": "object",
+  "required": ["project", "version", "state", "timeline", "assets", "history"],
+
+  "properties": {
+    "project": {
+      "type": "object",
+      "description": "Project metadata and configuration",
+      "properties": {
+        "id": {"type": "string", "format": "uuid"},
+        "name": {"type": "string"},
+        "format": {"type": "string", "enum": ["episode", "vignette", "trailer", "feature"]},
+        "duration_seconds": {"type": "number"},
+        "fps": {"type": "integer", "default": 24},
+        "resolution": {
+          "type": "object",
+          "properties": {
+            "width": {"type": "integer"},
+            "height": {"type": "integer"}
+          }
+        },
+        "created_at": {"type": "string", "format": "date-time"},
+        "updated_at": {"type": "string", "format": "date-time"},
+        "creator": {"type": "string"},
+        "style_guide_id": {"type": "string"}
+      }
+    },
+
+    "version": {
+      "type": "object",
+      "description": "Version control metadata",
+      "properties": {
+        "commit_hash": {"type": "string"},
+        "branch": {"type": "string", "default": "main"},
+        "parent_commit": {"type": "string"},
+        "message": {"type": "string"},
+        "author": {"type": "string"},
+        "timestamp": {"type": "string", "format": "date-time"},
+        "tags": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+
+    "state": {
+      "type": "object",
+      "description": "Current production state",
+      "properties": {
+        "phase": {
+          "type": "string",
+          "enum": ["script", "storyboard", "animatic", "production", "post", "final"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "in_progress", "review", "approved", "locked"]
+        },
+        "completion_percentage": {"type": "number", "minimum": 0, "maximum": 100},
+        "quality_gates_passed": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+
+    "timeline": {
+      "type": "object",
+      "description": "Scene-by-scene timeline structure",
+      "properties": {
+        "scenes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {"type": "string"},
+              "scene_number": {"type": "integer"},
+              "name": {"type": "string"},
+              "duration_frames": {"type": "integer"},
+              "location": {"type": "string"},
+              "time_of_day": {"type": "string"},
+              "description": {"type": "string"},
+
+              "shots": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {"type": "string"},
+                    "shot_number": {"type": "string"},
+                    "shot_type": {"type": "string", "enum": ["wide", "medium", "close", "extreme_close", "tracking", "pan", "static"]},
+                    "duration_frames": {"type": "integer"},
+
+                    "composition": {
+                      "type": "object",
+                      "properties": {
+                        "characters": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "character_id": {"type": "string"},
+                              "position": {"type": "string", "enum": ["left", "center", "right", "background"]},
+                              "pose_category": {"type": "string", "enum": ["action", "casual", "portrait", "emotion"]},
+                              "expression": {"type": "string"},
+                              "action": {"type": "string"}
+                            }
+                          }
+                        },
+                        "background_id": {"type": "string"},
+                        "camera": {
+                          "type": "object",
+                          "properties": {
+                            "angle": {"type": "string"},
+                            "movement": {"type": "string"},
+                            "focal_point": {"type": "string"}
+                          }
+                        }
+                      }
+                    },
+
+                    "generation_params": {
+                      "type": "object",
+                      "properties": {
+                        "prompt": {"type": "string"},
+                        "negative_prompt": {"type": "string"},
+                        "style_modifiers": {"type": "object"},
+                        "technical_params": {
+                          "type": "object",
+                          "properties": {
+                            "steps": {"type": "integer"},
+                            "cfg": {"type": "number"},
+                            "seed": {"type": "integer"},
+                            "model": {"type": "string"}
+                          }
+                        }
+                      }
+                    },
+
+                    "render_state": {
+                      "type": "object",
+                      "properties": {
+                        "status": {"type": "string", "enum": ["pending", "generating", "completed", "failed", "approved"]},
+                        "asset_path": {"type": "string"},
+                        "thumbnail_path": {"type": "string"},
+                        "quality_scores": {
+                          "type": "object",
+                          "properties": {
+                            "technical": {"type": "number"},
+                            "consistency": {"type": "number"},
+                            "style": {"type": "number"}
+                          }
+                        },
+                        "generation_time": {"type": "number"},
+                        "last_rendered": {"type": "string", "format": "date-time"}
+                      }
+                    },
+
+                    "dialogue": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "character": {"type": "string"},
+                          "text": {"type": "string"},
+                          "start_frame": {"type": "integer"},
+                          "end_frame": {"type": "integer"},
+                          "emotion": {"type": "string"}
+                        }
+                      }
+                    },
+
+                    "audio": {
+                      "type": "object",
+                      "properties": {
+                        "dialogue_track": {"type": "string"},
+                        "music_track": {"type": "string"},
+                        "sfx_tracks": {"type": "array", "items": {"type": "string"}},
+                        "ambient_track": {"type": "string"}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "assets": {
+      "type": "object",
+      "description": "Asset library references",
+      "properties": {
+        "characters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {"type": "string"},
+              "name": {"type": "string"},
+              "version": {"type": "string"},
+              "design_sheet_path": {"type": "string"},
+              "reference_embeddings": {
+                "type": "object",
+                "properties": {
+                  "action": {"type": "array", "items": {"type": "string"}},
+                  "casual": {"type": "array", "items": {"type": "string"}},
+                  "portrait": {"type": "array", "items": {"type": "string"}},
+                  "canonical": {"type": "string"}
+                }
+              },
+              "consistency_threshold": {"type": "number", "default": 0.75},
+              "metadata": {
+                "type": "object",
+                "properties": {
+                  "age": {"type": "string"},
+                  "personality": {"type": "string"},
+                  "role": {"type": "string"},
+                  "voice_actor": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+
+        "backgrounds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {"type": "string"},
+              "name": {"type": "string"},
+              "location_type": {"type": "string"},
+              "time_variants": {
+                "type": "object",
+                "properties": {
+                  "dawn": {"type": "string"},
+                  "day": {"type": "string"},
+                  "dusk": {"type": "string"},
+                  "night": {"type": "string"}
+                }
+              },
+              "style_params": {"type": "object"}
+            }
+          }
+        },
+
+        "style_guides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {"type": "string"},
+              "name": {"type": "string"},
+              "reference_images": {"type": "array", "items": {"type": "string"}},
+              "color_palette": {"type": "array", "items": {"type": "string"}},
+              "line_weight": {"type": "string"},
+              "shading_style": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+
+    "history": {
+      "type": "object",
+      "description": "Change history and branches",
+      "properties": {
+        "commits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "hash": {"type": "string"},
+              "parent": {"type": "string"},
+              "timestamp": {"type": "string", "format": "date-time"},
+              "author": {"type": "string"},
+              "message": {"type": "string"},
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {"type": "string", "enum": ["add", "modify", "delete"]},
+                    "path": {"type": "string"},
+                    "before": {"type": "object"},
+                    "after": {"type": "object"}
+                  }
+                }
+              }
+            }
+          }
+        },
+
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "created_from": {"type": "string"},
+              "head": {"type": "string"},
+              "description": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+
+    "echo_memory": {
+      "type": "object",
+      "description": "Echo's learned preferences and context",
+      "properties": {
+        "creative_decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "instruction": {"type": "string"},
+              "context": {"type": "object"},
+              "suggestion": {"type": "object"},
+              "user_response": {"type": "string", "enum": ["accepted", "modified", "rejected"]},
+              "final_params": {"type": "object"},
+              "timestamp": {"type": "string", "format": "date-time"}
+            }
+          }
+        },
+
+        "style_preferences": {
+          "type": "object",
+          "properties": {
+            "learned_associations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "term": {"type": "string"},
+                  "parameters": {"type": "object"},
+                  "confidence": {"type": "number"}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

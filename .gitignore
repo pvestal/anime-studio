@@ -7,84 +7,77 @@ __pycache__/
 venv/
 ENV/
 env/
-.venv
+*.egg-info/
+dist/
+build/
 
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
+# Project-specific (isolated data)
+projects/*/rendered/
+projects/*/echo_learning/decisions.json
+projects/*/.history/
+projects/*/temp/
+projects/*/cache/
 
-# Environment and secrets (CRITICAL!)
-.env
-.env.*
+# ComfyUI outputs (large files)
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.avi
+*.mov
+*.gif
+
+# But keep reference images
+!projects/*/assets/characters/*.png
+!projects/*/assets/backgrounds/*.png
+!system/genre_libraries/references/*.png
+
+# Sensitive data
 *.env
-*.pem
-*.key
-*.p8
-*_token.txt
-credentials/
-secrets/
+.env.local
+secrets.json
+credentials.json
 
-# IDE
+# System files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
 .vscode/
 .idea/
-*.swp
-*~
-.DS_Store
 
 # Logs
 *.log
 logs/
+*.err
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
 
-# Testing
-.coverage
-.pytest_cache/
-
-# Media files (large)
-*.mp4
-*.mp3
-*.wav
-data/music/
-data/videos/
-output/
-outputs/
-frames/
-
-# Temporary
-tmp/
-temp/
-cache/
-
-# Development and experimental files
-*_test.py
-*_testing.py
-test_*.py
-FINAL_*.py
-FUCKING_*.py
-WORKING_*.py
-*_now.py
-*_debug.py
-*_scratch.py
-experimental/
-playground/
-scratch/
-debug/
-testing/
-
-# Generated content directories
-generated_videos/
-generated_images/
-exports/
-renders/
-output_*/
-
-# Backup files
-*.backup*
+# Backups
+*.backup
 *.bak
-*.old
-backups/
+*_backup.*
+*_corrupted.*
+
+# Test outputs
+test_outputs/
+test_*.json
+ISOLATION_TEST_REPORT.json
+
+# Migration artifacts
+MIGRATION_SUMMARY.json
+workspace_old.json
+
+# Node modules (if any frontend)
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+
+# Keep project templates and genre libraries
+!system/templates/*.json
+!system/genre_libraries/*.json
+!system/core.json

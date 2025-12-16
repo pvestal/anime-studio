@@ -1,0 +1,319 @@
+{
+  "test_type": "COMPREHENSIVE_VIDEO_QUALITY_GATES",
+  "video_path": "/opt/tower-anime-production/generated/videos/kai_sequence_20251215_213459.mp4",
+  "frames_used": [
+    "/home/patrick/ComfyUI/output/anime_ef96dd9a-8baf-4a3c-8bc9-d3b25e7f92b3_00001_.png",
+    "/home/patrick/ComfyUI/output/anime_7e7c59c9-1304-4d0c-b34c-1b342dffc546_00001_.png",
+    "/home/patrick/ComfyUI/output/anime_ace69d48-c00a-4f12-aca4-530500ad9c65_00001_.png",
+    "/home/patrick/ComfyUI/output/anime_c095b023-b851-4775-a211-60ccdf0a3826_00001_.png",
+    "/home/patrick/ComfyUI/output/anime_e56d8144-87ba-46d3-a0d7-3511793eca53_00001_.png"
+  ],
+  "comprehensive_results": {
+    "test_session": {
+      "start_time": "2025-12-15T21:35:06.964358",
+      "end_time": "2025-12-15T21:35:23.436817",
+      "duration_seconds": 16.472459,
+      "test_type": "comprehensive_quality_gates",
+      "version": "1.0.0"
+    },
+    "configuration": {
+      "character_name": "Kai Nakamura",
+      "sequence_name": "kai_turning_sequence",
+      "intended_story": "Detective Kai Nakamura turns around in a dark alley, rain reflecting off his coat as he senses danger",
+      "asset_count": 2,
+      "frame_count": 5,
+      "sequence_frame_count": 5,
+      "has_audio": false
+    },
+    "overall_results": {
+      "pass": false,
+      "average_score": 0.4753357487973799,
+      "gates_passed": 0,
+      "gates_failed": 4,
+      "total_gates": 4
+    },
+    "gate_results": {
+      "gate_1": {
+        "gate": "Gate 1: Asset Readiness & Style Consistency",
+        "pass": false,
+        "start_time": "2025-12-15T21:35:06.964460",
+        "end_time": "2025-12-15T21:35:07.198058",
+        "duration_seconds": 0.233598,
+        "tests": {
+          "asset_completeness": {
+            "pass": true,
+            "results": {
+              "kai_character": true
+            }
+          },
+          "style_consistency": {
+            "pass": false,
+            "results": {
+              "/home/patrick/ComfyUI/output/anime_ef96dd9a-8baf-4a3c-8bc9-d3b25e7f92b3_00001_.png": 0.5656812191009521,
+              "/home/patrick/ComfyUI/output/anime_7e7c59c9-1304-4d0c-b34c-1b342dffc546_00001_.png": 0.5816552639007568
+            }
+          }
+        }
+      },
+      "gate_2": {
+        "gate": "Gate 2: Frame Generation Quality",
+        "pass": false,
+        "start_time": "2025-12-15T21:35:07.198351",
+        "end_time": "2025-12-15T21:35:12.342221",
+        "duration_seconds": 5.14387,
+        "character_name": "Kai Nakamura",
+        "prompt": "anime detective turning in rainy alley, dark coat, serious expression, cinematic lighting",
+        "frame_count": 5,
+        "passed_frames": 2,
+        "failed_frames": 3,
+        "frames": {
+          "/home/patrick/ComfyUI/output/anime_ef96dd9a-8baf-4a3c-8bc9-d3b25e7f92b3_00001_.png": {
+            "frame_id": "anime_ef96dd9a-8baf-4a3c-8bc9-d3b25e7f92b3_00001_.png",
+            "character_fidelity_score": 0.5280131633839777,
+            "artifact_detection_score": 1.0,
+            "prompt_adherence_score": 0.37718403339385986,
+            "overall_quality": 0.6350657322592792,
+            "passed": false,
+            "issues": [
+              "Character fidelity low (0.528)"
+            ]
+          },
+          "/home/patrick/ComfyUI/output/anime_7e7c59c9-1304-4d0c-b34c-1b342dffc546_00001_.png": {
+            "frame_id": "anime_7e7c59c9-1304-4d0c-b34c-1b342dffc546_00001_.png",
+            "character_fidelity_score": 0.7142435372163458,
+            "artifact_detection_score": 1.0,
+            "prompt_adherence_score": 0.3646409511566162,
+            "overall_quality": 0.6929614961243207,
+            "passed": true,
+            "issues": []
+          },
+          "/home/patrick/ComfyUI/output/anime_ace69d48-c00a-4f12-aca4-530500ad9c65_00001_.png": {
+            "frame_id": "anime_ace69d48-c00a-4f12-aca4-530500ad9c65_00001_.png",
+            "character_fidelity_score": 0.5555919610810125,
+            "artifact_detection_score": 1.0,
+            "prompt_adherence_score": 0.36621835827827454,
+            "overall_quality": 0.640603439786429,
+            "passed": false,
+            "issues": [
+              "Character fidelity low (0.556)"
+            ]
+          },
+          "/home/patrick/ComfyUI/output/anime_c095b023-b851-4775-a211-60ccdf0a3826_00001_.png": {
+            "frame_id": "anime_c095b023-b851-4775-a211-60ccdf0a3826_00001_.png",
+            "character_fidelity_score": 0.6436232879830215,
+            "artifact_detection_score": 1.0,
+            "prompt_adherence_score": 0.3676805794239044,
+            "overall_quality": 0.6704346224689752,
+            "passed": true,
+            "issues": []
+          },
+          "/home/patrick/ComfyUI/output/anime_e56d8144-87ba-46d3-a0d7-3511793eca53_00001_.png": {
+            "frame_id": "anime_e56d8144-87ba-46d3-a0d7-3511793eca53_00001_.png",
+            "character_fidelity_score": 0.5786446929596408,
+            "artifact_detection_score": 1.0,
+            "prompt_adherence_score": 0.4005209803581238,
+            "overall_quality": 0.6597218911059216,
+            "passed": false,
+            "issues": [
+              "Character fidelity low (0.579)"
+            ]
+          }
+        }
+      },
+      "gate_3": {
+        "gate": "Gate 3: Temporal Consistency & Motion Smoothness",
+        "pass": false,
+        "start_time": "2025-12-15T21:35:12.342727",
+        "end_time": "2025-12-15T21:35:17.640981",
+        "duration_seconds": 5.298254,
+        "sequence": {
+          "name": "kai_turning_sequence",
+          "frame_count": 5,
+          "frames": [
+            "anime_ef96dd9a-8baf-4a3c-8bc9-d3b25e7f92b3_00001_.png",
+            "anime_7e7c59c9-1304-4d0c-b34c-1b342dffc546_00001_.png",
+            "anime_ace69d48-c00a-4f12-aca4-530500ad9c65_00001_.png",
+            "anime_c095b023-b851-4775-a211-60ccdf0a3826_00001_.png",
+            "anime_e56d8144-87ba-46d3-a0d7-3511793eca53_00001_.png"
+          ]
+        },
+        "quality_metrics": {
+          "sequence_id": "kai_turning_sequence",
+          "frame_count": 5,
+          "flicker_score": 0.276196369426765,
+          "motion_smoothness_score": 0.7672836780548096,
+          "temporal_consistency_score": 0.3052604997847336,
+          "overall_score": 0.4495801824221028,
+          "passed": false,
+          "issues": [
+            "Temporal consistency low (0.305)",
+            "Motion not smooth (0.767)",
+            "Flicker detected (0.276)"
+          ]
+        },
+        "detailed_analysis": {
+          "temporal_consistency": {
+            "temporal_consistency": 0.3052604997847336,
+            "consistency_scores": [
+              0.31677385720847306,
+              0.305126881630011,
+              0.3229448908736852,
+              0.276196369426765
+            ],
+            "frame_pairs_analyzed": 4
+          },
+          "motion_smoothness": {
+            "motion_smoothness": 0.7672836780548096,
+            "motion_scores": [
+              0.7521424293518066,
+              0.8011757135391235,
+              0.7485328912734985
+            ],
+            "motion_variance": 373.2513427734375,
+            "flow_magnitudes": [
+              386.13623046875,
+              368.2328186035156,
+              339.247314453125
+            ]
+          }
+        },
+        "video_analysis": {
+          "video_created": false,
+          "reason": "Video creation failed"
+        }
+      },
+      "gate_4": {
+        "gate": "Gate 4: Final Video Quality & Sync",
+        "pass": false,
+        "start_time": "2025-12-15T21:35:17.641339",
+        "end_time": "2025-12-15T21:35:23.436401",
+        "duration_seconds": 5.795062,
+        "video": {
+          "path": "/opt/tower-anime-production/generated/videos/kai_sequence_20251215_213459.mp4",
+          "intended_story": "Detective Kai Nakamura turns around in a dark alley, rain reflecting off his coat as he senses danger",
+          "technical_specs": {
+            "width": 512,
+            "height": 512,
+            "fps": 24.0,
+            "duration": 2.458333,
+            "codec": "h264",
+            "bitrate": 580,
+            "has_audio": false
+          }
+        },
+        "quality_metrics": {
+          "video_id": "kai_sequence_20251215_213459.mp4",
+          "sync_timing_score": 0.9,
+          "render_quality_score": 0.8200000000000001,
+          "narrative_cohesion_score": 0.6560161292552947,
+          "overall_quality": 0.7920053764184316,
+          "passed": false,
+          "technical_specs": {
+            "width": 512,
+            "height": 512,
+            "fps": 24.0,
+            "duration": 2.458333,
+            "codec": "h264",
+            "bitrate": 580,
+            "has_audio": false
+          },
+          "issues": [
+            "Bitrate too low - likely compression artifacts",
+            "Bitrate low: 580 kbps",
+            "Story adherence low (0.068)"
+          ]
+        },
+        "detailed_analysis": {
+          "sync_and_timing": {
+            "audio_video_sync": 0.0,
+            "cut_timing": 0.9,
+            "dialogue_sync": 0.0,
+            "overall_sync": 0.9,
+            "issues": []
+          },
+          "render_quality": {
+            "resolution_score": 1.0,
+            "framerate_score": 1.0,
+            "encoding_quality_score": 0.7,
+            "bitrate_score": 0.58,
+            "overall_render_quality": 0.8200000000000001,
+            "technical_specs": {
+              "width": 512,
+              "height": 512,
+              "fps": 24.0,
+              "duration": 2.458333,
+              "codec": "h264",
+              "bitrate": 580,
+              "has_audio": false
+            },
+            "issues": [
+              "Bitrate too low - likely compression artifacts",
+              "Bitrate low: 580 kbps"
+            ]
+          },
+          "narrative_cohesion": {
+            "story_adherence_score": 0.0680483877658844,
+            "visual_narrative_score": 1.0,
+            "pacing_score": 0.9,
+            "overall_narrative_cohesion": 0.6560161292552947,
+            "issues": [
+              "Story adherence low (0.068)"
+            ]
+          }
+        }
+      }
+    },
+    "gate_summary": {
+      "gate_1": {
+        "passed": false,
+        "score": 0.0
+      },
+      "gate_2": {
+        "passed": false,
+        "score": 0.6597574363489851
+      },
+      "gate_3": {
+        "passed": false,
+        "score": 0.4495801824221028
+      },
+      "gate_4": {
+        "passed": false,
+        "score": 0.7920053764184316
+      }
+    },
+    "issues": {
+      "total_count": 10,
+      "issues": [
+        "Gate gate_1: Test failed",
+        "Character fidelity low (0.528)",
+        "Character fidelity low (0.556)",
+        "Character fidelity low (0.579)",
+        "Temporal consistency low (0.305)",
+        "Motion not smooth (0.767)",
+        "Flicker detected (0.276)",
+        "Bitrate too low - likely compression artifacts",
+        "Bitrate low: 580 kbps",
+        "Story adherence low (0.068)"
+      ]
+    },
+    "recommendations": [
+      "Improve character reference data and training datasets",
+      "Consider using ControlNet or similar tools for better character consistency",
+      "Review frame interpolation settings and motion vectors",
+      "Consider using AnimateDiff or similar temporal consistency tools",
+      "Optimize video encoding settings for better quality",
+      "Ensure adequate bitrate for target resolution and framerate"
+    ],
+    "next_steps": [
+      "\ud83d\udd27 Address failed quality gates before proceeding",
+      "\ud83d\udccb Gate 1: Update asset database and style bible compliance",
+      "\ud83d\uddbc\ufe0f Gate 2: Improve frame generation quality and character consistency",
+      "\u23f1\ufe0f Gate 3: Fix temporal consistency and motion smoothness issues",
+      "\ud83c\udfac Gate 4: Resolve final video quality and synchronization problems",
+      "\ud83d\udd04 Re-run quality gates after addressing issues",
+      "\ud83d\udcc8 Monitor Echo Brain learning from quality gate results",
+      "\ud83d\udcbe Review saved quality metrics for pattern analysis"
+    ]
+  },
+  "timestamp": "20251215_213533"
+}

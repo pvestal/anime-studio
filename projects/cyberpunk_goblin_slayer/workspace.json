@@ -1,0 +1,298 @@
+{
+  "project_id": "cyberpunk_goblin_slayer",
+  "created_at": "2025-12-16T00:23:26.077233",
+  "version": "2.0",
+  "isolation": {
+    "character_references": {
+      "casual": [
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_casual_ref_001.png",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_casual_ref_003.png",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_casual_ref_002.png"
+      ],
+      "action": [
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_action_ref_001.png",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_action_ref_002.png",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_action_ref_003.png"
+      ],
+      "portrait": [
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_portrait_ref_002.png",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_portrait_ref_001.png"
+      ]
+    },
+    "project_thresholds": {
+      "character_consistency": 0.75,
+      "technical_quality": 0.85,
+      "visual_quality": 0.8
+    },
+    "project_echo_learning": [
+      {
+        "instruction": "Make it more cyberpunk with neon and wet streets",
+        "context": {
+          "scene": "cyberpunk_alley",
+          "time": "night",
+          "mood": "noir"
+        },
+        "suggestion": {
+          "neon_intensity": "+0.3",
+          "wet_street_reflection": "+0.5",
+          "color_palette": "pink_blue_cyberpunk",
+          "fog_density": "+0.15",
+          "contrast": "+0.25"
+        },
+        "user_response": "accepted",
+        "final_params": {
+          "neon_intensity": "+0.3",
+          "wet_street_reflection": "+0.5",
+          "color_palette": "pink_blue_cyberpunk",
+          "fog_density": "+0.15",
+          "contrast": "+0.25"
+        },
+        "timestamp": "2025-12-16T00:11:00Z"
+      }
+    ],
+    "assets": {
+      "characters": [
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_portrait_ref_002.png",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_casual_ref_001.png",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/consistency_analysis.json",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_casual_ref_003.png",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_action_ref_001.png",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_action_ref_002.png",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_action_ref_003.png",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_casual_ref_002.png",
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/assets/characters/ghost_ryker_portrait_ref_001.png"
+      ],
+      "backgrounds": [],
+      "shots": [
+        "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/rendered/shots/shot_s1a_001.png"
+      ]
+    },
+    "project_state": {
+      "project": {
+        "id": "cyberpunk_goblin_slayer_001",
+        "name": "Cyberpunk Goblin Slayer",
+        "format": "vignette",
+        "duration_seconds": 90,
+        "fps": 24,
+        "resolution": {
+          "width": 1920,
+          "height": 1080
+        },
+        "created_at": "2025-12-15T00:00:00Z",
+        "updated_at": "2025-12-16T00:11:56.540898",
+        "creator": "Patrick Vestal",
+        "style_guide_id": "cyberpunk_anime_v1"
+      },
+      "version": {
+        "commit_hash": "initial_001",
+        "branch": "main",
+        "parent_commit": null,
+        "message": "Initial project setup - Cyberpunk Goblin Slayer",
+        "author": "system",
+        "timestamp": "2025-12-15T00:00:00Z",
+        "tags": []
+      },
+      "state": {
+        "phase": "storyboard",
+        "status": "in_progress",
+        "completion_percentage": 25,
+        "quality_gates_passed": [
+          "character_consistency"
+        ]
+      },
+      "timeline": {
+        "scenes": [
+          {
+            "id": "scene_001",
+            "scene_number": 1,
+            "name": "Alley Encounter",
+            "duration_frames": 720,
+            "location": "Cyberpunk Alley",
+            "time_of_day": "night",
+            "description": "Ghost Ryker encounters hostiles in neon-lit alley",
+            "shots": [
+              {
+                "id": "s1a",
+                "shot_number": "001-010",
+                "shot_type": "wide",
+                "duration_frames": 240,
+                "composition": {
+                  "characters": [
+                    {
+                      "character_id": "ghost_ryker_v1",
+                      "position": "center",
+                      "pose_category": "action",
+                      "expression": "determined",
+                      "action": "walking_forward"
+                    }
+                  ],
+                  "background_id": "cyberpunk_alley_v1",
+                  "camera": {
+                    "angle": "low",
+                    "movement": "tracking",
+                    "focal_point": "ghost_ryker_full"
+                  }
+                },
+                "generation_params": {
+                  "prompt": "Ghost Ryker walking through neon-lit cyberpunk alley",
+                  "negative_prompt": "low quality, blurry",
+                  "style_modifiers": {
+                    "lighting": "neon_night",
+                    "mood": "tense",
+                    "color_grade": "cyberpunk_neon",
+                    "neon_intensity": "high",
+                    "reflections": "wet_street",
+                    "atmosphere": "cyberpunk_noir"
+                  },
+                  "technical_params": {
+                    "steps": 20,
+                    "cfg": 7.5,
+                    "seed": 2024,
+                    "model": "counterfeit_v3"
+                  }
+                },
+                "render_state": {
+                  "status": "completed",
+                  "asset_path": "/opt/tower-anime-production/projects/cyberpunk_goblin_slayer/rendered/shots/shot_s1a_001.png",
+                  "thumbnail_path": null,
+                  "quality_scores": {
+                    "technical": 0.85,
+                    "consistency": 0.8,
+                    "style": 0.9
+                  },
+                  "generation_time": 25,
+                  "last_rendered": "2025-12-16T00:10:00Z"
+                },
+                "dialogue": [],
+                "audio": {
+                  "dialogue_track": null,
+                  "music_track": "cyberpunk_tension_v1",
+                  "sfx_tracks": [
+                    "footsteps_metal"
+                  ],
+                  "ambient_track": "city_night_cyberpunk"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "assets": {
+        "characters": [
+          {
+            "id": "ghost_ryker_v1",
+            "name": "Ghost Ryker",
+            "version": "1.0",
+            "design_sheet_path": null,
+            "reference_embeddings": {
+              "action": [],
+              "casual": [],
+              "portrait": [],
+              "canonical": null
+            },
+            "consistency_threshold": 0.75,
+            "metadata": {
+              "age": "late 20s",
+              "personality": "stoic cyberpunk warrior",
+              "role": "protagonist",
+              "voice_actor": "TBD",
+              "design_notes": "Blue glowing cybernetic left arm, tactical helmet with visor, black armor with red stripes"
+            }
+          }
+        ],
+        "backgrounds": [
+          {
+            "id": "cyberpunk_alley_v1",
+            "name": "Cyberpunk Alley",
+            "location_type": "exterior",
+            "time_variants": {
+              "dawn": null,
+              "day": null,
+              "dusk": null,
+              "night": null
+            },
+            "style_params": {
+              "detail_level": "high",
+              "atmosphere": "neon_haze"
+            }
+          }
+        ],
+        "style_guides": [
+          {
+            "id": "cyberpunk_anime_v1",
+            "name": "Cyberpunk Anime Style",
+            "reference_images": [],
+            "color_palette": [
+              "#00FFFF",
+              "#FF00FF",
+              "#1A1A2E",
+              "#E94560"
+            ],
+            "line_weight": "medium",
+            "shading_style": "neon_cell"
+          }
+        ]
+      },
+      "history": {
+        "commits": [
+          {
+            "hash": "initial_001",
+            "parent": null,
+            "timestamp": "2025-12-15T00:00:00Z",
+            "author": "system",
+            "message": "Initial project setup - Cyberpunk Goblin Slayer",
+            "changes": [
+              {
+                "type": "add",
+                "path": "/",
+                "before": null,
+                "after": "entire_document"
+              }
+            ]
+          }
+        ]
+      },
+      "echo_memory": {
+        "creative_decisions": [
+          {
+            "instruction": "Make it more cyberpunk with neon and wet streets",
+            "context": {
+              "scene": "cyberpunk_alley",
+              "time": "night",
+              "mood": "noir"
+            },
+            "suggestion": {
+              "neon_intensity": "+0.3",
+              "wet_street_reflection": "+0.5",
+              "color_palette": "pink_blue_cyberpunk",
+              "fog_density": "+0.15",
+              "contrast": "+0.25"
+            },
+            "user_response": "accepted",
+            "final_params": {
+              "neon_intensity": "+0.3",
+              "wet_street_reflection": "+0.5",
+              "color_palette": "pink_blue_cyberpunk",
+              "fog_density": "+0.15",
+              "contrast": "+0.25"
+            },
+            "timestamp": "2025-12-16T00:11:00Z"
+          }
+        ],
+        "style_preferences": {
+          "learned_associations": [
+            {
+              "term": "cyberpunk",
+              "parameters": {
+                "neon_intensity": "high",
+                "reflections": "wet_street",
+                "atmosphere": "noir"
+              },
+              "confidence": 0.8
+            }
+          ]
+        }
+      }
+    }
+  }
+}

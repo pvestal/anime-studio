@@ -1,0 +1,33 @@
+{
+  "name": "cyberpunk_action",
+  "version": "1.0",
+  "created_at": "2025-12-16T00:23:26.077867",
+  "base_thresholds": {
+    "hero": 0.75,
+    "supporting": 0.7,
+    "background": 0.65
+  },
+  "default_pose_sets": [
+    "action",
+    "casual",
+    "portrait",
+    "stealth"
+  ],
+  "genre_tags": [
+    "cyberpunk",
+    "action",
+    "dystopian"
+  ],
+  "recommended_workflow": "dark_mood_first",
+  "quality_gates": [
+    "technical_validation",
+    "character_consistency",
+    "visual_quality",
+    "creative_review"
+  ],
+  "default_generation_params": {
+    "steps": 20,
+    "cfg": 7.5,
+    "model": "counterfeit_v3"
+  }
+}

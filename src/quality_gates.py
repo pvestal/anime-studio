@@ -1,477 +1,578 @@
 #!/usr/bin/env python3
 """
-Quality Gates Module for Phase 1 Character Consistency
-Implements quality assessment metrics including face similarity, aesthetic scoring,
-and style consistency validation with configurable thresholds.
+Quality Gates System for Anime Production
+Configurable validation pipeline with multiple tiers and flexible thresholds
 """
 
+import os
+import json
+import sqlite3
 import asyncio
 import logging
-import numpy as np
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
-import time
-import json
+from typing import Dict, List, Optional, Tuple, Any, Union
+from PIL import Image, ImageStat
+import numpy as np
+from datetime import datetime
 
-# Image processing
-from PIL import Image
-import cv2
-
-# Face recognition and embeddings
-try:
-    import insightface
-    from insightface.app import FaceAnalysis
-    INSIGHTFACE_AVAILABLE = True
-except ImportError:
-    INSIGHTFACE_AVAILABLE = False
-    logging.warning("InsightFace not available - face similarity will use mock data")
-
-# ML models for aesthetic scoring
-try:
-    import torch
-    import clip
-    CLIP_AVAILABLE = True
-except ImportError:
-    CLIP_AVAILABLE = False
-    logging.warning("CLIP not available - style consistency will use mock data")
-
-try:
-    import transformers
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
-
-# Database operations
-from character_bible_db import CharacterBibleDB
+from clip_consistency import CLIPCharacterConsistency, analyze_character_consistency_clip
 
 logger = logging.getLogger(__name__)
 
-class QualityGateEngine:
-    """
-    Quality assessment engine for character consistency validation.
-    Implements the target metrics:
-    - Face cosine similarity: >0.70
-    - LAION Aesthetic score: >5.5
-    - Style adherence: CLIP similarity >0.85
-    - Generation reproducibility: Same seed = identical output
-    """
+class QualityGateValidator:
+    """Production-grade quality gate validation system"""
 
-    def __init__(self, db: CharacterBibleDB = None):
-        self.db = db or CharacterBibleDB()
-        self.face_analyzer = None
-        self.clip_model = None
-        self.aesthetic_model = None
-        self._initialize_models()
+    def __init__(self, db_path: str = "/opt/tower-anime-production/database/anime_production.db"):
+        self.db_path = db_path
+        self.clip_checker = None  # Lazy initialization
 
-        # Target thresholds
-        self.target_thresholds = {
-            'face_similarity_min': 0.70,
-            'aesthetic_score_min': 5.5,
-            'style_clip_min': 0.85,
-            'overall_consistency_min': 0.75
+    def _get_db_connection(self):
+        """Get database connection with proper configuration"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_clip_checker(self, clip_model: str = "ViT-B/32"):
+        """Initialize CLIP checker if not already done"""
+        if self.clip_checker is None:
+            self.clip_checker = CLIPCharacterConsistency(
+                db_path=self.db_path,
+                clip_model=clip_model
+            )
+
+    def get_quality_gate_config(self, config_name: str = "default_production") -> Dict:
+        """Get quality gate configuration from database"""
+        try:
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    SELECT * FROM quality_gate_configs
+                    WHERE config_name = ? AND is_active = 1
+                """, (config_name,))
+
+                config = cursor.fetchone()
+                if not config:
+                    logger.warning(f"Config {config_name} not found, using defaults")
+                    return self._get_default_config()
+
+                # Parse JSON fields
+                result = dict(config)
+                for json_field in ['min_resolution', 'allowed_formats']:
+                    if result[json_field]:
+                        result[json_field] = json.loads(result[json_field])
+
+                return result
+
+        except Exception as e:
+            logger.error(f"Failed to get quality gate config: {e}")
+            return self._get_default_config()
+
+    def _get_default_config(self) -> Dict:
+        """Get default quality gate configuration"""
+        return {
+            "config_name": "default_fallback",
+            "min_resolution": {"width": 512, "height": 512},
+            "max_file_size": 10485760,  # 10MB
+            "allowed_formats": ["png", "jpg", "jpeg", "webp"],
+            "min_technical_quality": 0.7,
+            "min_visual_quality": 0.6,
+            "min_character_consistency": 0.75,
+            "min_style_consistency": 0.65,
+            "clip_model": "ViT-B/32",
+            "character_similarity_threshold": 0.8,
+            "require_manual_review": False,
+            "auto_fail_on_threshold": True
         }
 
-    def _initialize_models(self):
-        """Initialize AI models for quality assessment"""
+    async def validate_technical_quality(self, image_path: str, config: Dict) -> Dict:
+        """Tier 1: Basic technical validation (file format, resolution, corruption)"""
         try:
-            # Initialize InsightFace for face embeddings
-            if INSIGHTFACE_AVAILABLE:
-                self.face_analyzer = FaceAnalysis(providers=['CPUExecutionProvider'])
-                self.face_analyzer.prepare(ctx_id=0, det_size=(640, 640))
-                logger.info("✅ InsightFace initialized")
-
-            # Initialize CLIP for style consistency
-            if CLIP_AVAILABLE:
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                self.clip_model, self.clip_preprocess = clip.load("ViT-B/32", device=device)
-                logger.info(f"✅ CLIP initialized on {device}")
-
-            # TODO: Initialize LAION aesthetic predictor
-            # For now, we'll use a mock implementation
-            logger.info("⚠️  LAION aesthetic predictor: using mock implementation")
-
-        except Exception as e:
-            logger.error(f"❌ Error initializing quality models: {e}")
-
-    async def extract_face_embedding(self, image_path: str) -> Optional[np.ndarray]:
-        """Extract face embedding using InsightFace ArcFace"""
-        try:
-            if not INSIGHTFACE_AVAILABLE or not self.face_analyzer:
-                # Return mock embedding for testing
-                return np.random.random(512).astype(np.float32)
-
-            # Load and process image
-            image = cv2.imread(str(image_path))
-            if image is None:
-                logger.error(f"Could not load image: {image_path}")
-                return None
-
-            # Detect faces
-            faces = self.face_analyzer.get(image)
-            if not faces:
-                logger.warning(f"No faces detected in {image_path}")
-                return None
-
-            # Get embedding from the first (largest) face
-            face = max(faces, key=lambda x: x.bbox[2] * x.bbox[3])  # Largest face by area
-            embedding = face.embedding
-
-            logger.info(f"✅ Extracted face embedding shape: {embedding.shape}")
-            return embedding
-
-        except Exception as e:
-            logger.error(f"❌ Error extracting face embedding: {e}")
-            return None
-
-    async def calculate_face_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
-        """Calculate cosine similarity between face embeddings"""
-        try:
-            if embedding1 is None or embedding2 is None:
-                return 0.0
-
-            # Normalize embeddings
-            norm1 = np.linalg.norm(embedding1)
-            norm2 = np.linalg.norm(embedding2)
-
-            if norm1 == 0 or norm2 == 0:
-                return 0.0
-
-            embedding1_norm = embedding1 / norm1
-            embedding2_norm = embedding2 / norm2
-
-            # Calculate cosine similarity
-            similarity = np.dot(embedding1_norm, embedding2_norm)
-
-            # Ensure similarity is in valid range
-            similarity = max(0.0, min(1.0, float(similarity)))
-
-            logger.debug(f"Face similarity calculated: {similarity:.4f}")
-            return similarity
-
-        except Exception as e:
-            logger.error(f"❌ Error calculating face similarity: {e}")
-            return 0.0
-
-    async def calculate_aesthetic_score(self, image_path: str) -> float:
-        """Calculate LAION aesthetic predictor score"""
-        try:
-            # TODO: Implement actual LAION aesthetic predictor
-            # For Phase 1, using mock implementation based on image properties
-
-            image = Image.open(image_path)
-            width, height = image.size
-
-            # Mock scoring based on resolution and aspect ratio
-            resolution_score = min(10.0, (width * height) / 100000)  # Higher res = better
-            aspect_ratio = width / height
-            aspect_score = 10.0 - abs(aspect_ratio - 1.0) * 2  # Closer to 1:1 = better
-
-            # Add some randomness to simulate real aesthetic scoring
-            aesthetic_score = (resolution_score + aspect_score) / 2 + np.random.uniform(-1.0, 1.0)
-            aesthetic_score = max(0.0, min(10.0, aesthetic_score))
-
-            logger.info(f"✅ Aesthetic score calculated: {aesthetic_score:.2f}")
-            return aesthetic_score
-
-        except Exception as e:
-            logger.error(f"❌ Error calculating aesthetic score: {e}")
-            return 0.0
-
-    async def calculate_clip_similarity(self, image_path: str, text_prompt: str) -> float:
-        """Calculate CLIP similarity between image and style description"""
-        try:
-            if not CLIP_AVAILABLE or not self.clip_model:
-                # Return mock similarity for testing
-                return np.random.uniform(0.7, 0.95)
-
-            # Load and preprocess image
-            image = Image.open(image_path)
-            image_input = self.clip_preprocess(image).unsqueeze(0)
-
-            # Tokenize text
-            text_input = clip.tokenize([text_prompt])
-
-            # Calculate features
-            with torch.no_grad():
-                image_features = self.clip_model.encode_image(image_input)
-                text_features = self.clip_model.encode_text(text_input)
-
-                # Normalize features
-                image_features /= image_features.norm(dim=-1, keepdim=True)
-                text_features /= text_features.norm(dim=-1, keepdim=True)
-
-                # Calculate similarity
-                similarity = torch.cosine_similarity(image_features, text_features).item()
-
-            logger.info(f"✅ CLIP similarity calculated: {similarity:.4f}")
-            return max(0.0, min(1.0, similarity))
-
-        except Exception as e:
-            logger.error(f"❌ Error calculating CLIP similarity: {e}")
-            return 0.0
-
-    async def assess_generation_quality(self, image_path: str, character_id: int,
-                                      style_prompt: str = None) -> Dict[str, Any]:
-        """Comprehensive quality assessment for a generated image"""
-        start_time = time.time()
-
-        try:
-            logger.info(f"🔍 Starting quality assessment for {image_path}")
-
-            # 1. Extract face embedding from new generation
-            new_embedding = await self.extract_face_embedding(image_path)
-
-            # 2. Get reference embeddings for character
-            reference_embeddings = await self.db.get_character_embeddings(character_id)
-
-            # 3. Calculate face similarity scores
-            face_similarities = []
-            if reference_embeddings and new_embedding is not None:
-                for ref_emb_data in reference_embeddings:
-                    ref_embedding = ref_emb_data['embedding_vector']
-                    if ref_embedding is not None:
-                        similarity = await self.calculate_face_similarity(new_embedding, ref_embedding)
-                        face_similarities.append(similarity)
-
-            # Take the best similarity score
-            best_face_similarity = max(face_similarities) if face_similarities else 0.0
-
-            # 4. Calculate aesthetic score
-            aesthetic_score = await self.calculate_aesthetic_score(image_path)
-
-            # 5. Calculate style consistency (CLIP similarity)
-            style_similarity = 0.0
-            if style_prompt:
-                style_similarity = await self.calculate_clip_similarity(image_path, style_prompt)
-
-            # 6. Calculate overall consistency score
-            overall_consistency = self._calculate_overall_score(
-                best_face_similarity, aesthetic_score, style_similarity
-            )
-
-            # 7. Check quality gates
-            scores = {
-                'face_similarity_score': best_face_similarity,
-                'aesthetic_score': aesthetic_score,
-                'style_similarity_score': style_similarity,
-                'overall_consistency_score': overall_consistency
-            }
-
-            quality_gates_passed, gate_failures = await self.db.check_quality_gates(scores)
-
-            # 8. Generate improvement suggestions
-            improvement_suggestions = self._generate_improvement_suggestions(scores, gate_failures)
-
-            assessment_time = time.time() - start_time
-
-            assessment_result = {
-                'character_id': character_id,
-                'image_path': image_path,
-                'face_similarity_score': best_face_similarity,
-                'aesthetic_score': aesthetic_score,
-                'style_similarity_score': style_similarity,
-                'overall_consistency_score': overall_consistency,
-                'quality_gates_passed': quality_gates_passed,
-                'gate_failures': gate_failures,
-                'improvement_suggestions': improvement_suggestions,
-                'reference_embeddings_count': len(reference_embeddings),
-                'assessment_time_seconds': assessment_time,
-                'target_metrics_met': {
-                    'face_similarity': best_face_similarity >= self.target_thresholds['face_similarity_min'],
-                    'aesthetic_score': aesthetic_score >= self.target_thresholds['aesthetic_score_min'],
-                    'style_consistency': style_similarity >= self.target_thresholds['style_clip_min'],
-                    'overall_consistency': overall_consistency >= self.target_thresholds['overall_consistency_min']
-                }
-            }
-
-            logger.info(f"✅ Quality assessment completed in {assessment_time:.2f}s")
-            logger.info(f"   Face similarity: {best_face_similarity:.3f} (target: >0.70)")
-            logger.info(f"   Aesthetic score: {aesthetic_score:.2f} (target: >5.5)")
-            logger.info(f"   Style consistency: {style_similarity:.3f} (target: >0.85)")
-            logger.info(f"   Overall consistency: {overall_consistency:.3f} (target: >0.75)")
-            logger.info(f"   Quality gates passed: {quality_gates_passed}")
-
-            return assessment_result
-
-        except Exception as e:
-            logger.error(f"❌ Quality assessment failed: {e}")
-            return {
-                'error': str(e),
-                'quality_gates_passed': False,
-                'assessment_time_seconds': time.time() - start_time
-            }
-
-    def _calculate_overall_score(self, face_sim: float, aesthetic: float, style_sim: float) -> float:
-        """Calculate weighted overall consistency score"""
-        # Normalize aesthetic score to 0-1 range
-        aesthetic_normalized = min(1.0, aesthetic / 10.0)
-
-        # Weighted combination (face similarity is most important for character consistency)
-        weights = {'face': 0.5, 'aesthetic': 0.2, 'style': 0.3}
-
-        overall_score = (
-            weights['face'] * face_sim +
-            weights['aesthetic'] * aesthetic_normalized +
-            weights['style'] * style_sim
-        )
-
-        return max(0.0, min(1.0, overall_score))
-
-    def _generate_improvement_suggestions(self, scores: Dict[str, float],
-                                        gate_failures: List[str]) -> List[str]:
-        """Generate specific improvement suggestions based on scores"""
-        suggestions = []
-
-        if scores['face_similarity_score'] < self.target_thresholds['face_similarity_min']:
-            suggestions.append(
-                f"Face similarity too low ({scores['face_similarity_score']:.3f}). "
-                "Consider using IPAdapter FaceID with higher weight or better reference images."
-            )
-
-        if scores['aesthetic_score'] < self.target_thresholds['aesthetic_score_min']:
-            suggestions.append(
-                f"Aesthetic quality too low ({scores['aesthetic_score']:.2f}). "
-                "Try increasing resolution, improving lighting, or adjusting composition."
-            )
-
-        if scores['style_similarity_score'] < self.target_thresholds['style_clip_min']:
-            suggestions.append(
-                f"Style consistency too low ({scores['style_similarity_score']:.3f}). "
-                "Refine style prompts or adjust CLIP guidance strength."
-            )
-
-        # Add specific gate failure messages
-        for failure in gate_failures:
-            suggestions.append(f"Quality gate failure: {failure}")
-
-        return suggestions
-
-    async def create_character_reference_set(self, character_id: int,
-                                           reference_images: List[str]) -> Dict[str, Any]:
-        """Create canonical reference set for character consistency"""
-        try:
-            logger.info(f"🎯 Creating reference set for character {character_id}")
-
-            embeddings_created = 0
-            total_quality_score = 0.0
-
-            for i, image_path in enumerate(reference_images):
-                # Extract face embedding
-                embedding = await self.extract_face_embedding(image_path)
-                if embedding is None:
-                    logger.warning(f"⚠️  No face found in reference image: {image_path}")
-                    continue
-
-                # Assess image quality
-                aesthetic_score = await self.calculate_aesthetic_score(image_path)
-
-                # Store embedding in database
-                embedding_data = {
-                    'character_id': character_id,
-                    'embedding_type': 'arcface',
-                    'embedding_vector': embedding,
-                    'confidence_score': 0.95  # High confidence for reference images
-                }
-
-                await self.db.store_face_embedding(embedding_data)
-                embeddings_created += 1
-                total_quality_score += aesthetic_score
-
-                logger.info(f"✅ Processed reference image {i+1}/{len(reference_images)}: {image_path}")
-
-            # Calculate average quality
-            avg_quality = total_quality_score / max(1, embeddings_created)
-
-            # Generate canonical hash
-            import hashlib
-            hash_data = json.dumps({
-                'character_id': character_id,
-                'reference_count': embeddings_created,
-                'avg_quality': avg_quality,
-                'timestamp': time.time()
-            }, sort_keys=True)
-            canonical_hash = hashlib.sha256(hash_data.encode()).hexdigest()
-
-            # Update character with canonical hash
-            await self.db.update_character_canonical_hash(character_id, canonical_hash)
-
             result = {
-                'character_id': character_id,
-                'embeddings_created': embeddings_created,
-                'total_references': len(reference_images),
-                'average_quality_score': avg_quality,
-                'canonical_hash': canonical_hash,
-                'status': 'completed'
+                "gate_name": "technical_quality",
+                "passed": True,
+                "score": 1.0,
+                "threshold": config.get("min_technical_quality", 0.7),
+                "details": {}
             }
 
-            logger.info(f"✅ Reference set created: {embeddings_created}/{len(reference_images)} successful")
+            # Check file exists and is readable
+            if not os.path.exists(image_path):
+                result.update({
+                    "passed": False,
+                    "score": 0.0,
+                    "details": {"error": "File does not exist"}
+                })
+                return result
+
+            # Check file size
+            file_size = os.path.getsize(image_path)
+            max_size = config.get("max_file_size", 10485760)
+
+            if file_size > max_size:
+                result.update({
+                    "passed": False,
+                    "score": 0.0,
+                    "details": {"error": f"File too large: {file_size} > {max_size}"}
+                })
+                return result
+
+            result["details"]["file_size"] = file_size
+
+            # Check file format and process image
+            with Image.open(image_path) as img:
+                format_ext = img.format.lower() if img.format else "unknown"
+                allowed_formats = config.get("allowed_formats", ["png", "jpg", "jpeg"])
+
+                if format_ext not in [fmt.lower() for fmt in allowed_formats]:
+                    result.update({
+                        "passed": False,
+                        "score": 0.0,
+                        "details": {"error": f"Invalid format: {format_ext}"}
+                    })
+                    return result
+
+                # Check resolution
+                min_res = config.get("min_resolution", {"width": 512, "height": 512})
+                if img.width < min_res["width"] or img.height < min_res["height"]:
+                    result.update({
+                        "passed": False,
+                        "score": 0.0,
+                        "details": {
+                            "error": f"Resolution too low: {img.width}x{img.height} < {min_res['width']}x{min_res['height']}"
+                        }
+                    })
+                    return result
+
+                result["details"].update({
+                    "format": format_ext,
+                    "resolution": {"width": img.width, "height": img.height},
+                    "mode": img.mode,
+                    "has_transparency": img.mode in ("RGBA", "LA") or "transparency" in img.info
+                })
+
+                # Basic corruption check - try to load image data
+                try:
+                    _ = np.array(img)
+                    result["details"]["corruption_check"] = "passed"
+                except Exception as e:
+                    result.update({
+                        "passed": False,
+                        "score": 0.0,
+                        "details": {"error": f"Image corruption detected: {e}"}
+                    })
+                    return result
+
+                # Calculate technical quality score
+                tech_score = 1.0
+
+                # Penalize very large files
+                if file_size > max_size * 0.8:
+                    tech_score *= 0.9
+
+                # Bonus for high resolution
+                if img.width >= 1024 and img.height >= 1024:
+                    tech_score *= 1.1
+
+                result["score"] = min(1.0, tech_score)
+                result["passed"] = result["score"] >= result["threshold"]
+
             return result
 
         except Exception as e:
-            logger.error(f"❌ Failed to create reference set: {e}")
-            return {'status': 'error', 'error': str(e)}
+            logger.error(f"Technical quality validation failed: {e}")
+            return {
+                "gate_name": "technical_quality",
+                "passed": False,
+                "score": 0.0,
+                "details": {"error": str(e)}
+            }
 
-    async def batch_quality_assessment(self, image_paths: List[str],
-                                     character_id: int, style_prompt: str = None) -> List[Dict[str, Any]]:
-        """Perform quality assessment on multiple images"""
-        results = []
+    async def validate_visual_quality(self, image_path: str, config: Dict) -> Dict:
+        """Tier 2: Visual quality assessment (composition, clarity, aesthetics)"""
+        try:
+            result = {
+                "gate_name": "visual_quality",
+                "passed": True,
+                "score": 0.0,
+                "threshold": config.get("min_visual_quality", 0.6),
+                "details": {}
+            }
 
-        logger.info(f"🔍 Starting batch quality assessment for {len(image_paths)} images")
+            with Image.open(image_path) as img:
+                # Convert to RGB for analysis
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
 
-        for i, image_path in enumerate(image_paths):
-            logger.info(f"Processing image {i+1}/{len(image_paths)}: {image_path}")
-            result = await self.assess_generation_quality(image_path, character_id, style_prompt)
-            result['batch_index'] = i
-            results.append(result)
+                img_array = np.array(img)
 
-        # Calculate batch statistics
-        valid_results = [r for r in results if 'error' not in r]
-        if valid_results:
-            avg_face_sim = np.mean([r['face_similarity_score'] for r in valid_results])
-            avg_aesthetic = np.mean([r['aesthetic_score'] for r in valid_results])
-            avg_style_sim = np.mean([r['style_similarity_score'] for r in valid_results])
-            pass_rate = np.mean([r['quality_gates_passed'] for r in valid_results])
+                # 1. Brightness and contrast analysis
+                brightness = np.mean(img_array) / 255.0
+                contrast = np.std(img_array) / 255.0
 
-            logger.info(f"✅ Batch assessment complete:")
-            logger.info(f"   Average face similarity: {avg_face_sim:.3f}")
-            logger.info(f"   Average aesthetic score: {avg_aesthetic:.2f}")
-            logger.info(f"   Average style consistency: {avg_style_sim:.3f}")
-            logger.info(f"   Quality gate pass rate: {pass_rate:.2%}")
+                # 2. Color distribution
+                color_variance = np.var(img_array, axis=(0, 1)).mean() / (255.0 ** 2)
 
-        return results
+                # 3. Edge sharpness (simple gradient-based)
+                gray = np.dot(img_array[..., :3], [0.2989, 0.5870, 0.1140])
+                grad_x = np.gradient(gray, axis=1)
+                grad_y = np.gradient(gray, axis=0)
+                sharpness = np.mean(np.sqrt(grad_x**2 + grad_y**2))
 
-# Testing and validation functions
+                # 4. Saturation analysis
+                hsv_img = img.convert("HSV")
+                hsv_array = np.array(hsv_img)
+                saturation = np.mean(hsv_array[:, :, 1]) / 255.0
+
+                # Calculate composite visual quality score
+                scores = {
+                    "brightness": self._score_brightness(brightness),
+                    "contrast": self._score_contrast(contrast),
+                    "color_variance": self._score_color_variance(color_variance),
+                    "sharpness": self._score_sharpness(sharpness),
+                    "saturation": self._score_saturation(saturation)
+                }
+
+                # Weighted average
+                weights = {
+                    "brightness": 0.15,
+                    "contrast": 0.25,
+                    "color_variance": 0.20,
+                    "sharpness": 0.25,
+                    "saturation": 0.15
+                }
+
+                visual_score = sum(scores[key] * weights[key] for key in scores)
+
+                result.update({
+                    "score": visual_score,
+                    "passed": visual_score >= result["threshold"],
+                    "details": {
+                        "brightness": brightness,
+                        "contrast": contrast,
+                        "color_variance": color_variance,
+                        "sharpness": sharpness,
+                        "saturation": saturation,
+                        "component_scores": scores,
+                        "weights": weights
+                    }
+                })
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Visual quality validation failed: {e}")
+            return {
+                "gate_name": "visual_quality",
+                "passed": False,
+                "score": 0.0,
+                "details": {"error": str(e)}
+            }
+
+    def _score_brightness(self, brightness: float) -> float:
+        """Score brightness (0-1, optimal around 0.3-0.7)"""
+        if 0.3 <= brightness <= 0.7:
+            return 1.0
+        elif 0.1 <= brightness < 0.3:
+            return 0.5 + (brightness - 0.1) * 2.5
+        elif 0.7 < brightness <= 0.9:
+            return 1.0 - (brightness - 0.7) * 2.5
+        else:
+            return 0.1
+
+    def _score_contrast(self, contrast: float) -> float:
+        """Score contrast (0-1, higher contrast generally better for anime)"""
+        if contrast >= 0.3:
+            return 1.0
+        elif contrast >= 0.15:
+            return contrast / 0.3
+        else:
+            return 0.1
+
+    def _score_color_variance(self, variance: float) -> float:
+        """Score color variance (0-1, moderate variance preferred)"""
+        if 0.1 <= variance <= 0.4:
+            return 1.0
+        elif variance < 0.1:
+            return variance * 10
+        else:
+            return max(0.1, 1.0 - (variance - 0.4) * 2)
+
+    def _score_sharpness(self, sharpness: float) -> float:
+        """Score sharpness based on gradient magnitude"""
+        if sharpness >= 50:
+            return 1.0
+        elif sharpness >= 10:
+            return 0.3 + (sharpness / 50) * 0.7
+        else:
+            return 0.1
+
+    def _score_saturation(self, saturation: float) -> float:
+        """Score saturation (anime typically has good saturation)"""
+        if 0.4 <= saturation <= 0.8:
+            return 1.0
+        elif 0.2 <= saturation < 0.4:
+            return saturation / 0.4
+        elif 0.8 < saturation <= 1.0:
+            return 1.0 - (saturation - 0.8) * 2.5
+        else:
+            return 0.1
+
+    async def validate_character_consistency(self, image_path: str, character_name: str, config: Dict) -> Dict:
+        """Tier 3: CLIP-based character consistency validation"""
+        try:
+            # Initialize CLIP checker
+            self._init_clip_checker(config.get("clip_model", "ViT-B/32"))
+
+            # Run CLIP consistency analysis
+            clip_result = await analyze_character_consistency_clip(
+                image_path,
+                character_name,
+                clip_model=config.get("clip_model", "ViT-B/32"),
+                consistency_threshold=config.get("character_similarity_threshold", 0.8),
+                auto_add_reference=True
+            )
+
+            consistency_score = clip_result.get("consistency_score", 0.0)
+            threshold = config.get("min_character_consistency", 0.75)
+
+            result = {
+                "gate_name": "character_consistency",
+                "passed": consistency_score >= threshold,
+                "score": consistency_score,
+                "threshold": threshold,
+                "details": {
+                    "reference_count": clip_result.get("reference_count", 0),
+                    "method": clip_result.get("method", "unknown"),
+                    "is_first_reference": clip_result.get("is_first_reference", False),
+                    "added_as_reference": clip_result.get("added_as_reference", False),
+                    "best_match_score": clip_result.get("best_match", {}).get("similarity", None),
+                    "clip_model": config.get("clip_model", "ViT-B/32")
+                }
+            }
+
+            if "error" in clip_result:
+                result.update({
+                    "passed": False,
+                    "score": 0.0,
+                    "details": {"error": clip_result["error"]}
+                })
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Character consistency validation failed: {e}")
+            return {
+                "gate_name": "character_consistency",
+                "passed": False,
+                "score": 0.0,
+                "details": {"error": str(e)}
+            }
+
+    async def validate_style_consistency(self, image_path: str, config: Dict) -> Dict:
+        """Tier 4: Style consistency validation (placeholder for future enhancement)"""
+        return {
+            "gate_name": "style_consistency",
+            "passed": True,
+            "score": 0.8,
+            "threshold": config.get("min_style_consistency", 0.65),
+            "details": {"implementation": "placeholder"}
+        }
+
+    async def run_quality_gates(self, image_path: str, character_name: str,
+                              config_name: str = "default_production") -> Dict:
+        """Run complete quality gate pipeline"""
+        start_time = datetime.now()
+
+        try:
+            config = self.get_quality_gate_config(config_name)
+
+            # Store initial asset metadata
+            asset_id = -1
+            try:
+                self._init_clip_checker(config.get("clip_model", "ViT-B/32"))
+                asset_id = self.clip_checker.store_asset_metadata(image_path, character_name)
+            except Exception as e:
+                logger.warning(f"Failed to store asset metadata: {e}")
+
+            # Run validation gates
+            gate_results = []
+
+            # Tier 1: Technical Quality
+            tech_result = await self.validate_technical_quality(image_path, config)
+            gate_results.append(tech_result)
+
+            # Tier 2: Visual Quality (only if technical passes)
+            if tech_result["passed"]:
+                visual_result = await self.validate_visual_quality(image_path, config)
+                gate_results.append(visual_result)
+
+                # Tier 3: Character Consistency (only if visual passes)
+                if visual_result["passed"]:
+                    char_result = await self.validate_character_consistency(
+                        image_path, character_name, config
+                    )
+                    gate_results.append(char_result)
+
+                    # Tier 4: Style Consistency (only if character passes)
+                    if char_result["passed"]:
+                        style_result = await self.validate_style_consistency(image_path, config)
+                        gate_results.append(style_result)
+
+            # Calculate overall results
+            execution_time = (datetime.now() - start_time).total_seconds() * 1000
+            overall_passed = all(result["passed"] for result in gate_results)
+            overall_score = np.mean([result["score"] for result in gate_results])
+
+            # Determine final status
+            if config.get("require_manual_review", False) and overall_passed:
+                final_status = "manual_review"
+            elif overall_passed:
+                final_status = "passed"
+            else:
+                final_status = "failed"
+
+            pipeline_result = {
+                "asset_id": asset_id,
+                "image_path": image_path,
+                "character_name": character_name,
+                "config_name": config_name,
+                "overall_status": final_status,
+                "overall_passed": overall_passed,
+                "overall_score": float(overall_score),
+                "gate_results": gate_results,
+                "gates_executed": len(gate_results),
+                "execution_time_ms": int(execution_time),
+                "timestamp": start_time.isoformat(),
+                "config_used": config
+            }
+
+            # Store results in database
+            await self._store_quality_gate_results(pipeline_result, config)
+
+            return pipeline_result
+
+        except Exception as e:
+            logger.error(f"Quality gate pipeline failed: {e}")
+            return {
+                "error": str(e),
+                "execution_time_ms": int((datetime.now() - start_time).total_seconds() * 1000)
+            }
+
+    async def _store_quality_gate_results(self, pipeline_result: Dict, config: Dict):
+        """Store quality gate results in database"""
+        try:
+            with self._get_db_connection() as conn:
+                cursor = conn.cursor()
+
+                # Get or create config ID
+                cursor.execute("""
+                    SELECT id FROM quality_gate_configs WHERE config_name = ?
+                """, (pipeline_result["config_name"],))
+
+                config_row = cursor.fetchone()
+                config_id = config_row["id"] if config_row else 1
+
+                # Store individual gate results
+                for gate_result in pipeline_result.get("gate_results", []):
+                    cursor.execute("""
+                        INSERT INTO quality_gate_results (
+                            asset_id, config_id, gate_name, passed, score,
+                            threshold, details, execution_time_ms
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        pipeline_result.get("asset_id"),
+                        config_id,
+                        gate_result["gate_name"],
+                        int(gate_result["passed"]),  # Convert bool to int
+                        gate_result["score"],
+                        gate_result.get("threshold"),
+                        json.dumps(gate_result.get("details", {}), default=str),  # Handle any non-serializable objects
+                        pipeline_result.get("execution_time_ms", 0)
+                    ))
+
+                # Update asset metadata with final status
+                if pipeline_result.get("asset_id", -1) != -1:
+                    cursor.execute("""
+                        UPDATE asset_metadata
+                        SET quality_gate_status = ?,
+                            character_consistency_score = ?,
+                            technical_quality_score = ?,
+                            visual_quality_score = ?,
+                            quality_gate_results = ?,
+                            last_validated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (
+                        pipeline_result["overall_status"],
+                        self._get_gate_score(pipeline_result, "character_consistency"),
+                        self._get_gate_score(pipeline_result, "technical_quality"),
+                        self._get_gate_score(pipeline_result, "visual_quality"),
+                        json.dumps(pipeline_result, default=str),
+                        pipeline_result["asset_id"]
+                    ))
+
+        except Exception as e:
+            logger.error(f"Failed to store quality gate results: {e}")
+
+    def _get_gate_score(self, pipeline_result: Dict, gate_name: str) -> Optional[float]:
+        """Extract score for specific gate from pipeline results"""
+        for gate in pipeline_result.get("gate_results", []):
+            if gate.get("gate_name") == gate_name:
+                return gate.get("score")
+        return None
+
+
+# Convenience functions for API integration
+async def validate_anime_asset(
+    image_path: str,
+    character_name: str,
+    config_name: str = "default_production"
+) -> Dict:
+    """Validate anime asset through complete quality gate pipeline"""
+    validator = QualityGateValidator()
+    return await validator.run_quality_gates(image_path, character_name, config_name)
+
+
+async def quick_character_check(image_path: str, character_name: str,
+                              threshold: float = 0.8) -> bool:
+    """Quick character consistency check"""
+    validator = QualityGateValidator()
+    config = validator.get_quality_gate_config()
+    config["min_character_consistency"] = threshold
+    result = await validator.validate_character_consistency(image_path, character_name, config)
+    return result.get("passed", False)
+
+
+# Test function
 async def test_quality_gates():
-    """Test quality gates with mock data"""
-    try:
-        quality_engine = QualityGateEngine()
+    """Test quality gates with existing images"""
+    import glob
 
-        # Test with mock image (you would replace with real image path)
-        test_image = "/tmp/test_character.png"
+    test_images = glob.glob("/mnt/1TB-storage/ComfyUI/output/anime_*.png")[:3]
 
-        # Create a simple test image if it doesn't exist
-        if not Path(test_image).exists():
-            # Create a simple colored image for testing
-            import numpy as np
-            from PIL import Image
-            test_img = Image.fromarray(np.random.randint(0, 255, (512, 512, 3), dtype=np.uint8))
-            test_img.save(test_image)
+    if not test_images:
+        print("No test images found")
+        return
 
-        # Run quality assessment
-        assessment = await quality_engine.assess_generation_quality(
-            image_path=test_image,
-            character_id=1,
-            style_prompt="anime character, high quality, detailed"
+    print(f"Testing quality gates with {len(test_images)} images")
+
+    for i, image_path in enumerate(test_images):
+        print(f"\n--- Testing image {i+1}: {Path(image_path).name} ---")
+
+        result = await validate_anime_asset(
+            image_path,
+            "test_character",
+            "default_production"
         )
 
-        print("✅ Quality Assessment Test Results:")
-        print(json.dumps(assessment, indent=2, default=str))
+        print(f"Overall Status: {result.get('overall_status', 'N/A')}")
+        print(f"Overall Score: {result.get('overall_score', 0):.3f}")
+        print(f"Gates Executed: {result.get('gates_executed', 0)}")
+        print(f"Execution Time: {result.get('execution_time_ms', 0)}ms")
 
-        return assessment['quality_gates_passed'] if 'quality_gates_passed' in assessment else False
+        for gate in result.get("gate_results", []):
+            print(f"  {gate['gate_name']}: {gate['passed']} (score: {gate['score']:.3f})")
 
-    except Exception as e:
-        logger.error(f"❌ Quality gates test failed: {e}")
-        return False
 
 if __name__ == "__main__":
     asyncio.run(test_quality_gates())

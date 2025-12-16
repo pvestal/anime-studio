@@ -20,6 +20,9 @@
       </template>
     </Toolbar>
 
+    <!-- Test View -->
+    <SimpleGenerationTest v-if="viewMode === 'test'" />
+
     <!-- Dashboard View -->
     <AnimeDashboard v-if="viewMode === 'dashboard'" />
 
@@ -172,12 +175,13 @@ import { ref, computed, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import EchoAnimeConsole from './components/EchoAnimeConsole.vue'
 import AnimeDashboard from './components/AnimeDashboard.vue'
+import SimpleGenerationTest from './components/SimpleGenerationTest.vue'
 
 const toast = useToast()
-const API_BASE = 'http://192.168.50.135:8323/api/anime'
+const API_BASE = '/api/anime'
 
 // View Mode
-const viewMode = ref('dashboard')
+const viewMode = ref('test')
 
 // State
 const projects = ref([])

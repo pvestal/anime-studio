@@ -1,0 +1,39 @@
+{
+  "test_type": "WORKING_QUALITY_GATES_EVIDENCE",
+  "generated_file": "/home/patrick/ComfyUI/output/anime_d5f991cf-e72f-4842-a558-a898c012e10a_00001_.png",
+  "generation_payload": {
+    "prompt": "Kai Nakamura, anime male detective, dark hair, serious expression, detective coat, urban night setting, high quality detailed anime art, masterpiece",
+    "character_name": "kai_test_evidence",
+    "project_id": 1,
+    "width": 768,
+    "height": 768,
+    "steps": 12,
+    "seed": 5555
+  },
+  "quality_results": {
+    "gate": "Gate 2: Frame Generation Quality",
+    "pass": false,
+    "start_time": "2025-12-15T21:23:44.129446",
+    "end_time": "2025-12-15T21:23:49.304532",
+    "duration_seconds": 5.175086,
+    "character_name": "Kai Nakamura",
+    "prompt": "anime male detective, dark hair, serious expression, detective coat, urban night setting",
+    "frame_count": 1,
+    "passed_frames": 0,
+    "failed_frames": 1,
+    "frames": {
+      "/home/patrick/ComfyUI/output/anime_d5f991cf-e72f-4842-a558-a898c012e10a_00001_.png": {
+        "frame_id": "anime_d5f991cf-e72f-4842-a558-a898c012e10a_00001_.png",
+        "character_fidelity_score": 0.4746551552030716,
+        "artifact_detection_score": 1.0,
+        "prompt_adherence_score": 0.34175097942352295,
+        "overall_quality": 0.6054687115421982,
+        "passed": false,
+        "issues": [
+          "Character fidelity low (0.475)"
+        ]
+      }
+    }
+  },
+  "timestamp": "20251215_212349"
+}

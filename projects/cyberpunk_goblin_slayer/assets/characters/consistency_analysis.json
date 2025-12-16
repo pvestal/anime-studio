@@ -1,0 +1,9 @@
+{
+  "character": "ghost_ryker",
+  "total_references": 8,
+  "average_similarity": 0.8011300223214286,
+  "min_similarity": 0.69970703125,
+  "max_similarity": 0.900390625,
+  "std_deviation": 0.05197629764475023,
+  "hero_threshold": 0.75,
+  "passed": 

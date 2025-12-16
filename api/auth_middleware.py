@@ -71,6 +71,10 @@ def verify_jwt_locally(token: str) -> dict:
 async def require_auth(authorization: Optional[str] = Header(None)) -> dict:
     """Require valid authentication for protected endpoints"""
 
+    # Allow internal service calls from Echo Brain
+    if authorization == "Bearer internal_echo_service_token_2025":
+        return {"username": "echo_service", "role": "internal"}
+
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization header required")
 

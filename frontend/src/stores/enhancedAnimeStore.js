@@ -46,8 +46,10 @@ export const useEnhancedAnimeStore = defineStore('enhancedAnime', () => {
   const notifications = ref([])
   const activeView = ref('console') // console, studio, timeline
 
-  // API Base URL
-  const API_BASE = 'http://localhost:8328'
+  // API Base URL - Use proxied endpoint in production
+  const API_BASE = window.location.hostname === 'localhost'
+    ? 'http://localhost:8328'
+    : 'https://192.168.50.135/api/anime'
   const WS_URL = 'ws://localhost:8765'
 
   // ==================== COMPUTED ====================

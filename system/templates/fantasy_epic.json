@@ -1,0 +1,33 @@
+{
+  "name": "fantasy_epic",
+  "version": "1.0",
+  "created_at": "2025-12-16T00:23:26.077923",
+  "base_thresholds": {
+    "hero": 0.78,
+    "supporting": 0.73,
+    "background": 0.68
+  },
+  "default_pose_sets": [
+    "heroic",
+    "magic_casting",
+    "battle",
+    "royal"
+  ],
+  "genre_tags": [
+    "fantasy",
+    "epic",
+    "magical"
+  ],
+  "recommended_workflow": "character_first",
+  "quality_gates": [
+    "technical_validation",
+    "character_consistency",
+    "visual_quality",
+    "creative_review"
+  ],
+  "default_generation_params": {
+    "steps": 25,
+    "cfg": 8.0,
+    "model": "counterfeit_v3"
+  }
+}

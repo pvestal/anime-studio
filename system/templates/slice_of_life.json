@@ -1,0 +1,33 @@
+{
+  "name": "slice_of_life",
+  "version": "1.0",
+  "created_at": "2025-12-16T00:23:26.077970",
+  "base_thresholds": {
+    "hero": 0.7,
+    "supporting": 0.65,
+    "background": 0.6
+  },
+  "default_pose_sets": [
+    "casual",
+    "emotion",
+    "school",
+    "daily"
+  ],
+  "genre_tags": [
+    "slice_of_life",
+    "school",
+    "romance"
+  ],
+  "recommended_workflow": "emotion_first",
+  "quality_gates": [
+    "technical_validation",
+    "character_consistency",
+    "visual_quality",
+    "creative_review"
+  ],
+  "default_generation_params": {
+    "steps": 15,
+    "cfg": 7.0,
+    "model": "counterfeit_v3"
+  }
+}

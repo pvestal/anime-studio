@@ -1,0 +1,23 @@
+{
+  "gate": "Gate 2: Frame Generation Quality",
+  "pass": true,
+  "start_time": "2025-12-15T21:36:20.888859",
+  "end_time": "2025-12-15T21:36:26.101651",
+  "duration_seconds": 5.212792,
+  "character_name": "Kai Nakamura",
+  "prompt": "anime male detective, dark hair, serious expression, detective coat, urban night setting",
+  "frame_count": 1,
+  "passed_frames": 1,
+  "failed_frames": 0,
+  "frames": {
+    "/home/patrick/ComfyUI/output/anime_08bfd993-30a0-41ba-baec-7457dca69f0f_00001_.png": {
+      "frame_id": "anime_08bfd993-30a0-41ba-baec-7457dca69f0f_00001_.png",
+      "character_fidelity_score": 0.5004503353452103,
+      "artifact_detection_score": 1.0,
+      "prompt_adherence_score": 0.33960264921188354,
+      "overall_quality": 0.6133509948523647,
+      "passed": true,
+      "issues": []
+    }
+  }
+}

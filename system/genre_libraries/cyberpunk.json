@@ -1,0 +1,51 @@
+{
+  "genre": "cyberpunk",
+  "created_at": "2025-12-16T00:23:26.077796",
+  "projects_contributed": [],
+  "patterns": {
+    "style_modifiers": {
+      "lighting": [
+        "neon_night"
+      ],
+      "mood": [
+        "tense"
+      ],
+      "color_grade": [
+        "cyberpunk_neon"
+      ],
+      "neon_intensity": [
+        "high"
+      ],
+      "reflections": [
+        "wet_street"
+      ],
+      "atmosphere": [
+        "cyberpunk_noir"
+      ]
+    },
+    "composition_rules": [],
+    "color_palettes": [
+      "#00FFFF",
+      "#FF00FF",
+      "#1A1A2E",
+      "#E94560"
+    ],
+    "technical_patterns": {
+      "neon_intensity": [
+        "+0.3"
+      ],
+      "wet_street_reflection": [
+        "+0.5"
+      ],
+      "color_palette": [
+        "pink_blue_cyberpunk"
+      ],
+      "fog_density": [
+        "+0.15"
+      ],
+      "contrast": [
+        "+0.25"
+      ]
+    }
+  }
+}

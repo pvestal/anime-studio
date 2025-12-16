@@ -1,0 +1,82 @@
+{
+  "gate": "Gate 4: Final Video Quality & Sync",
+  "pass": false,
+  "start_time": "2025-12-15T21:27:20.825955",
+  "end_time": "2025-12-15T21:27:26.714231",
+  "duration_seconds": 5.888276,
+  "video": {
+    "path": "/opt/tower-anime-production/generated/videos/kai_sequence_20251215_212702.mp4",
+    "intended_story": "Detective Kai Nakamura turns around in a dark alley, rain reflecting off his coat as he senses danger",
+    "technical_specs": {
+      "width": 512,
+      "height": 512,
+      "fps": 24.0,
+      "duration": 2.458333,
+      "codec": "h264",
+      "bitrate": 591,
+      "has_audio": false
+    }
+  },
+  "quality_metrics": {
+    "video_id": "kai_sequence_20251215_212702.mp4",
+    "sync_timing_score": 0.9,
+    "render_quality_score": 0.67275,
+    "narrative_cohesion_score": 0.6560161292552947,
+    "overall_quality": 0.7429220430850982,
+    "passed": false,
+    "technical_specs": {
+      "width": 512,
+      "height": 512,
+      "fps": 24.0,
+      "duration": 2.458333,
+      "codec": "h264",
+      "bitrate": 591,
+      "has_audio": false
+    },
+    "issues": [
+      "Resolution below target: 512x512",
+      "Bitrate too low - likely compression artifacts",
+      "Bitrate low: 591 kbps",
+      "Story adherence low (0.068)"
+    ]
+  },
+  "detailed_analysis": {
+    "sync_and_timing": {
+      "audio_video_sync": 0.0,
+      "cut_timing": 0.9,
+      "dialogue_sync": 0.0,
+      "overall_sync": 0.9,
+      "issues": []
+    },
+    "render_quality": {
+      "resolution_score": 0.4,
+      "framerate_score": 1.0,
+      "encoding_quality_score": 0.7,
+      "bitrate_score": 0.591,
+      "overall_render_quality": 0.67275,
+      "technical_specs": {
+        "width": 512,
+        "height": 512,
+        "fps": 24.0,
+        "duration": 2.458333,
+        "codec": "h264",
+        "bitrate": 591,
+        "has_audio": false
+      },
+      "issues": [
+        "Resolution below target: 512x512",
+        "Bitrate too low - likely compression artifacts",
+        "Bitrate low: 591 kbps"
+      ]
+    },
+    "narrative_cohesion": {
+      "story_adherence_score": 0.0680483877658844,
+      "visual_narrative_score": 1.0,
+      "pacing_score": 0.9,
+      "overall_narrative_cohesion": 0.6560161292552947,
+      "issues": [
+        "Story adherence low (0.068)"
+      ]
+    }
+  }
+}

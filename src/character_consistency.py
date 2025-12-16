@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Character Consistency using basic image comparison
-No ML dependencies - uses histogram and simple pixel comparisons
+Character Consistency using CLIP embeddings for high-quality similarity checking
+Enhanced with both CLIP-based and fallback histogram methods
 """
 
 import hashlib
@@ -11,6 +11,10 @@ from typing import Dict, List, Optional, Tuple
 from PIL import Image
 import numpy as np
 import logging
+import torch
+import clip
+import pickle
+import json
 
 logger = logging.getLogger(__name__)
 

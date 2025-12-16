@@ -135,33 +135,37 @@ class TestGenerationWorkflow:
 
 
     def test_character_consistency(self):
-        """Test character consistency between generations"""
-        # Generate first image
+        """Test Dylan's theater selfie with face preservation"""
+        # Test face preservation with Dylan's original image
         response1 = requests.post(
             f"{API_URL}/api/anime/orchestrate",
             json={
-                "prompt": "anime boy with red hair, samurai outfit",
+                "prompt": "photorealistic theater selfie, man with beard wearing tan shirt, beautiful African American woman with natural hair, no tattoos, red theater seats, warm lighting",
                 "type": "image",
-                "width": 512,
-                "height": 512,
-                "seed": 42,
+                "width": 768,
+                "height": 768,
+                "seed": 777888,
                 "project_id": 2,
-                "character_name": "samurai_test"
+                "character_name": "dylan_theater",
+                "input_image": "/tmp/uploads/dylan.jpeg",
+                "denoise": 0.3
             }
         )
         assert response1.status_code == 200
 
-        # Generate second image with same character
+        # Generate with subtle grim reaper in background
         response2 = requests.post(
             f"{API_URL}/api/anime/orchestrate",
             json={
-                "prompt": "anime boy with red hair, samurai outfit, different pose",
+                "prompt": "photorealistic theater selfie, man with beard wearing tan shirt, African American woman, (subtle dark hooded figure in far background seats:0.4), theater atmosphere, warm lighting",
                 "type": "image",
-                "width": 512,
-                "height": 512,
-                "seed": 43,  # Different seed but same character
+                "width": 768,
+                "height": 768,
+                "seed": 131313,
                 "project_id": 2,
-                "character_name": "samurai_test"
+                "character_name": "dylan_theater_reaper",
+                "input_image": "/tmp/uploads/dylan.jpeg",
+                "denoise": 0.45
             }
         )
         assert response2.status_code == 200

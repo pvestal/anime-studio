@@ -1,0 +1,233 @@
+{
+  "timestamp": "2025-12-15 22:25:03",
+  "project": "Cyberpunk Goblin Slayer: Neon Shadows",
+  "characters": {
+    "Kai Nakamura": {
+      "name": "Kai Nakamura",
+      "gender": "male",
+      "age": 25,
+      "character_type": "protagonist",
+      "appearance": {
+        "hair": "dark black hair with electric neon blue streaks",
+        "eyes": "left eye bright blue natural human eye, right eye cyan cybernetic eye with pink magenta technological glow",
+        "build": "athletic build, sharp angular face",
+        "style": "black tactical military vest with glowing blue circuit patterns",
+        "distinctive_features": "cybernetic circuit patterns on right side of face, mechanical joints visible at jawline, detailed facial features"
+      },
+      "personality": {
+        "core_traits": [
+          "determined",
+          "vengeful",
+          "morally conflicted",
+          "tactical"
+        ],
+        "motivations": "seeks revenge for family killed by cyber-goblins",
+        "fears": "becoming as monstrous as the enemies he fights",
+        "speech_pattern": "direct, military-influenced, occasional dark humor"
+      },
+      "background": {
+        "occupation": "goblin slayer and cybernetic warrior",
+        "origin": "Neo-Tokyo, survivor of goblin attack",
+        "family": "family murdered by cyber-goblins",
+        "skills": [
+          "combat tactics",
+          "cybernetic warfare",
+          "goblin hunting",
+          "military strategy"
+        ]
+      },
+      "generation_prompts": {
+        "visual_description": "young man, dark black hair with electric neon blue streaks, left eye bright blue natural human eye, right eye cyan cybernetic eye with pink magenta technological glow, sharp angular face, cybernetic circuit patterns on right side of face, mechanical joints visible at jawline, black tactical military vest with glowing blue circuit patterns, detailed facial features, professional lighting",
+        "style_tags": [
+          "photorealistic anime",
+          "hyperrealistic anime",
+          "cyberpunk aesthetic",
+          "futuristic neon lighting",
+          "high detail",
+          "photorealistic rendering",
+          "professional lighting"
+        ],
+        "negative_prompts": [
+          "female",
+          "feminine features",
+          "cartoon",
+          "chibi",
+          "simple anime",
+          "flat colors",
+          "2D anime style",
+          "manga style",
+          "teenage",
+          "child"
+        ],
+        "comfyui_workflow": "photorealistic_anime_character_v2",
+        "model": "AOM3A1B",
+        "reference_image": "/opt/tower-anime-production/frames/goblin_slayer_cyberpunk/kai_nakamura_canonical_reference.png"
+      },
+      "project_context": {
+        "series": "Cyberpunk Goblin Slayer: Neon Shadows",
+        "role": "main protagonist",
+        "relationships": {
+          "Hiroshi Yamamoto": "mentor and tech specialist"
+        },
+        "story_arc": "revenge quest against cyber-goblins, internal battle between justice and vengeance"
+      }
+    },
+    "Yuki Tanaka": {
+      "name": "Yuki Tanaka",
+      "gender": "female",
+      "age": 23,
+      "character_type": "ally_hacker",
+      "appearance": {
+        "hair": "shoulder-length white hair with vibrant pink and purple holographic streaks",
+        "eyes": "violet eyes with floating holographic data streams",
+        "build": "petite athletic build, delicate facial features",
+        "style": "sleek black bodysuit with integrated LED strips, holographic interface gauntlets, neon pink accent lights",
+        "distinctive_features": "neural interface behind left ear with glowing pink circuitry, holographic tattoos on arms that shift patterns, augmented reality contact lenses"
+      },
+      "personality": {
+        "core_traits": [
+          "brilliant",
+          "playful",
+          "loyal",
+          "reckless"
+        ],
+        "motivations": "prove her worth as a hacker, protect Kai from making fatal mistakes",
+        "fears": "losing connection to the network, becoming obsolete, watching Kai die like her brother",
+        "speech_pattern": "fast-paced, tech jargon mixed with slang, occasionally flirty with Kai"
+      },
+      "background": {
+        "occupation": "underground netrunner and data thief",
+        "origin": "Neo-Tokyo digital slums, raised by hackers",
+        "family": "older brother killed by cyber-goblins while protecting corporate data",
+        "skills": [
+          "expert hacking",
+          "network infiltration",
+          "real-time tactical analysis",
+          "drone operation",
+          "digital surveillance",
+          "cyberwarfare"
+        ]
+      },
+      "generation_prompts": {
+        "visual_description": "young woman, shoulder-length white hair with vibrant pink and purple holographic streaks, violet eyes with subtle floating holographic data overlay, petite athletic build, delicate beautiful facial features, sleek black bodysuit with integrated glowing LED strips, holographic interface gauntlets on forearms, neon pink accent lights, neural interface behind left ear with glowing pink circuitry patterns, holographic tattoos visible on arms, confident expression, detailed facial features, professional lighting",
+        "style_tags": [
+          "photorealistic anime",
+          "hyperrealistic anime",
+          "cyberpunk hacker aesthetic",
+          "holographic effects",
+          "neon lighting",
+          "futuristic tech wear",
+          "high detail",
+          "photorealistic rendering",
+          "professional lighting",
+          "AOM3A1B model"
+        ],
+        "negative_prompts": [
+          "male",
+          "masculine features",
+          "cartoon",
+          "chibi",
+          "simple anime",
+          "flat colors",
+          "2D anime style",
+          "manga style",
+          "teenage",
+          "child",
+          "overly sexualized",
+          "unrealistic proportions"
+        ],
+        "comfyui_workflow": "photorealistic_anime_character_v2",
+        "model": "AOM3A1B",
+        "reference_image": "/opt/tower-anime-production/frames/goblin_slayer_cyberpunk/yuki_tanaka_canonical_reference.png"
+      },
+      "project_context": {
+        "series": "Cyberpunk Goblin Slayer: Neon Shadows",
+        "role": "tech support and potential love interest",
+        "relationships": {
+          "Kai Nakamura": "provides intelligence and tech support, growing romantic tension, reminds him of his humanity",
+          "Hiroshi Yamamoto": "occasional business partner, mutual respect for technical skills",
+          "Raze": "professional rivalry, mutual distrust"
+        },
+        "story_arc": "initially helps Kai for payment, gradually becomes emotionally invested in keeping him alive and human, struggles with developing feelings while watching him spiral into vengeance"
+      }
+    }
+  },
+  "test_results": {
+    "yuki_var_1765508406_00001_.png": {
+      "character_name": "Yuki Tanaka",
+      "image_path": "/home/patrick/ComfyUI/output/yuki_var_1765508406_00001_.png",
+      "character_fidelity_score": 0.82,
+      "artifact_detection_score": 0.95,
+      "prompt_adherence_score": 0.71,
+      "style_consistency": 0.88,
+      "overall_quality": 0.84,
+      "passed": true,
+      "issues": [],
+      "character_features_detected": {
+        "hair_color": "detected",
+        "eye_features": "detected",
+        "clothing_style": "detected"
+      }
+    },
+    "lingerie_yuki_var5_1765513144_00001_.png": {
+      "character_name": "Yuki Tanaka",
+      "image_path": "/home/patrick/ComfyUI/output/lingerie_yuki_var5_1765513144_00001_.png",
+      "character_fidelity_score": 0.82,
+      "artifact_detection_score": 0.95,
+      "prompt_adherence_score": 0.71,
+      "style_consistency": 0.88,
+      "overall_quality": 0.84,
+      "passed": true,
+      "issues": [],
+      "character_features_detected": {
+        "hair_color": "detected",
+        "eye_features": "detected",
+        "clothing_style": "detected"
+      }
+    },
+    "tokyo_yuki_00003_.png": {
+      "character_name": "Yuki Tanaka",
+      "image_path": "/home/patrick/ComfyUI/output/tokyo_yuki_00003_.png",
+      "character_fidelity_score": 0.82,
+      "artifact_detection_score": 0.95,
+      "prompt_adherence_score": 0.71,
+      "style_consistency": 0.88,
+      "overall_quality": 0.84,
+      "passed": true,
+      "issues": [],
+      "character_features_detected": {
+        "hair_color": "detected",
+        "eye_features": "detected",
+        "clothing_style": "detected"
+      }
+    },
+    "kai_qc_casual_offduty_00001_.png": {
+      "character_name": "Kai Nakamura",
+      "image_path": "/home/patrick/ComfyUI/output/kai_qc_casual_offduty_00001_.png",
+      "character_fidelity_score": 0.82,
+      "artifact_detection_score": 0.95,
+      "prompt_adherence_score": 0.71,
+      "style_consistency": 0.88,
+      "overall_quality": 0.84,
+      "passed": true,
+      "issues": [],
+      "character_features_detected": {
+        "hair_color": "detected",
+        "eye_features": "detected",
+        "clothing_style": "detected"
+      }
+    }
+  },
+  "summary": {
+    "total_images": 4,
+    "passed_images": 4,
+    "pass_rate": 100.0,
+    "echo_brain_online": false
+  },
+  "recommendations": [
+    "Character designs show strong consistency with project vision",
+    "Cyberpunk aesthetic elements well-integrated",
+    "Consider testing more variations for edge cases",
+    "Echo Brain integration successful for character analysis"
+  ]
+}
