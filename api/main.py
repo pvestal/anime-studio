@@ -17,17 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import (
-    BigInteger,
-    Column,
-    DateTime,
-    Float,
-    Integer,
-    String,
-    Text,
-    create_engine,
-    text,
-)
+from sqlalchemy import (BigInteger, Column, DateTime, Float, Integer, String, Text, create_engine,
+                        text)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, sessionmaker
@@ -3617,11 +3608,7 @@ async def get_git_status(project_id: int):
     """Get comprehensive git status for a project including Echo analysis"""
     try:
         sys.path.append("/opt/tower-anime-production")
-        from git_branching import (
-            echo_analyze_storyline,
-            get_commit_history,
-            list_branches,
-        )
+        from git_branching import echo_analyze_storyline, get_commit_history, list_branches
 
         # Get all branches
         branches = list_branches(project_id)

@@ -6,7 +6,6 @@ Fixes the broken job status API and provides actual working progress tracking
 """
 
 import logging
-
 # Import our modular components
 import sys
 from typing import Any, Dict, Optional
@@ -16,14 +15,8 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 sys.path.append("/opt/tower-anime-production")
-from modules import (
-    ComfyUIConnector,
-    DatabaseManager,
-    FileManager,
-    JobManager,
-    StatusMonitor,
-    WorkflowGenerator,
-)
+from modules import (ComfyUIConnector, DatabaseManager, FileManager, JobManager, StatusMonitor,
+                     WorkflowGenerator)
 from modules.job_manager import JobStatus, JobType
 
 # Configure logging

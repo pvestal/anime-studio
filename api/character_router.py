@@ -13,14 +13,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 # Import character models and schemas
 sys.path.append("/tmp")
-from character_studio_patch import (
-    CharacterGenerationRequest,
-    CharacterProfile,
-    CharacterProfileCreate,
-    CharacterProfileResponse,
-    CharacterProfileUpdate,
-    build_character_prompt,
-)
+from character_studio_patch import (CharacterGenerationRequest, CharacterProfile,
+                                    CharacterProfileCreate, CharacterProfileResponse,
+                                    CharacterProfileUpdate, build_character_prompt)
 
 # Database setup for Echo Brain
 ECHO_BRAIN_DATABASE_URL = (

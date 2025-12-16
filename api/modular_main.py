@@ -15,7 +15,6 @@ import redis
 import requests
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-
 # Import modular components
 from models import AnimeProject, Base, ProductionJob
 from pydantic import BaseModel

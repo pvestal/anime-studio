@@ -3,18 +3,8 @@ Database models for anime production system.
 Updated to match existing database schema in public schema.
 """
 
-from sqlalchemy import (
-    ARRAY,
-    JSON,
-    Boolean,
-    Column,
-    DateTime,
-    ForeignKey,
-    Integer,
-    LargeBinary,
-    String,
-    Text,
-)
+from sqlalchemy import (ARRAY, JSON, Boolean, Column, DateTime, ForeignKey, Integer, LargeBinary,
+                        String, Text)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func

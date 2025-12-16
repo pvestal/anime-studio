@@ -7,7 +7,7 @@ from typing import Optional
 
 import httpx
 import jwt
-from fastapi import HTTPException, Header
+from fastapi import Header, HTTPException
 
 # Configuration
 AUTH_SERVICE_URL = "http://localhost:8088"
@@ -107,7 +107,6 @@ async def optional_auth(authorization: Optional[str] = Header(None)) -> Optional
 
 from collections import defaultdict
 from datetime import datetime, timedelta
-
 # Rate limiting decorator
 from functools import wraps
 

@@ -5,7 +5,6 @@ New endpoints for enhanced seed storage and character consistency management
 """
 
 import json
-
 # Import the main app dependencies
 import os
 import sys
@@ -20,15 +19,10 @@ from sqlalchemy.orm import Session
 sys.path.append("/opt/tower-anime-production/api")
 
 # Import from the patch
-from character_consistency_patch import (
-    CharacterVersionCreate,
-    CharacterVersionResponse,
-    EnhancedGenerationRequest,
-    consistency_engine,
-    create_character_version,
-    seed_manager,
-    update_production_job_with_consistency_data,
-)
+from character_consistency_patch import (CharacterVersionCreate, CharacterVersionResponse,
+                                         EnhancedGenerationRequest, consistency_engine,
+                                         create_character_version, seed_manager,
+                                         update_production_job_with_consistency_data)
 
 # Create router for new endpoints
 router = APIRouter(prefix="/api/anime", tags=["character-consistency"])
