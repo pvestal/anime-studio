@@ -39,7 +39,7 @@ except ImportError:
     PIPELINE_AVAILABLE = False
 
 # Database Setup
-DATABASE_URL = "postgresql://patrick@localhost/anime_production"
+DATABASE_URL = f"postgresql://patrick:{os.getenv('DATABASE_PASSWORD', '***REMOVED***')}@localhost/anime_production"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
