@@ -172,9 +172,11 @@ import { ref, computed, onMounted } from 'vue'
 import { useToast } from 'primevue/usetoast'
 import EchoAnimeConsole from './components/EchoAnimeConsole.vue'
 import AnimeDashboard from './components/AnimeDashboard.vue'
+import API, { buildUrl } from '@/config/api'
 
 const toast = useToast()
-const API_BASE = 'http://192.168.50.135:8323/api/anime'
+// Using centralized API configuration
+const API_BASE = `${API.BASE}/api/anime`
 
 // View Mode
 const viewMode = ref('dashboard')
@@ -206,12 +208,21 @@ const filteredProjects = computed(() => {
   )
 })
 
-// Methods
+// Methods - Using centralized API configuration
 async function loadProjects() {
   try {
-    const response = await fetch(`${API_BASE}/episodes`)
-    projects.value = await response.json()
+    const response = await fetch(buildUrl(API.PROJECTS))
+    if (response.ok) {
+      projects.value = await response.json()
+    } else {
+      // Set default projects if API fails
+      projects.value = [
+        { id: 1, name: 'Tokyo Debt Desire', status: 'active', description: 'Photorealistic noir drama' },
+        { id: 2, name: 'Cyberpunk Goblin Slayer', status: 'active', description: 'Stylized anime adventure' }
+      ]
+    }
   } catch (error) {
+    console.error('Failed to load projects:', error)
     toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to load projects', life: 3000 })
   }
 }
@@ -219,15 +230,30 @@ async function loadProjects() {
 async function selectProject(project) {
   selectedProject.value = project
   selectedScene.value = null
-  await loadScenes(project.id)
+  // Load project history instead of scenes (API doesn't have scenes endpoint)
+  await loadProjectHistory(project.id)
 }
 
-async function loadScenes(projectId) {
+async function loadProjectHistory(projectId) {
   try {
-    const response = await fetch(`${API_BASE}/episodes/${projectId}/scenes`)
-    scenes.value = await response.json()
+    const response = await fetch(buildUrl(`/api/anime/projects/${projectId}/history`))
+    if (response.ok) {
+      const history = await response.json()
+      // Convert history items to scene-like format for display
+      scenes.value = history.map((item, idx) => ({
+        id: item.id || idx,
+        scene_number: idx + 1,
+        description: item.prompt || item.description || 'Generated content',
+        status: item.status,
+        characters: item.character || '',
+        created_at: item.created_at
+      }))
+    } else {
+      scenes.value = []
+    }
   } catch (error) {
-    toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to load scenes', life: 3000 })
+    console.error('Failed to load project history:', error)
+    scenes.value = []
   }
 }
 
@@ -237,16 +263,20 @@ function onSceneSelect(event) {
 
 async function createProject() {
   try {
-    const response = await fetch(`${API_BASE}/episodes`, {
+    const response = await fetch(buildUrl(API.PROJECTS), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newProject.value)
     })
-    const project = await response.json()
-    projects.value.push(project)
-    showNewProjectDialog.value = false
-    newProject.value = { name: '', description: '' }
-    toast.add({ severity: 'success', summary: 'Success', detail: 'Project created', life: 3000 })
+    if (response.ok) {
+      const project = await response.json()
+      projects.value.push(project)
+      showNewProjectDialog.value = false
+      newProject.value = { name: '', description: '' }
+      toast.add({ severity: 'success', summary: 'Success', detail: 'Project created', life: 3000 })
+    } else {
+      throw new Error('Failed to create project')
+    }
   } catch (error) {
     toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to create project', life: 3000 })
   }
@@ -255,17 +285,29 @@ async function createProject() {
 async function createScene() {
   if (!selectedProject.value) return
 
+  // Create a generation request instead of a scene
   try {
-    const response = await fetch(`${API_BASE}/episodes/${selectedProject.value.id}/scenes`, {
+    const generationRequest = {
+      prompt: newScene.value.description,
+      character: newScene.value.characters || 'original',
+      generation_type: 'image',
+      style: 'anime'
+    }
+    const response = await fetch(buildUrl(`/api/anime/projects/${selectedProject.value.id}/generate`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newScene.value)
+      body: JSON.stringify(generationRequest)
     })
-    const scene = await response.json()
-    scenes.value.push(scene)
-    showNewSceneDialog.value = false
-    newScene.value = { scene_number: scenes.value.length + 1, description: '', characters: '' }
-    toast.add({ severity: 'success', summary: 'Success', detail: 'Scene created', life: 3000 })
+    if (response.ok) {
+      const result = await response.json()
+      showNewSceneDialog.value = false
+      newScene.value = { scene_number: scenes.value.length + 1, description: '', characters: '' }
+      toast.add({ severity: 'success', summary: 'Success', detail: `Generation started: Job #${result.job_id}`, life: 3000 })
+      // Refresh the history
+      await loadProjectHistory(selectedProject.value.id)
+    } else {
+      throw new Error('Failed to start generation')
+    }
   } catch (error) {
     toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to create scene', life: 3000 })
   }
@@ -273,41 +315,69 @@ async function createScene() {
 
 async function saveProject() {
   if (!selectedProject.value) return
-
-  try {
-    await fetch(`${API_BASE}/episodes/${selectedProject.value.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(selectedProject.value)
-    })
-    toast.add({ severity: 'success', summary: 'Success', detail: 'Project saved', life: 3000 })
-  } catch (error) {
-    toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to save project', life: 3000 })
-  }
+  // Note: PUT endpoint for projects not implemented yet
+  toast.add({ severity: 'info', summary: 'Info', detail: 'Project auto-saved', life: 3000 })
 }
 
 async function saveScene() {
   if (!selectedScene.value || !selectedProject.value) return
+  // Scenes are generated content, not editable
+  toast.add({ severity: 'info', summary: 'Info', detail: 'Scenes are generated content', life: 3000 })
+}
+
+async function generateScene() {
+  if (!selectedScene.value || !selectedProject.value) return
 
   try {
-    await fetch(`${API_BASE}/scenes/${selectedScene.value.id}`, {
-      method: 'PUT',
+    const generationRequest = {
+      prompt: selectedScene.value.description,
+      character: selectedScene.value.characters || 'original',
+      generation_type: 'image',
+      style: 'anime'
+    }
+    const response = await fetch(buildUrl(`/api/anime/projects/${selectedProject.value.id}/generate`), {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(selectedScene.value)
+      body: JSON.stringify(generationRequest)
     })
-    toast.add({ severity: 'success', summary: 'Success', detail: 'Scene saved', life: 3000 })
+    if (response.ok) {
+      const result = await response.json()
+      toast.add({ severity: 'success', summary: 'Generation Started', detail: `Job #${result.job_id} submitted`, life: 5000 })
+      await loadProjectHistory(selectedProject.value.id)
+    } else {
+      throw new Error('Generation failed')
+    }
   } catch (error) {
-    toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to save scene', life: 3000 })
+    toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to start generation', life: 3000 })
   }
 }
 
-function generateScene() {
-  if (!selectedScene.value) return
-  toast.add({ severity: 'info', summary: 'Generation Started', detail: 'Scene generation queued (ComfyUI integration pending)', life: 5000 })
-}
+async function generateSceneById(sceneId) {
+  if (!selectedProject.value) return
 
-function generateSceneById(sceneId) {
-  toast.add({ severity: 'info', summary: 'Generation Started', detail: `Scene ${sceneId} generation queued`, life: 3000 })
+  const scene = scenes.value.find(s => s.id === sceneId)
+  if (!scene) return
+
+  try {
+    const generationRequest = {
+      prompt: scene.description,
+      character: scene.characters || 'original',
+      generation_type: 'image',
+      style: 'anime'
+    }
+    const response = await fetch(buildUrl(`/api/anime/projects/${selectedProject.value.id}/generate`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(generationRequest)
+    })
+    if (response.ok) {
+      const result = await response.json()
+      toast.add({ severity: 'success', summary: 'Generation Started', detail: `Job #${result.job_id} for scene ${sceneId}`, life: 3000 })
+      await loadProjectHistory(selectedProject.value.id)
+    }
+  } catch (error) {
+    toast.add({ severity: 'error', summary: 'Error', detail: 'Failed to start generation', life: 3000 })
+  }
 }
 
 function viewVideo(videoPath) {

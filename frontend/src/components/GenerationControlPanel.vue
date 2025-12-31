@@ -228,6 +228,7 @@
 
 <script>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
+import API, { buildUrl } from '@/config/api'
 
 export default {
   name: 'GenerationControlPanel',
@@ -276,10 +277,10 @@ export default {
       return selectedModel.value && !generating.value && vramUsage.value < 95 && selectedGenerationType.value
     })
 
-    // Methods
+    // Methods - Using centralized API configuration
     const loadQualityPresets = async () => {
       try {
-        const response = await fetch('/api/anime/quality-presets')
+        const response = await fetch(buildUrl(API.QUALITY_PRESETS))
         qualityPresets.value = await response.json()
       } catch (error) {
         console.error('Failed to load quality presets:', error)
@@ -288,7 +289,7 @@ export default {
 
     const loadAvailableModels = async () => {
       try {
-        const response = await fetch('/api/anime/models')
+        const response = await fetch(buildUrl(API.MODELS))
         availableModels.value = await response.json()
       } catch (error) {
         console.error('Failed to load models:', error)
@@ -297,7 +298,7 @@ export default {
 
     const updateVramUsage = async () => {
       try {
-        const response = await fetch('/api/anime/vram-status')
+        const response = await fetch(buildUrl(API.VRAM_STATUS))
         const data = await response.json()
         vramUsed.value = data.used
         vramTotal.value = data.total
