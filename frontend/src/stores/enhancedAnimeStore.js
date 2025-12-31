@@ -1,9 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import API, { WS, ECHO, buildUrl } from '@/config/api'
 
 /**
  * Enhanced Anime Production Store - Production-ready state management
  * Manages projects, characters, scenes, generation history, and real-time WebSocket updates
+ *
+ * Uses centralized API configuration from @/config/api.js
  */
 export const useEnhancedAnimeStore = defineStore('enhancedAnime', () => {
   // ==================== STATE ====================
@@ -46,9 +49,9 @@ export const useEnhancedAnimeStore = defineStore('enhancedAnime', () => {
   const notifications = ref([])
   const activeView = ref('console') // console, studio, timeline
 
-  // API Base URL
-  const API_BASE = 'http://localhost:8328'
-  const WS_URL = 'ws://localhost:8765'
+  // API Base URL - Using centralized config
+  const API_BASE = API.BASE
+  const WS_URL = WS.URL
 
   // ==================== COMPUTED ====================
 
@@ -191,7 +194,7 @@ export const useEnhancedAnimeStore = defineStore('enhancedAnime', () => {
       loading.value = true
       error.value = null
 
-      const response = await fetch(`${API_BASE}/api/anime/projects`)
+      const response = await fetch(buildUrl(API.PROJECTS))
       if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`)
 
       const data = await response.json()
@@ -222,7 +225,7 @@ export const useEnhancedAnimeStore = defineStore('enhancedAnime', () => {
       loading.value = true
       error.value = null
 
-      const response = await fetch(`${API_BASE}/api/anime/projects`, {
+      const response = await fetch(buildUrl(API.PROJECTS), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(projectData)
@@ -258,7 +261,7 @@ export const useEnhancedAnimeStore = defineStore('enhancedAnime', () => {
 
   async function loadProjectCharacters(projectId) {
     try {
-      const response = await fetch(`${API_BASE}/api/anime/projects/${projectId}/characters`)
+      const response = await fetch(buildUrl(API.PROJECT_CHARACTERS(projectId)))
       if (response.ok) {
         const projectCharacters = await response.json()
         // Update characters array with project characters
@@ -300,7 +303,7 @@ export const useEnhancedAnimeStore = defineStore('enhancedAnime', () => {
 
   async function loadProjectScenes(projectId) {
     try {
-      const response = await fetch(`${API_BASE}/api/anime/projects/${projectId}/scenes`)
+      const response = await fetch(buildUrl(API.PROJECT_SCENES(projectId)))
       if (response.ok) {
         const projectScenes = await response.json()
         scenes.value = scenes.value.filter(scene => scene.project_id !== projectId)
@@ -321,7 +324,7 @@ export const useEnhancedAnimeStore = defineStore('enhancedAnime', () => {
     try {
       loading.value = true
 
-      const response = await fetch(`${API_BASE}/api/anime/generate`, {
+      const response = await fetch(buildUrl(API.GENERATE), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(generationRequest)
@@ -359,7 +362,7 @@ export const useEnhancedAnimeStore = defineStore('enhancedAnime', () => {
 
   async function loadGenerationHistory() {
     try {
-      const response = await fetch(`${API_BASE}/api/anime/generations`)
+      const response = await fetch(buildUrl(API.GENERATIONS))
       if (response.ok) {
         const history = await response.json()
         generationHistory.value = history
@@ -397,7 +400,7 @@ export const useEnhancedAnimeStore = defineStore('enhancedAnime', () => {
   async function loadOrganizedFiles(date = null) {
     try {
       const dateParam = date || new Date().toISOString().split('T')[0].replace(/-/g, '')
-      const response = await fetch(`${API_BASE}/api/anime/files?date=${dateParam}`)
+      const response = await fetch(buildUrl(`${API.FILES}?date=${dateParam}`))
 
       if (response.ok) {
         const files = await response.json()
@@ -518,7 +521,7 @@ export const useEnhancedAnimeStore = defineStore('enhancedAnime', () => {
 
   async function checkApiHealth() {
     try {
-      const response = await fetch(`${API_BASE}/api/anime/health`)
+      const response = await fetch(buildUrl(API.HEALTH))
       return response.ok
     } catch (error) {
       return false

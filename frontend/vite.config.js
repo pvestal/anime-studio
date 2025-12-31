@@ -1,8 +1,14 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import path from 'path'
 
 export default defineConfig({
   plugins: [vue()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, 'src')
+    }
+  },
   build: {
     outDir: '../static/dist',
     emptyOutDir: true
@@ -10,7 +16,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8305',
+        target: 'http://127.0.0.1:8328',  // Tower Anime Production API port
         changeOrigin: true
       }
     }
