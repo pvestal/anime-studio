@@ -302,18 +302,23 @@ async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura
                 "class_type": "LoraLoader"
             }
 
-        # Add video save node if generating video
+        # Add video save node if generating video, remove image save node
         if generation_type == "video":
-            workflow["11"] = {
+            # Remove the SaveImage node for video generation
+            del workflow["9"]
+
+            # Add VHS_VideoCombine for MP4 output
+            workflow["9"] = {
                 "inputs": {
+                    "frame_rate": 8,
+                    "loop_count": 0,
                     "filename_prefix": f"video_{int(time.time())}",
-                    "format": "video/webp",
-                    "fps": 8,
-                    "lossless": False,
-                    "quality": 80,
+                    "format": "video/h264-mp4",
+                    "pingpong": False,
+                    "save_output": True,
                     "images": ["8", 0]
                 },
-                "class_type": "SaveAnimatedWEBP"
+                "class_type": "VHS_VideoCombine"
             }
 
         async with aiohttp.ClientSession() as session:
@@ -322,7 +327,7 @@ async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura
                 if response.status == 200:
                     result = await response.json()
                     if generation_type == "video":
-                        output_path = f"/mnt/1TB-storage/ComfyUI/output/video_{int(time.time())}_00001_.webp"
+                        output_path = f"/mnt/1TB-storage/ComfyUI/output/video_{int(time.time())}_00001_.mp4"
                     else:
                         output_path = f"/mnt/1TB-storage/ComfyUI/output/anime_{int(time.time())}_00001_.png"
                     return {
