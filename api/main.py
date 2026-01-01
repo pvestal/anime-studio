@@ -844,6 +844,29 @@ async def get_gallery_images():
 
     return images
 
+@app.get("/api/anime/episodes/{project_id}/scenes")
+async def get_project_scenes(project_id: int, db: Session = Depends(get_db)):
+    """Get scenes for a project (returns generated images for now)"""
+    # Get all jobs for this project
+    jobs = db.query(ProductionJob).filter(
+        ProductionJob.project_id == project_id
+    ).order_by(ProductionJob.created_at.desc()).all()
+
+    scenes = []
+    for job in jobs:
+        if job.output_path and os.path.exists(job.output_path):
+            scenes.append({
+                "id": job.id,
+                "name": f"Scene {job.id}",
+                "description": job.prompt,
+                "status": job.status,
+                "frames": 1,
+                "videoPath": job.output_path,
+                "thumbnail": job.output_path
+            })
+
+    return scenes
+
 @app.get("/quality/assess/{job_id}")
 async def assess_quality(job_id: int, db: Session = Depends(get_db)):
     """Assess quality of generated content using REAL computer vision"""
