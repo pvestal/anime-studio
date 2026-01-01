@@ -67,13 +67,13 @@ app.add_middleware(
 
 # Database Models
 class AnimeProject(Base):
-    __tablename__ = "anime_projects"
+    __tablename__ = "projects"  # Fixed to use correct table name
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)  # Changed from title to name to match existing table
+    name = Column(String, index=True)
     description = Column(Text)
-    status = Column(String, default="draft")
-    settings = Column(JSONB)  # JSON settings (matches existing JSONB column)
+    status = Column(String, default="active")
+    project_metadata = Column("metadata", JSONB)  # Map to metadata column
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -102,7 +102,7 @@ class AnimeProjectResponse(AnimeProjectBase):
     id: int
     status: str
     created_at: datetime
-    settings: Optional[dict] = None
+    project_metadata: Optional[dict] = None
 
     class Config:
         from_attributes = True
@@ -158,7 +158,7 @@ async def submit_comfyui_workflow(workflow_data: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"ComfyUI connection failed: {str(e)}")
 
-async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura", style: str = "anime"):
+async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura", style: str = "anime", generation_type: str = "image"):
     """Generate anime using direct ComfyUI with SSOT profiles"""
     try:
         # Get SSOT profile from database
@@ -221,6 +221,14 @@ async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura
             model_source = ["4", 0]   # Checkpoint model
             clip_source = ["4", 1]    # Checkpoint clip
 
+        # Adjust for video generation
+        if generation_type == "video":
+            batch_size = 16  # 16 frames for video
+            width = 512  # Standard video size
+            height = 512
+        else:
+            batch_size = 1  # Single frame for image
+
         workflow = {
             "3": {
                 "inputs": {
@@ -247,7 +255,7 @@ async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura
                 "inputs": {
                     "width": width,
                     "height": height,
-                    "batch_size": 1
+                    "batch_size": batch_size
                 },
                 "class_type": "EmptyLatentImage"
             },
@@ -294,14 +302,32 @@ async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura
                 "class_type": "LoraLoader"
             }
 
+        # Add video save node if generating video
+        if generation_type == "video":
+            workflow["11"] = {
+                "inputs": {
+                    "filename_prefix": f"video_{int(time.time())}",
+                    "format": "video/webp",
+                    "fps": 8,
+                    "lossless": False,
+                    "quality": 80,
+                    "images": ["8", 0]
+                },
+                "class_type": "SaveAnimatedWEBP"
+            }
+
         async with aiohttp.ClientSession() as session:
             # Submit to ComfyUI
             async with session.post(f"{COMFYUI_URL}/prompt", json={"prompt": workflow}) as response:
                 if response.status == 200:
                     result = await response.json()
+                    if generation_type == "video":
+                        output_path = f"/mnt/1TB-storage/ComfyUI/output/video_{int(time.time())}_00001_.webp"
+                    else:
+                        output_path = f"/mnt/1TB-storage/ComfyUI/output/anime_{int(time.time())}_00001_.png"
                     return {
                         "prompt_id": result.get("prompt_id"),
-                        "output_path": f"/mnt/1TB-storage/ComfyUI/output/anime_{int(time.time())}_00001_.png"
+                        "output_path": output_path
                     }
                 else:
                     error_text = await response.text()
@@ -355,6 +381,31 @@ async def get_projects(db: Session = Depends(get_db)):
     """Get all anime projects"""
     projects = db.query(AnimeProject).all()
     return projects
+
+@app.get("/api/anime/characters")
+async def get_characters(db: Session = Depends(get_db)):
+    """Get all characters"""
+    from sqlalchemy import text
+    result = db.execute(text("SELECT id, name, description, project_id FROM characters"))
+    return [{"id": r[0], "name": r[1], "description": r[2], "project_id": r[3]} for r in result.fetchall()]
+
+@app.post("/api/anime/characters")
+async def create_character(data: dict, db: Session = Depends(get_db)):
+    """Create character"""
+    from sqlalchemy import text
+    result = db.execute(text(
+        "INSERT INTO characters (name, description, project_id) VALUES (:name, :desc, :pid) RETURNING id"
+    ), {"name": data["name"], "desc": data.get("description"), "pid": data.get("project_id")})
+    db.commit()
+    return {"id": result.fetchone()[0], "name": data["name"]}
+
+@app.delete("/api/anime/characters/{character_id}")
+async def delete_character(character_id: int, db: Session = Depends(get_db)):
+    """Delete character"""
+    from sqlalchemy import text
+    db.execute(text("DELETE FROM characters WHERE id = :id"), {"id": character_id})
+    db.commit()
+    return {"message": "Character deleted"}
 
 @app.post("/api/anime/projects", response_model=AnimeProjectResponse)
 async def create_project(project: AnimeProjectCreate, db: Session = Depends(get_db)):
@@ -435,7 +486,8 @@ async def generate_video_for_project(project_id: int, request: AnimeGenerationRe
         echo_result = await generate_with_echo_service(
             prompt=request.prompt,
             character=request.character,
-            style=request.style
+            style=request.style,
+            generation_type=getattr(request, 'generation_type', 'image')
         )
 
         # Update job status
