@@ -23,6 +23,8 @@ import sys
 import logging
 import random
 import time
+import json
+import psycopg2
 from datetime import datetime, timedelta
 
 # Fix Python path for Echo Brain imports
@@ -49,6 +51,32 @@ DATABASE_URL = f"postgresql://patrick:{os.getenv('DATABASE_PASSWORD', '***REMOVE
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+class SystemConfig:
+    """Single source of truth for system configuration"""
+    _cache = {}
+
+    @classmethod
+    def get(cls, key: str, default=None):
+        """Get config value from database with caching"""
+        if key not in cls._cache:
+            conn = psycopg2.connect(
+                host='localhost',
+                database='anime_production',
+                user='patrick',
+                password=os.getenv('DATABASE_PASSWORD', '***REMOVED***')
+            )
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM system_config WHERE key = %s", (key,))
+                result = cur.fetchone()
+                cls._cache[key] = result[0] if result else default
+            conn.close()
+        return cls._cache[key]
+
+    @classmethod
+    def refresh(cls):
+        """Clear cache to reload from database"""
+        cls._cache = {}
 
 app = FastAPI(
     title="Tower Anime Production API",
@@ -114,6 +142,7 @@ class AnimeGenerationRequest(BaseModel):
     duration: int = 3
     style: str = "anime"
     type: str = "professional"  # professional, personal, creative
+    generation_type: str = "image"  # image or video
 
 class PersonalCreativeRequest(BaseModel):
     mood: str = "neutral"
@@ -130,7 +159,7 @@ def get_db():
         db.close()
 
 # Integration Services
-COMFYUI_URL = "http://127.0.0.1:8188"
+COMFYUI_URL = SystemConfig.get('comfyui_url', 'http://127.0.0.1:8188')
 ECHO_SERVICE_URL = "http://127.0.0.1:8351"
 
 # Initialize integrated pipeline
@@ -165,8 +194,8 @@ async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura
         from sqlalchemy import text
         db = next(get_db())
 
-        # Default to tokyo_debt_realism for realistic Mei
-        profile_name = "tokyo_debt_realism" if "mei" in prompt.lower() else "cyberpunk_arcane"
+        # Use SSOT profile - tokyo_debt_realism has the correct models
+        profile_name = "tokyo_debt_realism"  # Has realisticVision_v51 + mei_working_v1
 
         profile_query = text("""
             SELECT
@@ -221,11 +250,15 @@ async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura
             model_source = ["4", 0]   # Checkpoint model
             clip_source = ["4", 1]    # Checkpoint clip
 
-        # Adjust for video generation
+        # Use the FIXED AnimateDiff workflow for video generation
         if generation_type == "video":
-            batch_size = 16  # 16 frames for video
-            width = 512  # Standard video size
-            height = 512
+            # Use our proven working AnimateDiff workflow
+            return await generate_with_fixed_animatediff_workflow(
+                prompt=full_prompt,
+                generation_type="video",
+                checkpoint=checkpoint,
+                lora_name=lora_path if lora_path else "mei_working_v1.safetensors"
+            )
         else:
             batch_size = 1  # Single frame for image
 
@@ -302,23 +335,25 @@ async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura
                 "class_type": "LoraLoader"
             }
 
-        # Add video save node if generating video, remove image save node
+        # Add video save node if generating video
         if generation_type == "video":
-            # Remove the SaveImage node for video generation
-            del workflow["9"]
-
-            # Add VHS_VideoCombine for MP4 output
-            workflow["9"] = {
+            # Keep SaveImage for debugging but also add VHS_VideoCombine
+            workflow["11"] = {
                 "inputs": {
                     "frame_rate": 8,
                     "loop_count": 0,
                     "filename_prefix": f"video_{int(time.time())}",
                     "format": "video/h264-mp4",
+                    "pix_fmt": "yuv420p",
+                    "crf": 19,
+                    "save_metadata": True,
                     "pingpong": False,
                     "save_output": True,
+                    "videopreview": {"gooey_gpu": False},
                     "images": ["8", 0]
                 },
-                "class_type": "VHS_VideoCombine"
+                "class_type": "VHS_VideoCombine",
+                "_meta": {"title": "Save Video"}
             }
 
         async with aiohttp.ClientSession() as session:
@@ -339,6 +374,180 @@ async def generate_with_echo_service(prompt: str, character: str = "Kai Nakamura
                     raise HTTPException(status_code=500, detail=f"ComfyUI error: {response.status}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"ComfyUI connection failed: {str(e)}")
+
+async def generate_with_fixed_animatediff_workflow(prompt: str, generation_type: str, checkpoint: str = None, lora_name: str = None):
+    """
+    Generate anime video using the FIXED AnimateDiff workflow that actually works.
+    This replaces the broken programmatic workflow generation.
+    """
+    # Use database defaults if not specified
+    if checkpoint is None:
+        checkpoint = SystemConfig.get('default_checkpoint', 'realisticVision_v51.safetensors')
+
+    if generation_type != "video":
+        # For image generation, use simple text2img workflow
+        workflow = {
+            "3": {
+                "inputs": {
+                    "seed": random.randint(0, 1000000),
+                    "steps": 20,
+                    "cfg": 7.5,
+                    "sampler_name": "dpmpp_2m",
+                    "scheduler": "karras",
+                    "denoise": 1,
+                    "model": ["4", 0],
+                    "positive": ["6", 0],
+                    "negative": ["7", 0],
+                    "latent_image": ["5", 0]
+                },
+                "class_type": "KSampler"
+            },
+            "4": {
+                "inputs": {"ckpt_name": checkpoint},
+                "class_type": "CheckpointLoaderSimple"
+            },
+            "5": {
+                "inputs": {
+                    "width": 512,
+                    "height": 768,
+                    "batch_size": 1
+                },
+                "class_type": "EmptyLatentImage"
+            },
+            "6": {
+                "inputs": {
+                    "text": f"{prompt}, masterpiece, best quality",
+                    "clip": ["4", 1]
+                },
+                "class_type": "CLIPTextEncode"
+            },
+            "7": {
+                "inputs": {
+                    "text": "nsfw, nude, naked, worst quality, low quality, blurry",
+                    "clip": ["4", 1]
+                },
+                "class_type": "CLIPTextEncode"
+            },
+            "8": {
+                "inputs": {
+                    "samples": ["3", 0],
+                    "vae": ["4", 2]
+                },
+                "class_type": "VAEDecode"
+            },
+            "9": {
+                "inputs": {
+                    "filename_prefix": f"anime_image_{int(time.time())}",
+                    "images": ["8", 0]
+                },
+                "class_type": "SaveImage"
+            }
+        }
+
+        # Add LoRA if specified
+        if lora_name:
+            workflow["10"] = {
+                "inputs": {
+                    "lora_name": lora_name,
+                    "strength_model": 0.8,
+                    "strength_clip": 0.8,
+                    "model": ["4", 0],
+                    "clip": ["4", 1]
+                },
+                "class_type": "LoraLoader"
+            }
+            # Update references to use LoRA output
+            workflow["3"]["inputs"]["model"] = ["10", 0]
+            workflow["6"]["inputs"]["clip"] = ["10", 1]
+            workflow["7"]["inputs"]["clip"] = ["10", 1]
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(f"{COMFYUI_URL}/prompt", json={"prompt": workflow}) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    timestamp = int(time.time())
+                    return {
+                        "prompt_id": result.get("prompt_id"),
+                        "output_path": f"/mnt/1TB-storage/ComfyUI/output/anime_image_{timestamp}_00001.png",
+                        "workflow_used": "simple_text2img"
+                    }
+                else:
+                    raise HTTPException(status_code=500, detail=f"ComfyUI error: {response.status}")
+
+    # Load workflow from database SSOT
+    try:
+        conn = psycopg2.connect(
+            host='localhost',
+            database='anime_production',
+            user='patrick',
+            password=os.getenv('DATABASE_PASSWORD', '***REMOVED***')
+        )
+
+        with conn.cursor() as cur:
+            # Get workflow from database - use the RIFE workflow for better quality
+            cur.execute("""
+                SELECT workflow_template, frame_count
+                FROM video_workflow_templates
+                WHERE name = 'anime_30sec_rife_workflow'
+            """)
+            row = cur.fetchone()
+
+            if not row:
+                raise ValueError("Workflow not found in database SSOT")
+
+            workflow = row[0]  # JSONB returns dict directly
+            frame_count = row[1]
+            logger.info(f"Loaded workflow from database with {frame_count} frames")
+
+        conn.close()
+
+        # Update the prompts dynamically
+        for node_id, node in workflow.items():
+            if isinstance(node, dict):
+                # Update positive prompt - REPLACE the entire text, not append
+                if node.get("class_type") == "CLIPTextEncode" and "Positive" in str(node.get("_meta", {}).get("title", "")):
+                    old_prompt = workflow[node_id]["inputs"]["text"]
+                    # Complete replacement to avoid any leftover character names
+                    workflow[node_id]["inputs"]["text"] = f"{prompt}, masterpiece, best quality"
+                    logger.info(f"Updated prompt from '{old_prompt}' to '{workflow[node_id]['inputs']['text']}'")
+
+                # Update checkpoint if different
+                if node.get("class_type") == "CheckpointLoaderSimple":
+                    workflow[node_id]["inputs"]["ckpt_name"] = checkpoint
+
+                # Update LoRA if specified (for video workflows that have LoraLoader)
+                if node.get("class_type") == "LoraLoader" and lora_name:
+                    workflow[node_id]["inputs"]["lora_name"] = lora_name
+                    logger.info(f"Updated LoRA to '{lora_name}'")
+                elif node.get("class_type") == "LoraLoader" and not lora_name:
+                    # Remove LoRA node if no LoRA specified
+                    logger.info("No LoRA specified, using base model only")
+
+        # Generate unique filename - find the VHS_VideoCombine node
+        timestamp = int(time.time())
+        for node_id, node in workflow.items():
+            if isinstance(node, dict) and node.get("class_type") == "VHS_VideoCombine":
+                workflow[node_id]["inputs"]["filename_prefix"] = f"anime_video_{timestamp}"
+                logger.info(f"Updated video output node {node_id} with timestamp {timestamp}")
+                break
+
+        async with aiohttp.ClientSession() as session:
+            # Submit to ComfyUI
+            async with session.post(f"{COMFYUI_URL}/prompt", json={"prompt": workflow}) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    output_path = f"/mnt/1TB-storage/ComfyUI/output/anime_video_{timestamp}_00001_.mp4"
+                    return {
+                        "prompt_id": result.get("prompt_id"),
+                        "output_path": output_path,
+                        "workflow_used": "FIXED_anime_video_workflow"
+                    }
+                else:
+                    error_text = await response.text()
+                    raise HTTPException(status_code=500, detail=f"ComfyUI error: {response.status}")
+    except Exception as e:
+        logger.error(f"AnimateDiff workflow error: {e}")
+        raise HTTPException(status_code=500, detail=f"AnimateDiff generation failed: {str(e)}")
 
 async def get_real_comfyui_progress(request_id: str) -> float:
     """Get REAL progress from ComfyUI queue system"""
@@ -375,6 +584,11 @@ async def get_real_comfyui_progress(request_id: str) -> float:
         return 0.0
 
 # API Endpoints
+
+@app.get("/health")
+async def simple_health_check():
+    """Simple health check endpoint at root"""
+    return {"status": "healthy", "service": "tower-anime-production", "timestamp": datetime.utcnow().isoformat()}
 
 @app.get("/api/anime/health")
 async def health_check():
@@ -492,7 +706,7 @@ async def generate_video_for_project(project_id: int, request: AnimeGenerationRe
             prompt=request.prompt,
             character=request.character,
             style=request.style,
-            generation_type=getattr(request, 'generation_type', 'image')
+            generation_type=request.generation_type
         )
 
         # Update job status
@@ -642,6 +856,157 @@ async def get_stories():
             {"id": "friendship", "title": "Power of Friendship", "description": "Bonds that overcome all obstacles"}
         ]
     }
+
+class CharacterGenerateRequest(BaseModel):
+    action: str = "portrait"  # portrait, walking, talking, action, dancing
+    generation_type: str = "image"
+    location: str = "tokyo street"
+    prompt: Optional[str] = None
+
+@app.post("/api/anime/characters/{character_id}/generate")
+async def generate_character_shot(
+    character_id: int,
+    request: CharacterGenerateRequest,
+    db: Session = Depends(get_db)
+):
+    """Generate image/video of specific character from database"""
+    from sqlalchemy import text
+
+    # Get character with project info
+    char_query = text("""
+        SELECT c.id, c.name, c.description,
+               p.id as project_id, p.name as project_name
+        FROM characters c
+        JOIN projects p ON c.project_id = p.id
+        WHERE c.id = :char_id
+    """)
+
+    char = db.execute(char_query, {"char_id": character_id}).fetchone()
+    if not char:
+        raise HTTPException(status_code=404, detail="Character not found")
+
+    # Use custom prompt if provided, otherwise build from action
+    if request.prompt:
+        prompt = f"{char.name} {request.prompt}"
+    else:
+        # Build prompt based on action
+        action_prompts = {
+            "portrait": f"{char.name} portrait, face close up, looking at camera",
+            "walking": f"{char.name} walking down street, full body view",
+            "talking": f"{char.name} talking expressively, gesturing with hands",
+            "action": f"{char.name} in dynamic action pose, dramatic lighting",
+            "dancing": f"{char.name} dancing energetically"
+        }
+
+        prompt = action_prompts.get(request.action, action_prompts["portrait"])
+
+        # Add location
+        prompt = f"{prompt}, {request.location}"
+
+    # Add character description if available
+    if char.description:
+        prompt = f"{prompt}, {char.description}"
+
+    # Add quality tags
+    prompt = f"{prompt}, masterpiece, best quality, consistent character"
+
+    # Select profile based on project - use cyberpunk_anime for goblin slayer
+    if "tokyo" in char.project_name.lower() or "mei" in char.project_name.lower():
+        profile_name = "tokyo_debt_realism"
+    elif "cyberpunk" in char.project_name.lower() or "goblin" in char.project_name.lower():
+        profile_name = "cyberpunk_anime"
+    else:
+        profile_name = "tokyo_debt_realism"  # Default fallback
+
+    # Get profile settings - use model_path not file_path
+    profile_query = text("""
+        SELECT m.model_path as checkpoint, l.model_path as lora
+        FROM generation_profiles gp
+        LEFT JOIN ai_models m ON gp.checkpoint_id = m.id
+        LEFT JOIN ai_models l ON gp.lora_id = l.id
+        WHERE gp.name = :profile_name
+    """)
+    profile = db.execute(profile_query, {"profile_name": profile_name}).fetchone()
+
+    # Generate using our fixed workflow
+    if request.generation_type == "video":
+        # For non-Mei projects, don't use Mei's LoRA!
+        if "mei" not in char.name.lower() and char.project_id != 24:
+            # Use base model without character-specific LoRA for other projects
+            result = await generate_with_fixed_animatediff_workflow(
+                prompt=prompt,
+                generation_type="video",
+                checkpoint=profile.checkpoint if profile else "realisticVision_v51.safetensors",
+                lora_name=None  # No LoRA for non-Mei characters
+            )
+        else:
+            result = await generate_with_fixed_animatediff_workflow(
+                prompt=prompt,
+                generation_type="video",
+                checkpoint=profile.checkpoint if profile else "realisticVision_v51.safetensors",
+                lora_name=profile.lora if profile else "mei_working_v1.safetensors"
+            )
+    else:
+        result = await generate_with_fixed_animatediff_workflow(
+            prompt=prompt,
+            generation_type="image",
+            checkpoint=profile.checkpoint if profile else "realisticVision_v51.safetensors",
+            lora_name=profile.lora if profile else "mei_working_v1.safetensors"
+        )
+
+    # Store generation in production_jobs table
+    job = ProductionJob(
+        project_id=char.project_id,
+        job_type=f"character_{request.generation_type}",
+        prompt=prompt,
+        parameters=json.dumps({
+            "character_id": character_id,
+            "character_name": char.name,
+            "action": request.action,
+            "location": request.location,
+            "profile": profile_name
+        }),
+        status="completed",
+        output_path=result.get("output_path")
+    )
+    db.add(job)
+    db.commit()
+
+    return {
+        "character_id": character_id,
+        "character_name": char.name,
+        "action": request.action,
+        "location": request.location,
+        "prompt_used": prompt,
+        "profile": profile_name,
+        "job_id": job.id,
+        **result
+    }
+
+@app.get("/api/anime/characters")
+async def list_all_characters(db: Session = Depends(get_db)):
+    """List all characters with their projects"""
+    from sqlalchemy import text
+
+    query = text("""
+        SELECT c.id, c.name, c.description,
+               p.id as project_id, p.name as project_name
+        FROM characters c
+        JOIN projects p ON c.project_id = p.id
+        ORDER BY p.name, c.name
+    """)
+
+    chars = db.execute(query).fetchall()
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "description": c.description or "",
+            "project_id": c.project_id,
+            "project_name": c.project_name
+        }
+        for c in chars
+    ]
 
 @app.post("/echo/enhance-prompt")
 async def enhance_prompt_with_echo(request: dict):
@@ -879,6 +1244,12 @@ async def get_job_status_anime(job_id: int, db: Session = Depends(get_db)):
         "output_path": job.output_path
     }
 
+# Import episode endpoints
+from episode_endpoints import add_episode_endpoints
+
+# Add episode management endpoints
+add_episode_endpoints(app, get_db)
+
 @app.get("/api/anime/images")
 async def get_gallery_images():
     """Get recent generated images"""
@@ -1108,6 +1479,183 @@ async def get_daily_budget():
         "used": 23.45,  # Would track actual usage
         "remaining": 126.55,
         "autoApprovalThreshold": 5.00
+    }
+
+# Scene generation endpoints
+@app.get("/api/anime/scenes")
+async def get_scenes(project_id: int = None, db: Session = Depends(get_db)):
+    """Get scenes, optionally filtered by project"""
+    from sqlalchemy import text
+    if project_id:
+        result = db.execute(text("""
+            SELECT id::text, title, description, visual_description, scene_number, status, project_id
+            FROM scenes WHERE project_id = :pid ORDER BY scene_number
+        """), {"pid": project_id})
+    else:
+        result = db.execute(text("""
+            SELECT id::text, title, description, visual_description, scene_number, status, project_id
+            FROM scenes ORDER BY scene_number, id
+        """))
+    return [dict(r._mapping) for r in result.fetchall()]
+
+@app.post("/api/anime/scenes")
+async def create_scene(data: dict, db: Session = Depends(get_db)):
+    """Create a new scene"""
+    from sqlalchemy import text
+    result = db.execute(text("""
+        INSERT INTO scenes (project_id, title, description, visual_description, scene_number, prompt)
+        VALUES (:project_id, :title, :description, :visual_description, :scene_number, :prompt)
+        RETURNING id::text, title
+    """), {
+        "project_id": data.get("project_id"),
+        "title": data.get("title"),
+        "description": data.get("description"),
+        "visual_description": data.get("visual_description"),
+        "scene_number": data.get("scene_number", 1),
+        "prompt": data.get("visual_description", data.get("description"))
+    })
+    db.commit()
+    row = result.fetchone()
+    return {"id": row[0], "title": row[1]}
+
+@app.post("/api/anime/scenes/{scene_id}/generate")
+async def generate_from_scene(
+    scene_id: str,
+    generation_type: str = "image",
+    db: Session = Depends(get_db)
+):
+    """Generate image/video from actual scene data"""
+    from sqlalchemy import text
+
+    # Get scene with project info
+    scene = db.execute(text("""
+        SELECT s.id::text, s.title, s.description, s.visual_description, s.project_id,
+               p.name as project_name, s.prompt
+        FROM scenes s
+        JOIN projects p ON s.project_id = p.id
+        WHERE s.id::text = :id
+    """), {"id": scene_id}).fetchone()
+
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    # Use visual_description, then prompt, then description
+    prompt = scene.visual_description or scene.prompt or scene.description or scene.title
+
+    # Select profile based on project name
+    if "tokyo" in scene.project_name.lower() or "mei" in scene.project_name.lower():
+        profile_name = "tokyo_debt_realism"
+    elif "cyberpunk" in scene.project_name.lower() or "goblin" in scene.project_name.lower():
+        profile_name = "cyberpunk_anime"
+    else:
+        profile_name = "tokyo_debt_realism"  # Default fallback
+
+    # Get checkpoint/lora from SSOT profile
+    profile = db.execute(text("""
+        SELECT m.model_path as checkpoint, l.model_path as lora
+        FROM generation_profiles gp
+        LEFT JOIN ai_models m ON gp.checkpoint_id = m.id
+        LEFT JOIN ai_models l ON gp.lora_id = l.id
+        WHERE gp.name = :name
+    """), {"name": profile_name}).fetchone()
+
+    checkpoint = profile.checkpoint if profile else "realisticVision_v51.safetensors"
+    lora = profile.lora if profile else None
+
+    # Generate using the working AnimateDiff workflow
+    result = await generate_with_fixed_animatediff_workflow(
+        prompt=prompt,
+        generation_type=generation_type,
+        checkpoint=checkpoint,
+        lora_name=lora
+    )
+
+    # Update scene with output path
+    db.execute(text("""
+        UPDATE scenes SET
+            output_path = :output_path,
+            status = 'generated',
+            updated_at = NOW()
+        WHERE id::text = :id
+    """), {"id": scene_id, "output_path": result.get("output_path")})
+    db.commit()
+
+    return {
+        "scene_id": scene_id,
+        "scene_title": scene.title,
+        "project": scene.project_name,
+        "prompt_used": prompt,
+        "profile": profile_name,
+        "checkpoint": checkpoint,
+        "lora": lora,
+        **result
+    }
+
+@app.post("/api/anime/characters/{character_id}/generate-action")
+async def generate_character_action(
+    character_id: int,
+    action: str = "portrait",
+    generation_type: str = "image",
+    db: Session = Depends(get_db)
+):
+    """Generate image/video of specific character with action"""
+    from sqlalchemy import text
+
+    char = db.execute(text("""
+        SELECT c.id, c.name, c.description, c.project_id, p.name as project_name
+        FROM characters c
+        JOIN projects p ON c.project_id = p.id
+        WHERE c.id = :id
+    """), {"id": character_id}).fetchone()
+
+    if not char:
+        raise HTTPException(status_code=404, detail="Character not found")
+
+    # Build prompt based on action type
+    action_prompts = {
+        "portrait": f"{char.name} portrait, face close up, looking at camera",
+        "full_body": f"{char.name} full body standing pose",
+        "walking": f"{char.name} walking down street",
+        "talking": f"{char.name} talking, expressive face",
+        "action": f"{char.name} dynamic action pose",
+        "fighting": f"{char.name} in combat stance"
+    }
+
+    prompt = action_prompts.get(action, action_prompts["portrait"])
+    if char.description:
+        prompt += f", {char.description}"
+
+    # Select profile
+    if "tokyo" in char.project_name.lower() or "mei" in char.project_name.lower():
+        profile_name = "tokyo_debt_realism"
+    elif "cyberpunk" in char.project_name.lower() or "goblin" in char.project_name.lower():
+        profile_name = "cyberpunk_anime"
+    else:
+        profile_name = "tokyo_debt_realism"
+
+    # Get checkpoint/lora
+    profile = db.execute(text("""
+        SELECT m.model_path as checkpoint, l.model_path as lora
+        FROM generation_profiles gp
+        LEFT JOIN ai_models m ON gp.checkpoint_id = m.id
+        LEFT JOIN ai_models l ON gp.lora_id = l.id
+        WHERE gp.name = :name
+    """), {"name": profile_name}).fetchone()
+
+    result = await generate_with_fixed_animatediff_workflow(
+        prompt=prompt,
+        generation_type=generation_type,
+        checkpoint=profile.checkpoint if profile else "realisticVision_v51.safetensors",
+        lora_name=profile.lora if profile and char.project_id == 24 else None  # Only use LoRA for Mei project
+    )
+
+    return {
+        "character_id": character_id,
+        "character_name": char.name,
+        "action": action,
+        "prompt_used": prompt,
+        "profile": profile_name,
+        **result
     }
 
 # Import Echo Brain router

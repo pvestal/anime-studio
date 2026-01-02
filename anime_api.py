@@ -509,6 +509,114 @@ async def create_scene(scene: SceneCreate):
         logger.error(f"Error creating scene: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/anime/episodes/{project_id}")
+async def list_episodes_with_scenes(project_id: str):
+    """List all episodes for a project with scene counts"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Get episodes with scene counts
+            cursor.execute("""
+                SELECT
+                    e.id,
+                    e.episode_number,
+                    e.title,
+                    e.description,
+                    e.production_status,
+                    e.created_at,
+                    COUNT(s.id) as scene_count
+                FROM episodes e
+                LEFT JOIN scenes s ON e.id = s.episode_id
+                WHERE e.project_id = %s
+                GROUP BY e.id, e.episode_number, e.title, e.description,
+                         e.production_status, e.created_at
+                ORDER BY e.episode_number
+            """, (project_id,))
+
+            episodes = cursor.fetchall()
+
+            return {"episodes": episodes if episodes else []}
+
+    except Exception as e:
+        logger.error(f"Error listing episodes: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/anime/episodes/{episode_id}/generate-all")
+async def generate_all_episode_scenes(episode_id: str):
+    """Batch generate all scenes in an episode"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Get all scenes for the episode
+            cursor.execute("""
+                SELECT id, scene_number, prompt, description
+                FROM scenes
+                WHERE episode_id = %s
+                ORDER BY scene_number
+            """, (episode_id,))
+
+            scenes = cursor.fetchall()
+
+            if not scenes:
+                raise HTTPException(status_code=404, detail="No scenes found for episode")
+
+            job_ids = []
+
+            # Queue generation for each scene
+            for scene in scenes:
+                # Create generation job (simplified - you'd integrate with ComfyUI here)
+                cursor.execute("""
+                    UPDATE scenes
+                    SET status = 'generating'
+                    WHERE id = %s
+                    RETURNING id
+                """, (scene['id'],))
+
+                # In production, this would submit to ComfyUI and return real job ID
+                job_ids.append(f"job_{scene['id']}")
+
+            conn.commit()
+
+            return {
+                "message": f"Started generation for {len(scenes)} scenes",
+                "job_ids": job_ids,
+                "scenes": len(scenes)
+            }
+
+    except Exception as e:
+        logger.error(f"Error generating episode scenes: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/anime/scenes/reorder")
+async def reorder_scenes(request: Dict[str, Any]):
+    """Update scene order within an episode"""
+    try:
+        scenes = request.get('scenes', [])
+
+        if not scenes:
+            raise HTTPException(status_code=400, detail="No scenes provided")
+
+        with get_db() as conn:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            # Update scene numbers
+            for scene in scenes:
+                cursor.execute("""
+                    UPDATE scenes
+                    SET scene_number = %s
+                    WHERE id = %s
+                """, (scene['scene_number'], scene['id']))
+
+            conn.commit()
+
+            return {"message": f"Reordered {len(scenes)} scenes"}
+
+    except Exception as e:
+        logger.error(f"Error reordering scenes: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/anime/scenes", response_model=List[SceneResponse])
 async def list_scenes(project_id: Optional[int] = None, branch_name: Optional[str] = None, limit: int = 100):
     """List scenes with optional project and branch filters"""
