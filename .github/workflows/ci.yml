@@ -39,24 +39,24 @@ jobs:
           pip install flake8 black isort pylint mypy
 
       - name: Run Black formatter check
-        run: black --check api/ tests/
+        run: black --check api/ services/ config/ tests/
 
       - name: Run isort import checker
-        run: isort --check-only api/ tests/ --line-length 100
+        run: isort --check-only api/ services/ config/ tests/ --line-length 100
 
       - name: Run Flake8 linter
         run: |
-          flake8 api/ tests/ --max-line-length=100 \
+          flake8 api/ services/ config/ tests/ --max-line-length=100 \
             --exclude=venv,__pycache__,.git,build,dist \
             --ignore=E203,E266,W503,E501,E302,E305,E402,F541,E722,F821,F841,E303,W504,E226
 
       - name: Run Pylint
         continue-on-error: true
-        run: pylint api/ tests/ --max-line-length=100 --disable=C0114,C0115,C0116 || echo "Pylint issues found (non-blocking)"
+        run: pylint api/ services/ config/ tests/ --max-line-length=100 --disable=C0114,C0115,C0116 || echo "Pylint issues found (non-blocking)"
 
       - name: Run MyPy type checker
         continue-on-error: true
-        run: mypy api/ --ignore-missing-imports || echo "MyPy issues found (non-blocking)"
+        run: mypy api/ services/ config/ --ignore-missing-imports || echo "MyPy issues found (non-blocking)"
 
   test-unit:
     name: Unit Tests
@@ -160,7 +160,8 @@ jobs:
 
       - name: Setup test database
         run: |
-          PGPASSWORD=tower_echo_brain_secret_key_2025 psql -h localhost -U patrick -d anime_production_test < schema/anime_production_schema.sql
+          PGPASSWORD=tower_echo_brain_secret_key_2025 psql -h localhost -U patrick -d anime_production_test < database/anime_schema.sql
+          PGPASSWORD=tower_echo_brain_secret_key_2025 psql -h localhost -U patrick -d anime_production_test < database/framepack_schema.sql
 
       - name: Run integration tests
         env:
@@ -173,7 +174,7 @@ jobs:
       - name: Run API endpoint tests
         run: |
           # Start API server in background
-          python api/secured_api.py &
+          python api/main.py &
           API_PID=$!
           sleep 5
 
