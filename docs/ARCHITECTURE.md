@@ -1,177 +1,110 @@
-# Tower Anime Production System - Architecture Documentation
+# Tower Anime Production - Architecture
 
 ## Overview
 
-The Tower Anime Production System is a GPU-accelerated anime generation platform that integrates with ComfyUI and Echo Brain for AI orchestration. The system follows a modular architecture with clear separation of concerns.
+GPU-accelerated anime generation platform integrating ComfyUI, Echo Brain AI, and FramePack for movie-length video production.
 
 ## Directory Structure
 
 ```
 tower-anime-production/
-├── api/                          # FastAPI backend (current production)
-│   └── main.py                   # Main API server
-├── anime-system-modular/         # Modular architecture (target)
-│   ├── main.py                   # Slim app initialization
-│   └── backend/
-│       ├── routers/anime.py      # All API endpoints
-│       ├── models/schemas.py     # Pydantic models
-│       └── services/             # Business logic services
-│           ├── character_consistency.py
-│           └── quality_metrics.py
-├── frontend/                     # Vue.js 3 frontend
+├── api/                          # FastAPI backend
+│   ├── main.py                   # Entry point (port 8328)
+│   ├── echo_brain/               # Echo Brain AI integration
+│   │   ├── assist.py             # AI assistance
+│   │   ├── routes.py             # API routes
+│   │   └── workflow_orchestrator.py
+│   ├── auth_middleware.py        # Authentication
+│   ├── websocket_manager.py      # Real-time connections
+│   └── websocket_endpoints.py    # WebSocket routes
+├── services/                     # Business logic
+│   ├── framepack/                # FramePack video generation
+│   │   ├── echo_brain_memory.py  # State persistence
+│   │   ├── scene_generator.py    # Segment chaining
+│   │   └── quality_analyzer.py   # SSIM/optical flow
+│   └── generation/               # Image generation
+│       └── simple_generator.py   # ComfyUI integration
+├── config/                       # Configuration
+│   └── settings.py               # Environment-based config
+├── database/                     # SQL schemas
+│   ├── anime_schema.sql          # Core tables
+│   ├── framepack_schema.sql      # FramePack tables (8 tables)
+│   └── migrations/
+├── frontend/                     # Vue.js 3 UI
 │   └── src/
-│       ├── config/api.js         # Centralized API configuration
-│       ├── types/anime.ts        # TypeScript type definitions
-│       ├── stores/               # Pinia state management
-│       └── components/           # Vue components
-├── database/                     # SQL schema definitions
-├── workflows/                    # ComfyUI workflow templates
+│       ├── components/
+│       │   └── EchoBrainChat.vue
+│       └── App.vue
+├── workflows/                    # ComfyUI templates
+│   └── comfyui/
+├── tests/                        # Test suites
+│   ├── unit/
+│   └── integration/
 └── docs/                         # Documentation
+    └── archive/                  # Historical docs
 ```
 
 ## Core Components
 
-### Backend API (Port 8328)
+### API Layer (`api/`)
+- **main.py**: FastAPI app with endpoints for generation, status, health
+- **echo_brain/**: Echo Brain AI integration for creative assistance
+- **WebSocket**: Real-time progress updates during generation
 
-The backend provides RESTful API endpoints for:
-- **Generation**: Image and video generation via ComfyUI
-- **Projects**: Project management with Story Bibles
-- **Characters**: Character consistency with face embeddings
-- **Quality**: Quality metrics and phase gating
-- **Jobs**: Job tracking and progress monitoring
-- **Echo Brain**: AI orchestration integration
+### Services Layer (`services/`)
+- **framepack/**: FramePack video generation with memory persistence
+  - Maintains character/story/visual state across scenes
+  - Quality feedback learning loop
+  - Segment chaining via last-frame extraction
+- **generation/**: Direct ComfyUI integration for images/video
 
-### Frontend (Vue.js 3)
+### Database Layer (`database/`)
+Core tables:
+- `production_jobs` - Job tracking
+- `anime_characters` - Character definitions
+- `workflow_configs` - ComfyUI workflow templates
 
-- **State Management**: Pinia stores for reactive state
-- **API Configuration**: Centralized SSOT at `src/config/api.js`
-- **Type Safety**: Full TypeScript definitions at `src/types/anime.ts`
-- **Real-time Updates**: WebSocket integration for job progress
+FramePack tables:
+- `movie_projects`, `movie_episodes`, `movie_scenes`
+- `generation_segments` - Per-segment tracking
+- `character_scene_memory` - Character state per scene
+- `story_state_memory` - Plot/tension per scene
+- `visual_style_memory` - Lighting/camera per scene
+- `generation_quality_feedback` - Learning data
 
-### External Services
+## Data Flow
 
-- **ComfyUI (Port 8188)**: GPU-accelerated image/video generation
-- **Echo Brain (Port 8309)**: AI orchestration and task coordination
-- **PostgreSQL**: Database for projects, characters, and jobs
-
-## API Endpoints
-
-### Generation
-- `POST /api/anime/generate` - Submit generation job
-- `POST /api/anime/generate-fast` - Fast generation mode
-- `POST /api/anime/jobs/{id}/reproduce` - Reproduce previous generation
-
-### Projects
-- `GET /api/anime/projects` - List projects
-- `POST /api/anime/projects` - Create project
-- `GET /api/anime/projects/{id}/story-bible` - Get story bible
-- `POST /api/anime/projects/{id}/generate` - Generate for project
-
-### Characters
-- `PUT /api/anime/characters/{id}/embedding` - Store face embedding
-- `POST /api/anime/characters/{id}/consistency-check` - Check consistency
-- `GET /api/anime/characters/{id}/attributes` - Get character attributes
-- `POST /api/anime/characters/{id}/variations` - Create variation
-
-### Quality
-- `POST /api/anime/quality/evaluate` - Evaluate quality metrics
-- `POST /api/anime/quality/phase-gate/{phase}` - Check phase gate
-
-### Jobs
-- `GET /api/anime/jobs` - List all jobs
-- `GET /api/anime/jobs/{id}/status` - Get job status
-- `GET /api/anime/jobs/{id}/progress` - Get detailed progress
-- `GET /api/anime/jobs/{id}/quality` - Get quality scores
-
-## Data Models
-
-### Character Consistency
-
-Characters include:
-- **Face Embedding**: 512-dimension ArcFace embedding
-- **Attributes**: Visual tokens (hair color, eye color, outfit)
-- **Variations**: Outfit, expression, pose variants
-- **Color Palette**: Primary and accent colors
-- **Base Prompt**: Character description for prompts
-
-### Quality Metrics
-
-Quality scoring includes:
-- **Face Similarity**: Cosine similarity to reference (threshold: 0.70)
-- **Aesthetic Score**: LAION aesthetic score (threshold: 5.5)
-- **Temporal LPIPS**: Frame-to-frame consistency (video only)
-- **Motion Smoothness**: Animation smoothness (video only)
-- **Subject Consistency**: Subject tracking (video only)
-
-### Phase Gates
-
-Development phases:
-1. **Phase 1 (Still)**: Single frame generation
-2. **Phase 2 (Loop)**: Animation loop generation
-3. **Phase 3 (Video)**: Full video generation
-
-Each phase requires 80%+ pass rate before advancement.
-
-## Development
-
-### Running the Backend
-
-```bash
-cd /home/user/tower-anime-production
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8328
+```
+User Request
+    ↓
+API (main.py)
+    ↓
+Echo Brain (optional AI assistance)
+    ↓
+Services Layer
+    ├── FramePack (video) → Scene Generator → Quality Analyzer
+    └── Generation (image) → Simple Generator
+    ↓
+ComfyUI (localhost:8188)
+    ↓
+Output → /mnt/1TB-storage/ComfyUI/output/
 ```
 
-### Running the Frontend
+## Integration Points
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### Building for Production
-
-```bash
-cd frontend
-npm run build  # Outputs to ../static/dist
-```
+| Service | Port | Purpose |
+|---------|------|---------|
+| Anime API | 8328 | Main API |
+| ComfyUI | 8188 | Generation backend |
+| PostgreSQL | 5432 | Database |
+| Redis | 6379 | Job queue |
+| Echo Brain | 8309 | AI orchestration |
 
 ## Configuration
 
-### API Hosts
+All config via environment variables with Tower server defaults:
+- `DB_*` - Database connection
+- `COMFYUI_*` - ComfyUI connection
+- `API_*` - API server settings
 
-Update `frontend/src/config/api.js` for your environment:
-
-```javascript
-const API_HOSTS = {
-  anime: 'http://192.168.50.135:8328',
-  websocket: 'ws://192.168.50.135:8328/ws',
-  echo: 'http://192.168.50.135:8309',
-  comfyui: 'http://192.168.50.135:8188'
-}
-```
-
-### Database
-
-Configure in `api/main.py`:
-
-```python
-DATABASE_URL = "postgresql://patrick:***@localhost/anime_production"
-```
-
-## WebSocket Events
-
-Real-time updates via WebSocket:
-
-- `progress` - Job progress update
-- `job_complete` - Job completed successfully
-- `job_failed` - Job failed with error
-- `quality_evaluation` - Quality scores available
-
-## Project Style Enforcement
-
-Projects enforce style consistency:
-- **Tokyo Debt Desire**: Photorealistic (`realisticVision_v51`)
-- **Cyberpunk Goblin Slayer**: Stylized anime (`counterfeit_v3`)
-
-Style rules are stored in the database and validated at runtime.
+See `config/settings.py` for full list.
