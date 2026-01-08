@@ -1,6 +1,6 @@
 # Tower Anime Production
 
-Anime video production system with Echo Brain memory persistence and FramePack segment chaining for movie-length content.
+Anime video production system with Echo Brain AI integration and FramePack segment chaining for movie-length content.
 
 ## Quick Start
 
@@ -16,38 +16,52 @@ psql -U patrick -d anime_production < database/framepack_schema.sql
 python api/main.py
 ```
 
-API runs at `http://localhost:8328/api/anime/docs`
+API: `http://localhost:8328/api/anime/docs`
 
 ## Architecture
 
 ```
 tower-anime-production/
-├── api/                    # FastAPI application
-│   ├── main.py            # Entry point
-│   ├── auth_middleware.py # Authentication
-│   └── websocket_*.py     # Real-time updates
-├── services/              # Business logic
-│   ├── framepack/         # FramePack video generation
-│   │   ├── echo_brain_memory.py  # Character/story/visual persistence
-│   │   ├── scene_generator.py    # Segment generation & chaining
-│   │   └── quality_analyzer.py   # SSIM & optical flow analysis
-│   └── generation/        # Image/video generation
-├── config/                # Environment-based configuration
-│   └── settings.py
-├── database/              # SQL schemas
+├── api/
+│   ├── main.py                 # FastAPI entry point
+│   ├── echo_brain/             # Echo Brain AI integration
+│   │   ├── assist.py           # AI assistance endpoints
+│   │   ├── routes.py           # Echo Brain routes
+│   │   └── workflow_orchestrator.py
+│   ├── auth_middleware.py
+│   └── websocket_*.py          # Real-time updates
+├── services/
+│   ├── framepack/              # FramePack video generation
+│   │   ├── echo_brain_memory.py    # Character/story/visual persistence
+│   │   ├── scene_generator.py      # Segment generation & chaining
+│   │   └── quality_analyzer.py     # SSIM & optical flow analysis
+│   └── generation/             # Image/video generation
+├── config/
+│   └── settings.py             # Environment-based config
+├── database/
 │   ├── anime_schema.sql
-│   └── framepack_schema.sql
-├── tests/                 # Test suites
-├── workflows/             # ComfyUI workflow templates
-└── frontend/              # React UI
+│   ├── framepack_schema.sql
+│   └── migrations/
+├── frontend/                   # Vue.js UI
+│   └── src/components/
+│       └── EchoBrainChat.vue   # AI chat interface
+├── workflows/                  # ComfyUI templates
+└── docs/
+    └── archive/                # Historical docs
 ```
 
-## FramePack Pipeline
+## Features
 
-Generates movie-length content by chaining 30-60 second segments:
+### Echo Brain Integration
+- AI-powered creative assistance
+- Workflow orchestration
+- Chat interface for generation control
+
+### FramePack Pipeline
+Chain 30-60 second segments into movie-length content:
 
 ```
-Movie → Episodes → Scenes → Segments (30-60s each)
+Movie → Episodes → Scenes → Segments
                               ↓
                     Echo Brain Memory
                     - Character state per scene
@@ -57,32 +71,29 @@ Movie → Episodes → Scenes → Segments (30-60s each)
                               ↓
                     FramePack Generation
                     - First/last frame anchoring
-                    - Motion prompt from memory
-                    - Chain via extracted last frames
+                    - Anti-drift technology
+                    - 6GB VRAM requirement
                               ↓
                     Quality Analysis
                     - Frame consistency (SSIM)
                     - Motion smoothness (optical flow)
-                    - Feed back into memory
 ```
 
-### The Learning Loop
-
-After each segment generation:
-1. Quality analyzer measures frame consistency and motion smoothness
-2. If score > 0.7: prompt elements marked as "successful"
-3. If score < 0.4: prompt elements marked as "failed"
-4. Next generation queries feedback to enhance/filter prompts
+### Learning Loop
+After each segment:
+1. Quality analyzer scores frame consistency + motion smoothness
+2. Score > 0.7 → prompt elements marked "successful"
+3. Score < 0.4 → prompt elements marked "failed"
+4. Next generation uses feedback to enhance prompts
 
 ## Configuration
-
-Environment variables (or defaults for Tower server):
 
 ```bash
 # Database
 DB_HOST=localhost
 DB_NAME=anime_production
 DB_USER=patrick
+DB_PASSWORD=<from-env>
 
 # ComfyUI
 COMFYUI_HOST=localhost
@@ -92,31 +103,32 @@ COMFYUI_PORT=8188
 API_PORT=8328
 ```
 
-## Hardware Requirements
-
-Optimized for Tower server:
-- **GPU**: RTX 3060 12GB (FramePack needs ~6GB VRAM)
-- **CPU**: AMD Ryzen 9 24-core
-- **RAM**: 96GB DDR6
-- **Storage**: 1TB NVMe for models/output
-
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/anime/health` | GET | System health check |
-| `/api/anime/generate` | POST | Generate anime image |
-| `/api/anime/orchestrate` | POST | Full production pipeline |
-| `/api/anime/generation/{id}/status` | GET | Job status with progress |
-| `/api/anime/phases` | GET | Available production phases |
+| `/api/anime/health` | GET | System health |
+| `/api/anime/generate` | POST | Generate image |
+| `/api/anime/orchestrate` | POST | Full pipeline |
+| `/api/anime/generation/{id}/status` | GET | Job status |
+| `/api/echo-brain/assist` | POST | AI assistance |
+| `/api/echo-brain/chat` | WebSocket | Real-time chat |
+
+## Hardware
+
+Optimized for Tower server:
+- **GPU**: RTX 3060 12GB (FramePack ~6GB)
+- **CPU**: AMD Ryzen 9 24-core
+- **RAM**: 96GB DDR6
+- **Storage**: 1TB NVMe
 
 ## Development
 
 ```bash
-# Run tests
+# Tests
 pytest tests/ -v
 
-# Format code
+# Lint
 black api/ services/ config/
 isort api/ services/ config/
 
@@ -124,6 +136,17 @@ isort api/ services/ config/
 mypy api/ services/ config/
 ```
 
-## Documentation
+## FramePack Setup
 
-Historical implementation notes archived in `docs/archive/`.
+```bash
+# Install in ComfyUI
+cd /opt/ComfyUI/custom_nodes
+git clone https://github.com/kijai/ComfyUI-FramePackWrapper.git
+
+# Download models to /mnt/1TB-storage/models/
+# - diffusion_models/FramePackI2V_HY_fp8_e4m3fn.safetensors
+# - text_encoders/clip_l.safetensors
+# - text_encoders/llava_llama3_fp16.safetensors
+# - clip_vision/sigclip_vision_patch14_384.safetensors
+# - vae/hunyuan_video_vae_bf16.safetensors
+```
