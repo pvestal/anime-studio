@@ -36,7 +36,7 @@ The anime production system has **CRITICAL SECURITY VULNERABILITIES** and **MISL
 **Impact**: Anyone can access and use the system
 
 ### ❌ Hardcoded Credentials (CRITICAL)
-- Database password in source code: `***REMOVED***`
+- Database password in source code: `tower_echo_brain_secret_key_2025`
 - Location: `/opt/tower-anime-production/database.py:24`
 
 ### ❌ No Rate Limiting (HIGH)
@@ -146,7 +146,7 @@ The anime production system has **CRITICAL SECURITY VULNERABILITIES** and **MISL
    ```python
    import os
    DB_PASSWORD = os.environ.get('DB_PASSWORD')
-   # NOT: DB_PASSWORD = '***REMOVED***'
+   # NOT: DB_PASSWORD = 'tower_echo_brain_secret_key_2025'
    ```
 
 4. **ADD RATE LIMITING**

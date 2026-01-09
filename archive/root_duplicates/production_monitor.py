@@ -38,15 +38,15 @@ class ProductionMonitor:
 
     def __init__(self):
         self.db_config = {
-            "host": "***REMOVED***",
+            "host": "192.168.50.135",
             "database": "anime_production",
             "user": "patrick",
-            "password": "***REMOVED***",
+            "password": "tower_echo_brain_secret_key_2025",
             "port": 5432,
             "options": "-c search_path=anime_api,public",
         }
-        self.comfyui_url = "http://***REMOVED***:8188"
-        self.echo_url = "https://***REMOVED***/api/echo"
+        self.comfyui_url = "http://192.168.50.135:8188"
+        self.echo_url = "https://192.168.50.135/api/echo"
         self.output_dir = Path("/mnt/1TB-storage/ComfyUI/output")
         self.max_generation_time = 1800  # 30 minutes max
         self.retry_attempts = 3

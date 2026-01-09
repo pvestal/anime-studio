@@ -48,11 +48,11 @@ class SystemConfig:
     database_host: str = "localhost"
     database_name: str = "anime_production"
     database_user: str = "patrick"
-    database_password: str = "***REMOVED***"
+    database_password: str = "tower_echo_brain_secret_key_2025"
 
     # Service URLs
-    comfyui_url: str = "http://***REMOVED***:8188"
-    echo_brain_url: str = "http://***REMOVED***:8309"
+    comfyui_url: str = "http://192.168.50.135:8188"
+    echo_brain_url: str = "http://192.168.50.135:8309"
 
     # Storage paths
     base_storage_path: str = "/mnt/1TB-storage"

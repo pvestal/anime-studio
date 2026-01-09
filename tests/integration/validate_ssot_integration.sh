@@ -6,7 +6,7 @@ set -e  # Exit on any error
 
 # Configuration
 API_BASE_URL="http://localhost:8328"
-DB_HOST="***REMOVED***"
+DB_HOST="192.168.50.135"
 DB_USER="patrick"
 DB_NAME="tower_consolidated"
 TEST_PROJECT_ID="integration-test-$(date +%s)"

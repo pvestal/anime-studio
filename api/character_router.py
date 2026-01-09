@@ -19,7 +19,7 @@ from character_studio_patch import (CharacterGenerationRequest, CharacterProfile
 
 # Database setup for Echo Brain
 ECHO_BRAIN_DATABASE_URL = (
-    "postgresql://patrick:***REMOVED***@***REMOVED***/echo_brain"
+    "postgresql://patrick:tower_echo_brain_secret_key_2025@192.168.50.135/echo_brain"
 )
 echo_brain_engine = create_engine(ECHO_BRAIN_DATABASE_URL)
 EchoBrainSessionLocal = sessionmaker(

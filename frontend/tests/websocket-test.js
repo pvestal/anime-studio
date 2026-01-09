@@ -47,7 +47,7 @@ class WebSocketTester {
 
   createConnection(id) {
     return new Promise((resolve, reject) => {
-      const wsUrl = 'wss://***REMOVED***/api/ws'
+      const wsUrl = 'wss://192.168.50.135/api/ws'
       console.log(`[WebSocket Test] Creating connection ${id} to ${wsUrl}`)
 
       const ws = new WebSocket(wsUrl, {

@@ -26,7 +26,7 @@ class AnimeRequest(BaseModel):
     style: str = "anime"
 
 COMFYUI_URL = "http://127.0.0.1:8188"
-OUTPUT_DIR = "***REMOVED***/AnimeGenerated"
+OUTPUT_DIR = "/home/patrick/Videos/AnimeGenerated"
 
 class ComfyUIClient:
     def __init__(self):

@@ -226,7 +226,7 @@ class SecurityAudit:
             with open("/opt/tower-anime-production/database.py", "r") as f:
                 content = f.read()
 
-            if "password" in content and "***REMOVED***" in content:
+            if "password" in content and "tower_echo_brain_secret_key_2025" in content:
                 self.log_finding(
                     "CRITICAL",
                     "HARDCODED_CREDENTIALS",

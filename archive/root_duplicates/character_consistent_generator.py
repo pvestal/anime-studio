@@ -215,8 +215,8 @@ async def test_character_generation():
 
         # Copy to Videos directory for inspection
         import shutil
-        shutil.copy(result, "***REMOVED***/character_consistent_kai.png")
-        print("📁 Copied to ***REMOVED***/character_consistent_kai.png")
+        shutil.copy(result, "/home/patrick/Videos/character_consistent_kai.png")
+        print("📁 Copied to /home/patrick/Videos/character_consistent_kai.png")
 
     else:
         print("❌ FAILED: Could not generate character image")

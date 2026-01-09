@@ -133,7 +133,7 @@ DB_CONFIG = {
     "host": "localhost",
     "database": "anime_production",
     "user": "patrick",
-    "password": "***REMOVED***",
+    "password": "tower_echo_brain_secret_key_2025",
     "port": 5432,
     "options": "-c search_path=anime_api,public"
 }
@@ -153,7 +153,7 @@ DB_CONFIG = {
 ### Test Infrastructure
 1. **Test Jobs**: Pre-configured test jobs in database
 2. **Progress Simulation**: `test_websocket_progress.py simulate`
-3. **Live Demo**: `http://***REMOVED***:8328/static/progress_test.html`
+3. **Live Demo**: `http://192.168.50.135:8328/static/progress_test.html`
 4. **Connection Testing**: WebSocket connection validation
 
 ### Test Commands
@@ -240,7 +240,7 @@ python3 websocket_progress_server.py
 python3 enhanced_progress_monitor.py monitor
 
 # Browser: Open test interface
-# http://***REMOVED***:8328/static/progress_test.html
+# http://192.168.50.135:8328/static/progress_test.html
 ```
 
 ---

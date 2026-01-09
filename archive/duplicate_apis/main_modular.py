@@ -33,7 +33,7 @@ database_manager = None
 comfyui_connector = None
 
 # Configuration
-COMFYUI_URL = "http://***REMOVED***:8188"
+COMFYUI_URL = "http://192.168.50.135:8188"
 OUTPUT_BASE_PATH = "/mnt/1TB-storage/ComfyUI/output"
 
 

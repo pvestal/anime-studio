@@ -24,7 +24,7 @@ export function useAnimeProgress(jobId, options = {}) {
   let websocket = null
   let reconnectAttempts = 0
   const maxReconnectAttempts = options.maxReconnectAttempts || 5
-  const serverUrl = options.serverUrl || 'ws://***REMOVED***:8328'
+  const serverUrl = options.serverUrl || 'ws://192.168.50.135:8328'
 
   // Computed properties
   const isProcessing = computed(() => status.value === 'processing')
@@ -244,7 +244,7 @@ const props = defineProps({
   },
   serverUrl: {
     type: String,
-    default: 'ws://***REMOVED***:8328'
+    default: 'ws://192.168.50.135:8328'
   }
 })
 
@@ -594,7 +594,7 @@ import { ref, reactive, onMounted, onUnmounted } from 'vue'
 const props = defineProps({
   serverUrl: {
     type: String,
-    default: 'ws://***REMOVED***:8328'
+    default: 'ws://192.168.50.135:8328'
   }
 })
 
@@ -897,7 +897,7 @@ export function useAnimeProgress(jobId, options = {}) {
   const websocketRef = useRef(null)
   const reconnectAttemptsRef = useRef(0)
   const maxReconnectAttempts = options.maxReconnectAttempts || 5
-  const serverUrl = options.serverUrl || 'ws://***REMOVED***:8328'
+  const serverUrl = options.serverUrl || 'ws://192.168.50.135:8328'
 
   const connect = useCallback(() => {
     if (!jobId) return

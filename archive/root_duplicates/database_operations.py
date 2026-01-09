@@ -55,7 +55,7 @@ def get_vault_secret() -> str:
         logger.warning(f"Could not get password from Vault: {e}")
 
     # Fallback to environment variable
-    return os.environ.get('ANIME_DB_PASSWORD', '***REMOVED***')
+    return os.environ.get('ANIME_DB_PASSWORD', 'tower_echo_brain_secret_key_2025')
 
 @dataclass
 class DatabaseConfig:

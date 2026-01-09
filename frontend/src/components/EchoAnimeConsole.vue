@@ -107,7 +107,7 @@ onMounted(async () => {
 
 async function checkEchoConnection() {
   try {
-    const response = await fetch('https://***REMOVED***/api/echo/health', {
+    const response = await fetch('https://192.168.50.135/api/echo/health', {
       method: 'GET'
     })
     echoConnected.value = response.ok
@@ -118,7 +118,7 @@ async function checkEchoConnection() {
 
 async function loadEchoStatus() {
   try {
-    const response = await fetch('https://***REMOVED***/api/echo/anime/system/status')
+    const response = await fetch('https://192.168.50.135/api/echo/anime/system/status')
     if (response.ok) {
       const status = await response.json()
       addConsoleLine('info', `System Status: ${status.overall_status.toUpperCase()}`)
@@ -192,7 +192,7 @@ async function refreshEchoStatus() {
 async function showCharacters() {
   try {
     addConsoleLine('info', 'Loading character data from Echo Brain...')
-    const response = await fetch('https://***REMOVED***/api/echo/anime/characters')
+    const response = await fetch('https://192.168.50.135/api/echo/anime/characters')
     if (response.ok) {
       const data = await response.json()
       addConsoleLine('success', `Found ${data.count} characters:`)
@@ -239,7 +239,7 @@ async function handleGenerate(args) {
       requestBody.character = character
     }
 
-    const response = await fetch('https://***REMOVED***/api/echo/anime/generate', {
+    const response = await fetch('https://192.168.50.135/api/echo/anime/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)

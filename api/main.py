@@ -45,7 +45,7 @@ except ImportError:
     PIPELINE_AVAILABLE = False
 
 # Database Setup
-DATABASE_URL = f"postgresql://patrick:{os.getenv('DATABASE_PASSWORD', '***REMOVED***')}@localhost/anime_production"
+DATABASE_URL = f"postgresql://patrick:{os.getenv('DATABASE_PASSWORD', 'tower_echo_brain_secret_key_2025')}@localhost/anime_production"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -1014,8 +1014,8 @@ async def git_control_interface():
                     <ul>
                         <li><a href="/api/anime/projects" style="color: #4a9eff;">View Projects API</a></li>
                         <li><a href="/api/anime/git/status" style="color: #4a9eff;">Git Status API</a></li>
-                        <li><a href="http://***REMOVED***:8188/" style="color: #4a9eff;">ComfyUI Interface</a></li>
-                        <li><a href="https://***REMOVED***/" style="color: #4a9eff;">Tower Dashboard</a></li>
+                        <li><a href="http://192.168.50.135:8188/" style="color: #4a9eff;">ComfyUI Interface</a></li>
+                        <li><a href="https://192.168.50.135/" style="color: #4a9eff;">Tower Dashboard</a></li>
                     </ul>
                 </body>
             </html>

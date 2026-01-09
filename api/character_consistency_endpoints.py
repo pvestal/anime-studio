@@ -36,7 +36,7 @@ except ImportError:
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
 
-        DATABASE_URL = "postgresql://patrick:***REMOVED***@localhost/anime_production"
+        DATABASE_URL = "postgresql://patrick:tower_echo_brain_secret_key_2025@localhost/anime_production"
         engine = create_engine(DATABASE_URL)
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         db = SessionLocal()

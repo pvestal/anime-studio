@@ -10,7 +10,7 @@
 Successfully migrated Tower Anime Production System from prototype to production-grade v2.0 architecture. Added 25 database tables with complete character consistency, quality metrics, and video production capabilities.
 
 ### Environment
-- **Server**: Tower (***REMOVED***)
+- **Server**: Tower (192.168.50.135)
 - **Database**: `anime_production` (PostgreSQL 16.11)
 - **User**: `patrick`
 - **Free Space**: 976GB available
@@ -267,7 +267,7 @@ If issues arise, full rollback available:
 sudo systemctl stop tower-anime-production
 
 # Restore from backup
-export PGPASSWORD=***REMOVED***
+export PGPASSWORD=tower_echo_brain_secret_key_2025
 dropdb -h localhost -U patrick anime_production
 createdb -h localhost -U patrick anime_production
 pg_restore -h localhost -U patrick -d anime_production /tmp/anime_db_backups/20251205_043858/anime_production_full.backup

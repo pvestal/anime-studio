@@ -389,7 +389,7 @@ async def wait_for_comfyui_completion(
                                 if "images" in node_outputs:
                                     for img_info in node_outputs["images"]:
                                         # Copy from ComfyUI output to our frames directory
-                                        src_path = f"***REMOVED***/ComfyUI-Working/output/{img_info['filename']}"
+                                        src_path = f"/home/patrick/Projects/ComfyUI-Working/output/{img_info['filename']}"
                                         if os.path.exists(src_path):
                                             os.makedirs(
                                                 os.path.dirname(frame_path),

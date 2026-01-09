@@ -112,8 +112,8 @@ sudo systemctl start $SERVICE_NAME
 sleep 3
 if systemctl is-active --quiet $SERVICE_NAME; then
     echo "✅ Service started successfully!"
-    echo "🌐 Service available at: https://***REMOVED***/anime"
-    echo "📊 API docs: https://***REMOVED***/anime/docs"
+    echo "🌐 Service available at: https://192.168.50.135/anime"
+    echo "📊 API docs: https://192.168.50.135/anime/docs"
 else
     echo "❌ Service failed to start. Checking logs..."
     sudo journalctl -u $SERVICE_NAME -n 20 --no-pager

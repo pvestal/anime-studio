@@ -8,7 +8,7 @@ This document provides comprehensive information about the CI/CD pipeline, versi
 
 ### Prerequisites
 - Git repository access to `pvestal/anime-production`
-- Self-hosted GitHub Actions runner on Tower (***REMOVED***)
+- Self-hosted GitHub Actions runner on Tower (192.168.50.135)
 - Access to production environment
 - Database credentials for testing
 
@@ -332,8 +332,8 @@ docs(deployment): update blue-green deployment documentation
 
 **Deployment Scripts:**
 - `SERVICE_URL`: Service URL for validation (default: http://127.0.0.1:8328)
-- `ECHO_URL`: Echo Brain URL (default: https://***REMOVED***/api/echo)
-- `COMFYUI_URL`: ComfyUI URL (default: http://***REMOVED***:8188)
+- `ECHO_URL`: Echo Brain URL (default: https://192.168.50.135/api/echo)
+- `COMFYUI_URL`: ComfyUI URL (default: http://192.168.50.135:8188)
 
 ### Database Configuration
 
@@ -344,7 +344,7 @@ docs(deployment): update blue-green deployment documentation
 - Password: test_password
 
 **Production Database:**
-- Host: ***REMOVED***
+- Host: 192.168.50.135
 - Database: anime_production
 - User: patrick
 - Password: [stored in secrets]
@@ -428,7 +428,7 @@ curl http://127.0.0.1:8328/api/health
 python tests/database/test_database_migrations.py
 
 # Check database connectivity
-psql -h ***REMOVED*** -U patrick -d anime_production -c "SELECT 1;"
+psql -h 192.168.50.135 -U patrick -d anime_production -c "SELECT 1;"
 ```
 
 ### Log Locations

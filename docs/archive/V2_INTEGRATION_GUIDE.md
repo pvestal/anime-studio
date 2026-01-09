@@ -196,7 +196,7 @@ If issues arise:
 # Remove v2_integration imports from anime_api.py
 
 # 2. Revert to backup if needed
-export PGPASSWORD=***REMOVED***
+export PGPASSWORD=tower_echo_brain_secret_key_2025
 pg_restore -h localhost -U patrick -d anime_production \
   /tmp/anime_db_backups/20251205_043858/anime_production_full.backup
 ```

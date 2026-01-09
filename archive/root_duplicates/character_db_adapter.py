@@ -12,7 +12,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-API_URL = "http://***REMOVED***:8328"
+API_URL = "http://192.168.50.135:8328"
 
 class CharacterDBAdapter:
     """Adapts comprehensive character JSONs to API schema"""

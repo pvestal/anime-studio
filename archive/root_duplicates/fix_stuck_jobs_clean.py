@@ -8,10 +8,10 @@ from datetime import datetime
 
 # Database configuration
 DB_CONFIG = {
-    'host': '***REMOVED***',
+    'host': '192.168.50.135',
     'database': 'anime_production',
     'user': 'patrick',
-    'password': '***REMOVED***',
+    'password': 'tower_echo_brain_secret_key_2025',
     'port': 5432
 }
 

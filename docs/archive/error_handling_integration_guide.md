@@ -148,15 +148,15 @@ Update your service configuration:
 
 ```bash
 # Database configuration
-export TOWER_DB_HOST="***REMOVED***"
+export TOWER_DB_HOST="192.168.50.135"
 export TOWER_DB_NAME="tower_consolidated"
 export TOWER_DB_USER="patrick"
 export TOWER_DB_PASSWORD="your_password"
 
 # Service URLs
 export COMFYUI_URL="http://127.0.0.1:8188"
-export ECHO_BRAIN_URL="http://***REMOVED***:8309"
-export TOWER_KB_URL="https://***REMOVED***/kb"
+export ECHO_BRAIN_URL="http://192.168.50.135:8309"
+export TOWER_KB_URL="https://192.168.50.135/kb"
 ```
 
 ### Step 4: Systemd Service Update

@@ -25,7 +25,7 @@ from workflows import get_simple_image_workflow, get_video_workflow
 
 # Configuration
 DATABASE_URL = (
-    "postgresql://patrick:***REMOVED***@localhost/anime_production"
+    "postgresql://patrick:tower_echo_brain_secret_key_2025@localhost/anime_production"
 )
 REDIS_URL = "redis://localhost:6379"
 COMFYUI_URL = "http://localhost:8188"

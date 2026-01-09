@@ -94,7 +94,7 @@ Successfully implemented authentication, authorization, and security hardening f
 1. **Move DB Password to Vault**
    ```python
    # Current: Hardcoded fallback
-   DB_CONFIG['password'] = '***REMOVED***'
+   DB_CONFIG['password'] = 'tower_echo_brain_secret_key_2025'
 
    # Should be:
    vault_client = hvac.Client(url='http://127.0.0.1:8200')

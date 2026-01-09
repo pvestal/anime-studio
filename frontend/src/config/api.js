@@ -12,18 +12,18 @@ const isProduction = import.meta.env.PROD
 // Base URLs - Update these for your environment
 const API_HOSTS = {
   // Primary anime production API
-  anime: isDevelopment ? '' : 'http://***REMOVED***:8328',
+  anime: isDevelopment ? '' : 'http://192.168.50.135:8328',
 
   // WebSocket for real-time job updates
   websocket: isDevelopment
     ? 'ws://localhost:8328/ws'
-    : 'ws://***REMOVED***:8328/ws',
+    : 'ws://192.168.50.135:8328/ws',
 
   // Echo Brain AI orchestration
-  echo: 'http://***REMOVED***:8309',
+  echo: 'http://192.168.50.135:8309',
 
   // ComfyUI for direct status checks
-  comfyui: 'http://***REMOVED***:8188'
+  comfyui: 'http://192.168.50.135:8188'
 }
 
 /**

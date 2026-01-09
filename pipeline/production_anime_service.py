@@ -61,7 +61,7 @@ class UserFeedbackRequest(BaseModel):
 
 # Configuration
 COMFYUI_URL = "http://127.0.0.1:8188"
-OUTPUT_DIR = "***REMOVED***/AnimeGenerated"
+OUTPUT_DIR = "/home/patrick/Videos/AnimeGenerated"
 
 class EnhancedComfyUIClient:
     """Enhanced ComfyUI client with comprehensive error handling and monitoring"""

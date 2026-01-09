@@ -29,7 +29,7 @@ class AnimeFileOrganizer(FileSystemEventHandler):
             'host': 'localhost',
             'database': 'anime_production',
             'user': 'patrick',
-            'password': '***REMOVED***'
+            'password': 'tower_echo_brain_secret_key_2025'
         }
 
         # Ensure target directory exists
@@ -179,10 +179,10 @@ def create_database_schema():
     """Create necessary database tables if they don't exist"""
     try:
         conn = psycopg2.connect(
-            host='***REMOVED***',
+            host='192.168.50.135',
             database='anime_production',
             user='patrick',
-            password='***REMOVED***'
+            password='tower_echo_brain_secret_key_2025'
         )
         cursor = conn.cursor()
 

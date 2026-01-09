@@ -24,7 +24,7 @@
 2. **Add database connection pool**
    - File: `/opt/tower-anime-production/database.py`
    - Use asyncpg for async PostgreSQL
-   - Connection string: `postgresql://patrick:***REMOVED***@localhost/anime_production`
+   - Connection string: `postgresql://patrick:tower_echo_brain_secret_key_2025@localhost/anime_production`
 
 3. **Update job status tracking**
    - Modify: `update_job_status()` to write to DB

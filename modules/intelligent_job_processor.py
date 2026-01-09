@@ -24,7 +24,7 @@ class IntelligentJobProcessor:
     - Comprehensive error reporting
     """
 
-    def __init__(self, comfyui_url: str = "http://***REMOVED***:8188", database_manager=None):
+    def __init__(self, comfyui_url: str = "http://192.168.50.135:8188", database_manager=None):
         self.comfyui_connector = ComfyUIConnector(comfyui_url)
         self.job_manager = JobManager(database_manager, self.comfyui_connector)
         self.database = database_manager

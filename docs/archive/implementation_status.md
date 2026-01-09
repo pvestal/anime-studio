@@ -114,7 +114,7 @@ python3 anime_service.py
 ```bash
 cd /opt/tower-anime-production/frontend
 pnpm run dev --host 0.0.0.0 --port 5174
-# Frontend available at: http://***REMOVED***:5174
+# Frontend available at: http://192.168.50.135:5174
 ```
 
 3. **Verify Echo Brain Connection**:

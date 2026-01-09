@@ -1,1 +1,73 @@
-yaml<br>name: Anime Production CI<br><br>on:<br> push:<br> branches: [ main, develop ]<br> pull_request:<br> branches: [ main ]<br> workflow_dispatch: # Allow manual trigger<br><br>jobs:<br> unit-tests:<br> runs-on: ubuntu-latest<br> strategy:<br> matrix:<br> python-version: ['3.10', '3.11']<br> steps:<br> - uses: actions/checkout@v4<br> - name: Set up Python ${{ matrix.python-version }}<br> uses: actions/setup-python@v4<br> with:<br> python-version: ${{ matrix.python-version }}<br> - name: Install dependencies<br> run: |<br> pip install -r requirements.txt<br> pip install pytest pytest-asyncio pytest-mock<br> - name: Run unit tests<br> run: |<br> pytest tests/unit/ -v --tb=short<br><br> integration-tests:<br> runs-on: ubuntu-latest<br> needs: unit-tests<br> services:<br> postgres:<br> image: postgres:15<br> env:<br> POSTGRES_DB: tower_test<br> POSTGRES_PASSWORD: testpass<br> options: >-<br> --health-cmd pg_isready<br> --health-interval 10s<br> --health-timeout 5s<br> --health-retries 5<br> ports:<br> - 5432:5432<br> redis:<br> image: redis:7<br> options: >-<br> --health-cmd "redis-cli ping"<br> --health-interval 10s<br> --health-timeout 5s<br> --health-retries 5<br> ports:<br> - 6379:6379<br> steps:<br> - uses: actions/checkout@v4<br> - name: Set up Python<br> uses: actions/setup-python@v4<br> with:<br> python-version: '3.11'<br> - name: Install dependencies<br> run: |<br> pip install -r requirements.txt<br> pip install pytest requests<br> - name: Initialize database<br> run: |<br> psql -h localhost -U postgres -c "CREATE DATABASE tower_test;"<br> # Add commands to run your schema scripts here<br> - name: Run integration tests<br> run: |<br> pytest tests/integration/ -v --tb=short<br>
+name: Anime Production CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11']
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio pytest-mock
+    - name: Run unit tests
+      run: |
+        pytest tests/unit/ -v --tb=short
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: tower_test
+          POSTGRES_PASSWORD: testpass
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pytest requests
+    - name: Initialize database
+      env:
+        PGPASSWORD: testpass
+      run: |
+        # Run your schema scripts here, for example:
+        # psql -h localhost -U postgres -d tower_test -f schema.sql
+    - name: Run integration tests
+      run: |
+        pytest tests/integration/ -v --tb=short

@@ -50,7 +50,7 @@ class PromptEnhancement(BaseModel):
 COMFYUI_URL = "http://127.0.0.1:8188"
 ECHO_BRAIN_URL = "http://localhost:8309"
 ANIME_API_URL = "http://localhost:8305"
-OUTPUT_DIR = "***REMOVED***/AnimeGenerated"
+OUTPUT_DIR = "/home/patrick/Videos/AnimeGenerated"
 
 class EchoBrainClient:
     """Client for interacting with Tower Echo Brain service"""

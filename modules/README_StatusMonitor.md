@@ -279,7 +279,7 @@ For multiple ComfyUI instances:
 # Create monitors for each instance
 monitors = []
 for port in [8188, 8189, 8190]:
-    connector = ComfyUIConnector(f"http://***REMOVED***:{port}")
+    connector = ComfyUIConnector(f"http://192.168.50.135:{port}")
     monitor = StatusMonitor(connector, websocket_port=8329 + port - 8188)
     await monitor.start_monitoring()
     monitors.append(monitor)

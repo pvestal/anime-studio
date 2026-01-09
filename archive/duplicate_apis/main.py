@@ -72,7 +72,7 @@ except ImportError as e:
 
 # Database Setup
 DATABASE_URL = (
-    "postgresql://patrick:***REMOVED***@localhost/anime_production"
+    "postgresql://patrick:tower_echo_brain_secret_key_2025@localhost/anime_production"
 )
 
 # ComfyUI Configuration

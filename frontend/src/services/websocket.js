@@ -19,9 +19,9 @@ class WebSocketService {
 
     // Echo Brain WebSocket endpoints
     this.endpoints = {
-      echo: 'wss://***REMOVED***/api/echo/ws',
-      coordination: 'wss://***REMOVED***/api/coordination/ws',
-      vue_integration: 'wss://***REMOVED***/api/ws'
+      echo: 'wss://192.168.50.135/api/echo/ws',
+      coordination: 'wss://192.168.50.135/api/coordination/ws',
+      vue_integration: 'wss://192.168.50.135/api/ws'
     }
   }
 

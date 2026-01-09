@@ -1,7 +1,7 @@
 # Anime System v2.0 Database Migration Plan
 ## Complete Step-by-Step Guide from Start to Finish
 
-**Target Database**: `anime_production` on Tower (***REMOVED***)
+**Target Database**: `anime_production` on Tower (192.168.50.135)
 **Current User**: `patrick` (via peer authentication)
 **Migration Source**: `/tmp/anime-system-extracted/anime-system/migrations/`
 **Estimated Duration**: 45-60 minutes (including backups and verification)

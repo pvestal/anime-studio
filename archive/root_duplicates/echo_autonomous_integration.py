@@ -18,7 +18,7 @@ class EchoAutonomousIntegration:
     """Integration with Echo Brain's autonomous task system"""
 
     def __init__(self):
-        self.echo_url = "https://***REMOVED***/api/echo"
+        self.echo_url = "https://192.168.50.135/api/echo"
         self.monitoring_conversation_id = "anime_production_monitoring"
 
     async def register_monitoring_tasks(self):
@@ -44,7 +44,7 @@ class EchoAutonomousIntegration:
                 "schedule": "every_30_seconds",
                 "metadata": {
                     "service": "comfyui",
-                    "endpoint": "http://***REMOVED***:8188/queue",
+                    "endpoint": "http://192.168.50.135:8188/queue",
                     "alert_on_empty": True
                 }
             },
@@ -219,7 +219,7 @@ async def initialize_echo_monitoring():
     }
 
     async with httpx.AsyncClient(verify=False, timeout=10.0) as client:
-        await client.post("https://***REMOVED***/api/echo/query", json=status_report)
+        await client.post("https://192.168.50.135/api/echo/query", json=status_report)
 
     logger.info("Echo Brain monitoring integration initialized successfully")
     return integration

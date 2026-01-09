@@ -46,7 +46,7 @@ cp -r "$SOURCE_DIR"/workflows/ "$PRESERVED_DIR"/ 2>/dev/null || true
 
 echo "  - Preserving database schemas..."
 mkdir -p "$PRESERVED_DIR"/database
-PGPASSWORD=***REMOVED*** pg_dump -h localhost -U patrick -d anime_production --schema-only > "$PRESERVED_DIR"/database/schema.sql
+PGPASSWORD=tower_echo_brain_secret_key_2025 pg_dump -h localhost -U patrick -d anime_production --schema-only > "$PRESERVED_DIR"/database/schema.sql
 
 echo "  - Preserving running API..."
 cp "$SOURCE_DIR"/api/secured_api.py "$PRESERVED_DIR"/ 2>/dev/null || true

@@ -55,7 +55,7 @@ Real-time progress updates for a specific job.
 
 **Connection:**
 ```javascript
-const ws = new WebSocket('ws://***REMOVED***:8328/ws/test-job-1');
+const ws = new WebSocket('ws://192.168.50.135:8328/ws/test-job-1');
 ```
 
 **Message Types:**
@@ -126,7 +126,7 @@ Get current WebSocket connection status and statistics.
 #### Basic WebSocket Client
 ```javascript
 class AnimeProgressTracker {
-    constructor(jobId, serverUrl = 'ws://***REMOVED***:8328') {
+    constructor(jobId, serverUrl = 'ws://192.168.50.135:8328') {
         this.jobId = jobId;
         this.wsUrl = `${serverUrl}/ws/${jobId}`;
         this.websocket = null;
@@ -215,7 +215,7 @@ export function useAnimeProgress(jobId) {
     const connectWebSocket = useCallback(() => {
         if (!jobId) return;
 
-        const ws = new WebSocket(`ws://***REMOVED***:8328/ws/${jobId}`);
+        const ws = new WebSocket(`ws://192.168.50.135:8328/ws/${jobId}`);
 
         ws.onopen = () => {
             setIsConnected(true);
@@ -316,7 +316,7 @@ async def monitor_comfyui_job(job_id: str, comfyui_prompt_id: str):
 
 2. **Test job progress:**
    - Enter job ID: `test-job-1`
-   - Server URL: `ws://***REMOVED***:8328`
+   - Server URL: `ws://192.168.50.135:8328`
    - Click "Connect to Job"
 
 3. **Test system monitor:**
@@ -331,15 +331,15 @@ async def monitor_comfyui_job(job_id: str, comfyui_prompt_id: str):
 npm install -g wscat
 
 # Connect to job progress
-wscat -c ws://***REMOVED***:8328/ws/test-job-1
+wscat -c ws://192.168.50.135:8328/ws/test-job-1
 
 # Connect to system monitor
-wscat -c ws://***REMOVED***:8328/ws/monitor
+wscat -c ws://192.168.50.135:8328/ws/monitor
 ```
 
 #### Test HTTP Status Endpoint
 ```bash
-curl http://***REMOVED***:8328/api/anime/websocket/status | jq
+curl http://192.168.50.135:8328/api/anime/websocket/status | jq
 ```
 
 ### Python Testing Script
@@ -350,7 +350,7 @@ import websockets
 import json
 
 async def test_websocket():
-    uri = "ws://***REMOVED***:8328/ws/test-job-1"
+    uri = "ws://192.168.50.135:8328/ws/test-job-1"
 
     async with websockets.connect(uri) as websocket:
         print(f"Connected to {uri}")
@@ -376,7 +376,7 @@ asyncio.run(test_websocket())
 DB_HOST=localhost
 DB_NAME=anime_production
 DB_USER=patrick
-DB_PASSWORD=***REMOVED***
+DB_PASSWORD=tower_echo_brain_secret_key_2025
 
 # Redis configuration (optional)
 REDIS_HOST=localhost
@@ -430,10 +430,10 @@ WHERE id = ?;
 1. **Connection Refused**
    ```bash
    # Check if service is running
-   curl http://***REMOVED***:8328/api/anime/health
+   curl http://192.168.50.135:8328/api/anime/health
 
    # Check WebSocket status
-   curl http://***REMOVED***:8328/api/anime/websocket/status
+   curl http://192.168.50.135:8328/api/anime/websocket/status
    ```
 
 2. **No Progress Updates**
@@ -444,7 +444,7 @@ WHERE id = ?;
 3. **High Memory Usage**
    ```bash
    # Check connection count
-   curl http://***REMOVED***:8328/api/anime/websocket/status | jq '.connections'
+   curl http://192.168.50.135:8328/api/anime/websocket/status | jq '.connections'
    ```
 
 ### Debug Mode

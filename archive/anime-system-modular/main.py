@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 DATABASE_URL = "postgresql://anime:anime@localhost:5432/anime_production"
-COMFYUI_URL = "http://***REMOVED***:8188"
-ECHO_BRAIN_URL = "http://***REMOVED***:8309"
+COMFYUI_URL = "http://192.168.50.135:8188"
+ECHO_BRAIN_URL = "http://192.168.50.135:8309"
 
 # Global service instances
 db_pool: asyncpg.Pool = None
@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Initialize Echo Brain client
     echo_client = EchoBrainClient(
         echo_url=ECHO_BRAIN_URL,
-        anime_callback_url="http://***REMOVED***:8328/api/anime/echo"
+        anime_callback_url="http://192.168.50.135:8328/api/anime/echo"
     )
     try:
         await echo_client.connect()
@@ -144,7 +144,7 @@ async def health_check():
             "character_consistency": "ready" if character_service else "not initialized",
             "quality_metrics": "ready" if quality_service else "not initialized",
             "echo_brain": echo_status,
-            "comfyui": "http://***REMOVED***:8188"
+            "comfyui": "http://192.168.50.135:8188"
         }
     }
 

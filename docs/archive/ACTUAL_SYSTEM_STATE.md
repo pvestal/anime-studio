@@ -29,7 +29,7 @@
    - No metadata tracking
 
 4. **Character Studio (Port 8329)**: SEPARATE SYSTEM
-   - Running from `***REMOVED***/`
+   - Running from `/home/patrick/Projects/`
    - NOT integrated with anime production
    - Uses `character_studio` database (not anime_production)
 

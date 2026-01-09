@@ -14,7 +14,7 @@ This directory contains the critical workflow files for generating 30-second ani
 
 ## Usage
 
-1. Load the workflow JSON file into ComfyUI interface at http://***REMOVED***:8188
+1. Load the workflow JSON file into ComfyUI interface at http://192.168.50.135:8188
 2. Alternatively, use the Python script to automate generation:
    ```bash
    python3 generate_30sec_anime.py
@@ -30,7 +30,7 @@ This directory contains the critical workflow files for generating 30-second ani
 
 ## Requirements
 
-- ComfyUI running on Tower (***REMOVED***:8188)
+- ComfyUI running on Tower (192.168.50.135:8188)
 - NVIDIA RTX 3060 with 12GB VRAM
 - AnimateDiff-Evolved extension
 - RIFE extension for frame interpolation

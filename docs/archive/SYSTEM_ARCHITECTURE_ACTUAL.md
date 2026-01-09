@@ -10,7 +10,7 @@
 - **Location**: `/mnt/1TB-storage/anime-projects/unorganized/images/YYYYMMDD/`
 - **Database**: Records all files in `anime_api.anime_files` table
 - **Files Processed**: 98 files organized and tracked
-- **Fixed**: Database connection (was using ***REMOVED*** instead of localhost)
+- **Fixed**: Database connection (was using 192.168.50.135 instead of localhost)
 
 #### 2. Job Monitor Service (anime-job-monitor)
 - **Status**: RUNNING
@@ -22,7 +22,7 @@
 - **Status**: RUNNING
 - **Function**: Processes jobs from Redis queue
 - **Redis Queue**: Currently empty (0 jobs)
-- **ComfyUI Integration**: Connected to http://***REMOVED***:8188
+- **ComfyUI Integration**: Connected to http://192.168.50.135:8188
 
 #### 4. WebSocket Progress Server (anime-websocket)
 - **Status**: RUNNING & WORKING
@@ -81,7 +81,7 @@ anime_api.anime_files
 
 ### Service Configuration Fixes Applied
 
-1. **Database Connections**: Changed all services from `***REMOVED***` to `localhost`
+1. **Database Connections**: Changed all services from `192.168.50.135` to `localhost`
 2. **WebSocket Handler**: Fixed method signature for new websockets library
 3. **File Organizer**: Added NULL handling for non-project files
 4. **Systemd Service**: Updated to use existing `api/main.py`
@@ -123,7 +123,7 @@ curl -X POST http://localhost:8330/api/anime/generate \
   -d '{"prompt": "anime character", "type": "image"}'
 
 # Check database
-PGPASSWORD=***REMOVED*** psql -h localhost -U patrick -d anime_production \
+PGPASSWORD=tower_echo_brain_secret_key_2025 psql -h localhost -U patrick -d anime_production \
   -c "SELECT * FROM anime_api.anime_files ORDER BY created_at DESC LIMIT 5;"
 ```
 

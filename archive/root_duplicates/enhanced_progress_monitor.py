@@ -87,7 +87,7 @@ Elapsed Time: {elapsed_time}s
 This job requires manual intervention.
 
 Timestamp: {datetime.now().isoformat()}
-Server: Tower (***REMOVED***)
+Server: Tower (192.168.50.135)
 
 Check the ComfyUI logs for detailed error information."""
 
@@ -108,7 +108,7 @@ ETA: {progress_data.get('eta_formatted', 'Unknown')}
 This job may be stuck or experiencing performance issues.
 
 Timestamp: {datetime.now().isoformat()}
-Server: Tower (***REMOVED***)"""
+Server: Tower (192.168.50.135)"""
 
         if send_alert:
             self.alert_cooldown[alert_key] = current_time

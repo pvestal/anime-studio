@@ -580,7 +580,7 @@ class StatusMonitor:
 # Convenience functions for easy integration
 
 async def create_status_monitor(
-    comfyui_url: str = "http://***REMOVED***:8188",
+    comfyui_url: str = "http://192.168.50.135:8188",
     database_manager = None,
     auto_start: bool = True
 ) -> StatusMonitor:

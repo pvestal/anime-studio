@@ -48,10 +48,10 @@ sleep 3
 echo "WebSocket Progress System started successfully!"
 echo "  Enhanced Monitor PID: $MONITOR_PID"
 echo "  WebSocket Server: ws://127.0.0.1:8329"
-echo "  Test UI: http://***REMOVED***:8328/static/progress_test.html"
+echo "  Test UI: http://192.168.50.135:8328/static/progress_test.html"
 echo ""
 echo "To test the system:"
-echo "  1. Open browser to: http://***REMOVED***:8328/static/progress_test.html"
+echo "  1. Open browser to: http://192.168.50.135:8328/static/progress_test.html"
 echo "  2. Check WebSocket connection status"
 echo "  3. Start an anime generation job to see real-time progress"
 echo ""
@@ -80,10 +80,10 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 try:
     conn = psycopg2.connect(
-        host='***REMOVED***',
+        host='192.168.50.135',
         database='anime_production',
         user='patrick',
-        password='***REMOVED***',
+        password='tower_echo_brain_secret_key_2025',
         cursor_factory=RealDictCursor
     )
     cursor = conn.cursor()

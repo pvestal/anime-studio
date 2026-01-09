@@ -137,7 +137,7 @@ const props = defineProps({
 async function connectToEcho() {
   try {
     // Check Echo health
-    const healthResponse = await fetch('https://***REMOVED***/api/echo/health', {
+    const healthResponse = await fetch('https://192.168.50.135/api/echo/health', {
       method: 'GET',
       headers: { 'Accept': 'application/json' }
     })
@@ -174,7 +174,7 @@ async function connectToEcho() {
 function initializeWebSocket() {
   // Note: WebSocket endpoint would need to be implemented in Echo Brain
   try {
-    echoSocket.value = new WebSocket('wss://***REMOVED***/api/echo/studio/collaborate')
+    echoSocket.value = new WebSocket('wss://192.168.50.135/api/echo/studio/collaborate')
 
     echoSocket.value.onopen = () => {
       echoActive.value = true
@@ -216,7 +216,7 @@ async function loadEchoState() {
   try {
     // Load character analysis if character is selected
     if (props.selectedScene?.characters) {
-      const charResponse = await fetch(`https://***REMOVED***/api/echo/anime/characters`, {
+      const charResponse = await fetch(`https://192.168.50.135/api/echo/anime/characters`, {
         method: 'GET'
       })
       if (charResponse.ok) {
@@ -226,7 +226,7 @@ async function loadEchoState() {
     }
 
     // Load style preferences
-    const prefResponse = await fetch(`https://***REMOVED***/api/echo/anime/preferences/summary`, {
+    const prefResponse = await fetch(`https://192.168.50.135/api/echo/anime/preferences/summary`, {
       method: 'GET'
     })
     if (prefResponse.ok) {
@@ -245,7 +245,7 @@ async function sendMessage() {
   chatMessage.value = ''
 
   try {
-    const response = await fetch('https://***REMOVED***/api/echo/query', {
+    const response = await fetch('https://192.168.50.135/api/echo/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -296,7 +296,7 @@ defineExpose({
     if (!echoConnected.value) return null
 
     try {
-      const response = await fetch('https://***REMOVED***/api/echo/anime/feedback', {
+      const response = await fetch('https://192.168.50.135/api/echo/anime/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt, character })
@@ -317,7 +317,7 @@ defineExpose({
     if (!echoConnected.value) return null
 
     try {
-      const response = await fetch('https://***REMOVED***/api/echo/anime/generate', {
+      const response = await fetch('https://192.168.50.135/api/echo/anime/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(generationRequest)

@@ -180,7 +180,7 @@ async def get_real_comfyui_progress(request_id: str) -> float:
 # Manual Verification:
 ```bash
 # Test professional generation (previously broken)
-curl - X POST http: // ***REMOVED***: 44451 / generate / professional \
+curl - X POST http: // 192.168.50.135: 44451 / generate / professional \
     - H "Content-Type: application/json" \
     - d '{"prompt": "anime character test", "style": "anime"}'
 
@@ -193,7 +193,7 @@ curl - X POST http: // ***REMOVED***: 44451 / generate / professional \
 }
 
 # Test real progress tracking
-curl - X GET "http://***REMOVED***:44451/generation/be59efd3-77e6-47d2-87b7-e49e37575c51/status"
+curl - X GET "http://192.168.50.135:44451/generation/be59efd3-77e6-47d2-87b7-e49e37575c51/status"
 
 # Response: ✅ REAL MONITORING
 {
@@ -220,7 +220,7 @@ curl - X GET "http://***REMOVED***:44451/generation/be59efd3-77e6-47d2-87b7-e49e
 cd / opt / tower - anime - production & & python3 api / main.py
 
 # Health verification
-curl http: // ***REMOVED***: 44451 / health
+curl http: // 192.168.50.135: 44451 / health
 # Response: {"status":"healthy","service":"tower-anime-production"}
 ```
 

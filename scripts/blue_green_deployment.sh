@@ -151,7 +151,7 @@ create_backup() {
 
     # Backup database schema
     if command -v pg_dump > /dev/null 2>&1; then
-        sudo -u patrick pg_dump -h ***REMOVED*** -d anime_production -s > "$backup_path/schema_backup.sql" 2>/dev/null || true
+        sudo -u patrick pg_dump -h 192.168.50.135 -d anime_production -s > "$backup_path/schema_backup.sql" 2>/dev/null || true
     fi
 
     # Backup nginx configuration
@@ -446,7 +446,7 @@ send_notification() {
     esac
 
     # Send to Echo Brain for logging
-    curl -k -X POST "https://***REMOVED***/api/echo/query" \
+    curl -k -X POST "https://192.168.50.135/api/echo/query" \
         -H "Content-Type: application/json" \
         -d "{
             \"query\": \"$emoji Blue-Green Deployment $status: $message\",
@@ -555,7 +555,7 @@ deploy() {
     echo "🔄 Environment: $current_env → $inactive_env"
     echo "📁 Backup: $backup_path"
     echo "⏰ Completed: $(date)"
-    echo "🌐 Service URL: https://***REMOVED***/anime"
+    echo "🌐 Service URL: https://192.168.50.135/anime"
     echo "============================================"
 }
 

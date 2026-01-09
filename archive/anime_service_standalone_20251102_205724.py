@@ -1542,7 +1542,7 @@ async def get_echo_enhanced_prompt(
             "model": "llama3.2:3b",
         }
 
-        echo_url = "http://***REMOVED***:8309/api/echo/query"
+        echo_url = "http://192.168.50.135:8309/api/echo/query"
 
         async with aiohttp.ClientSession() as session:
             async with session.post(

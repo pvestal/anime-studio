@@ -119,7 +119,7 @@ jobs:
         image: postgres:15
         env:
           POSTGRES_USER: patrick
-          POSTGRES_PASSWORD: ***REMOVED***
+          POSTGRES_PASSWORD: tower_echo_brain_secret_key_2025
           POSTGRES_DB: anime_production_test
         options: >-
           --health-cmd pg_isready
@@ -160,12 +160,12 @@ jobs:
 
       - name: Setup test database
         run: |
-          PGPASSWORD=***REMOVED*** psql -h localhost -U patrick -d anime_production_test < database/anime_schema.sql
-          PGPASSWORD=***REMOVED*** psql -h localhost -U patrick -d anime_production_test < database/framepack_schema.sql
+          PGPASSWORD=tower_echo_brain_secret_key_2025 psql -h localhost -U patrick -d anime_production_test < database/anime_schema.sql
+          PGPASSWORD=tower_echo_brain_secret_key_2025 psql -h localhost -U patrick -d anime_production_test < database/framepack_schema.sql
 
       - name: Run integration tests
         env:
-          DATABASE_URL: postgresql://patrick:***REMOVED***@localhost/anime_production_test
+          DATABASE_URL: postgresql://patrick:tower_echo_brain_secret_key_2025@localhost/anime_production_test
           REDIS_URL: redis://localhost:6379
           TESTING: true
         run: |

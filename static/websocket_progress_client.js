@@ -5,7 +5,7 @@
 
 class AnimeProductionProgressClient {
     constructor(options = {}) {
-        this.wsUrl = options.wsUrl || 'ws://***REMOVED***:8329';
+        this.wsUrl = options.wsUrl || 'ws://192.168.50.135:8329';
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = options.maxReconnectAttempts || 10;
         this.reconnectDelay = options.reconnectDelay || 3000;

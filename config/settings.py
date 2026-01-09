@@ -20,7 +20,7 @@ class DatabaseConfig:
     user: str = field(default_factory=lambda: os.getenv("DB_USER", "patrick"))
     password: str = field(
         default_factory=lambda: os.getenv(
-            "DB_PASSWORD", "***REMOVED***"
+            "DB_PASSWORD", "tower_echo_brain_secret_key_2025"
         )
     )
 

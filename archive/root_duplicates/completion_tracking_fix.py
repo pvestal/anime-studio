@@ -43,12 +43,12 @@ DB_CONFIG = {
     'host': 'localhost',
     'database': 'anime_production',
     'user': 'patrick',
-    'password': '***REMOVED***',
+    'password': 'tower_echo_brain_secret_key_2025',
     'port': 5432
 }
 
 # ComfyUI configuration
-COMFYUI_URL = "http://***REMOVED***:8188"
+COMFYUI_URL = "http://192.168.50.135:8188"
 
 class JobCompletionTracker:
     """Monitors ComfyUI jobs and updates database status when complete"""

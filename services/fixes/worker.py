@@ -30,7 +30,7 @@ class AnimeWorker:
         self.redis_client = redis.Redis(
             host="localhost", port=6379, db=1, decode_responses=True
         )
-        self.comfyui_url = "http://***REMOVED***:8188"
+        self.comfyui_url = "http://192.168.50.135:8188"
         self.websocket_redis = redis.Redis(host="localhost", port=6379, db=1)
         self.running = True
 

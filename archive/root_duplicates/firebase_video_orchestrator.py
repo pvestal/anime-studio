@@ -35,7 +35,7 @@ class FirebaseVideoOrchestrator:
             self.firebase_base_url = (
                 f"https://us-central1-{self.firebase_project_id}.cloudfunctions.net"
             )
-        self.local_comfyui_url = "http://***REMOVED***:8188"
+        self.local_comfyui_url = "http://192.168.50.135:8188"
         self.echo_brain_url = "http://127.0.0.1:8309"
         self.apple_music_url = "http://127.0.0.1:8315"
         self.comfyui_integration = ComfyUIIntegration(self.local_comfyui_url)

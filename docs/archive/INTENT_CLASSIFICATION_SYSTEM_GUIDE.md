@@ -229,7 +229,7 @@ Strategies for handling unclear requests.
 ### 1. Database Setup
 ```bash
 # Create database schema
-psql -h ***REMOVED*** -U patrick -d anime_production -f intent_classification_schema.sql
+psql -h 192.168.50.135 -U patrick -d anime_production -f intent_classification_schema.sql
 ```
 
 ### 2. Install Dependencies

@@ -21,7 +21,7 @@ DB_CONFIG = {
     "database": os.getenv("DB_NAME", "anime_production"),
     "user": os.getenv("DB_USER", "patrick"),
     "password": os.getenv(
-        "DB_PASSWORD", "***REMOVED***"
+        "DB_PASSWORD", "tower_echo_brain_secret_key_2025"
     ),  # Fallback from secured_api.py
 }
 

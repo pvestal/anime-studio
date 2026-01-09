@@ -19,7 +19,7 @@ class StorylineDatabase:
     def __init__(self, db_url: str = None):
         self.db_url = db_url or os.getenv(
             "DATABASE_URL",
-            "postgresql://patrick:***REMOVED***@localhost:5433/anime_production"
+            "postgresql://patrick:tower_echo_brain_secret_key_2025@localhost:5433/anime_production"
         )
         self.pool: Optional[asyncpg.Pool] = None
 

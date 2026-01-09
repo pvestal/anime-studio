@@ -35,10 +35,10 @@ def get_vault_secret(path):
         print(f"Vault error: {e}")
         # Fallback for now but this should be removed in production
         return {
-            'host': '***REMOVED***',
+            'host': '192.168.50.135',
             'database': 'anime_production',
             'user': 'patrick',
-            'password': '***REMOVED***'
+            'password': 'tower_echo_brain_secret_key_2025'
         }
 
 def get_db():

@@ -25,11 +25,11 @@ logger.setLevel(logging.INFO)
 class DatabaseConfig:
     """Database configuration class"""
     def __init__(self):
-        self.host = "***REMOVED***"
+        self.host = "192.168.50.135"
         self.port = 5432
         self.database = "anime_production"
         self.user = "patrick"
-        self.password = "***REMOVED***"
+        self.password = "tower_echo_brain_secret_key_2025"
         self.pool_size = 5
         self.max_overflow = 10
         self.pool_timeout = 30

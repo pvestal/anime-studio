@@ -95,7 +95,7 @@ class APIConfig:
 
         if self.allowed_origins is None:
             self.allowed_origins = [
-                "https://***REMOVED***",
+                "https://192.168.50.135",
                 "http://localhost:3000",
                 "http://localhost:8080",
             ]

@@ -29,11 +29,11 @@ A clean, modular database manager for the Anime Production System, inspired by E
 
 ```python
 class DatabaseConfig:
-    host = "***REMOVED***"
+    host = "192.168.50.135"
     port = 5432
     database = "anime_production"
     user = "patrick"
-    password = "***REMOVED***"
+    password = "tower_echo_brain_secret_key_2025"
     pool_size = 5
 ```
 

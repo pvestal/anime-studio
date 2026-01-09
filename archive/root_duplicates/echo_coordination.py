@@ -51,7 +51,7 @@ class EchoServiceStatus(Enum):
 class EchoConfig:
     """Configuration for Echo Brain integration"""
 
-    base_url: str = "http://***REMOVED***:8309"
+    base_url: str = "http://192.168.50.135:8309"
     timeout_seconds: int = 300  # 5 minutes default
     max_retries: int = 3
     retry_delay: float = 2.0

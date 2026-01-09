@@ -9,7 +9,7 @@ Successfully implemented real-time WebSocket integration between the existing Vu
 ### ✅ 1. Connect Existing StatusDashboard.vue to Echo Brain WebSocket
 - **Status**: COMPLETE
 - **Integration**: StatusDashboard.vue (1,301 lines) now connects to Echo Brain via WebSocket
-- **Endpoint**: `wss://***REMOVED***/api/ws` (Echo Brain Vue Integration endpoint)
+- **Endpoint**: `wss://192.168.50.135/api/ws` (Echo Brain Vue Integration endpoint)
 - **Data Flow**: Real-time system metrics, generation status, alerts, communications
 
 ### ✅ 2. Real-time Progress Updates for Generation Jobs
@@ -194,11 +194,11 @@ Successfully implemented real-time WebSocket integration between the existing Vu
 ### WebSocket Endpoints
 ```bash
 # Primary Integration Endpoint
-wss://***REMOVED***/api/ws
+wss://192.168.50.135/api/ws
 
 # Alternative Endpoints
-wss://***REMOVED***/api/echo/ws          # Direct Echo Brain
-wss://***REMOVED***/api/coordination/ws  # Coordination Layer
+wss://192.168.50.135/api/echo/ws          # Direct Echo Brain
+wss://192.168.50.135/api/coordination/ws  # Coordination Layer
 ```
 
 ### Environment Setup
@@ -215,7 +215,7 @@ npm run build
 ### Service Integration
 ```bash
 # Echo Brain Status
-curl http://***REMOVED***:8309/api/echo/health
+curl http://192.168.50.135:8309/api/echo/health
 
 # Expected Response
 {"status":"healthy","consciousness":"active","working_memory":"0/7"}

@@ -22,7 +22,7 @@
 - **FIX REQUIRED**: Implement rate limiting (10 req/min suggested)
 
 ### Data Exposure
-- **HARDCODED PASSWORD**: '***REMOVED***' everywhere
+- **HARDCODED PASSWORD**: 'tower_echo_brain_secret_key_2025' everywhere
 - **FULL PATH DISCLOSURE**: Server paths in API responses
 - **CORS WIDE OPEN**: access-control-allow-origin: *
 - **FIX REQUIRED**: Use environment variables, sanitize responses
@@ -180,7 +180,7 @@ ls -lt /mnt/1TB-storage/anime-projects/unorganized/images/$(date +%Y%m%d)/ | hea
 
 ### Database Check
 ```bash
-PGPASSWORD=***REMOVED*** psql -h localhost -U patrick -d anime_production \
+PGPASSWORD=tower_echo_brain_secret_key_2025 psql -h localhost -U patrick -d anime_production \
   -c "SELECT COUNT(*) FROM anime_api.anime_files WHERE created_at > NOW() - INTERVAL '1 hour';"
 ```
 
@@ -194,7 +194,7 @@ sudo journalctl -u anime-file-organizer -f
 This document has been saved as KB Article #402 with tags:
 - anime, production, testing, truth, security, working, broken
 
-Access at: https://***REMOVED***/api/kb/articles/402
+Access at: https://192.168.50.135/api/kb/articles/402
 
 ## FINAL VERDICT
 

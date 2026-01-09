@@ -251,7 +251,7 @@ FastAPI provides automatic interactive documentation:
 CORS is enabled for all origins (*) to allow dashboard access. In production, update this to specific origins:
 
 ```python
-allow_origins=["https://***REMOVED***"]
+allow_origins=["https://192.168.50.135"]
 ```
 
 ## Error Handling

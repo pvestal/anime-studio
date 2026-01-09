@@ -6,9 +6,9 @@ set -euo pipefail
 
 # Configuration
 SERVICE_URL="${SERVICE_URL:-http://127.0.0.1:8328}"
-ECHO_URL="${ECHO_URL:-https://***REMOVED***/api/echo}"
-COMFYUI_URL="${COMFYUI_URL:-http://***REMOVED***:8188}"
-KB_URL="${KB_URL:-https://***REMOVED***/api/kb}"
+ECHO_URL="${ECHO_URL:-https://192.168.50.135/api/echo}"
+COMFYUI_URL="${COMFYUI_URL:-http://192.168.50.135:8188}"
+KB_URL="${KB_URL:-https://192.168.50.135/api/kb}"
 
 TIMEOUT=30
 MAX_RETRIES=5

@@ -268,11 +268,11 @@ thresholds = {
 ### Database Configuration
 ```python
 DB_CONFIG = {
-    'host': '***REMOVED***',
+    'host': '192.168.50.135',
     'port': 5432,
     'database': 'anime_production',
     'user': 'patrick',
-    'password': '***REMOVED***'
+    'password': 'tower_echo_brain_secret_key_2025'
 }
 ```
 
@@ -287,7 +287,7 @@ python3 final_performance_test.py
 
 ### Database Connectivity
 ```bash
-PGPASSWORD='***REMOVED***' psql -h ***REMOVED*** -U patrick -d anime_production -c "SELECT COUNT(*) FROM anime_api.generation_performance;"
+PGPASSWORD='tower_echo_brain_secret_key_2025' psql -h 192.168.50.135 -U patrick -d anime_production -c "SELECT COUNT(*) FROM anime_api.generation_performance;"
 ```
 
 ### API Endpoints Test

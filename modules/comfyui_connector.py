@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ComfyUIConnector:
     """Manages all ComfyUI interactions"""
 
-    def __init__(self, base_url: str = "http://***REMOVED***:8188"):
+    def __init__(self, base_url: str = "http://192.168.50.135:8188"):
         self.base_url = base_url
         self.session = None
 

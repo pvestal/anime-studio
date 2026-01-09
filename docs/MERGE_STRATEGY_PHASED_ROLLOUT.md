@@ -51,12 +51,12 @@ git push origin main --tags
 #### Post-Merge Validation
 ```bash
 # Verify Phase 1 in production
-curl -X POST https://***REMOVED***/api/anime/generate/image \
+curl -X POST https://192.168.50.135/api/anime/generate/image \
   -H "Content-Type: application/json" \
   -d '{"prompt": "Phase 1 validation", "project_id": "phase1-prod-test"}'
 
 # Verify database tracking
-psql -h ***REMOVED*** -U patrick -d tower_consolidated \
+psql -h 192.168.50.135 -U patrick -d tower_consolidated \
   -c "SELECT COUNT(*) FROM generation_decisions WHERE project_id = 'phase1-prod-test';"
 ```
 
@@ -206,7 +206,7 @@ git checkout main
 git revert <phase2-merge-commit> --no-edit
 
 # Database rollback if needed
-psql -h ***REMOVED*** -U patrick -d tower_consolidated \
+psql -h 192.168.50.135 -U patrick -d tower_consolidated \
   -c "DROP TABLE IF EXISTS ai_consultations, consultation_effectiveness;"
 ```
 
@@ -248,7 +248,7 @@ psql -h ***REMOVED*** -U patrick -d tower_consolidated \
 ### Phase 1 Monitoring
 ```bash
 # Decision tracking rate
-watch "psql -h ***REMOVED*** -U patrick -d tower_consolidated \
+watch "psql -h 192.168.50.135 -U patrick -d tower_consolidated \
   -c \"SELECT COUNT(*) FROM generation_decisions WHERE timestamp > NOW() - INTERVAL '1 hour';\""
 
 # Generation success rate

@@ -22,7 +22,7 @@ DB_CONFIG = {
     "host": "localhost",
     "database": "anime_production",
     "user": "patrick",
-    "password": "***REMOVED***",
+    "password": "tower_echo_brain_secret_key_2025",
     "port": 5432,
 }
 

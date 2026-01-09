@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ComfyUIIntegration:
     """ComfyUI integration for anime video generation"""
 
-    def __init__(self, comfyui_url: str = "http://***REMOVED***:8188"):
+    def __init__(self, comfyui_url: str = "http://192.168.50.135:8188"):
         self.comfyui_url = comfyui_url
 
     async def load_workflow_template(self, duration: int) -> Dict:

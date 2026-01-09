@@ -49,8 +49,8 @@ class EchoBrainClient:
     
     def __init__(
         self,
-        echo_url: str = "http://***REMOVED***:8309",
-        anime_callback_url: str = "http://***REMOVED***:8328/api/anime/echo",
+        echo_url: str = "http://192.168.50.135:8309",
+        anime_callback_url: str = "http://192.168.50.135:8328/api/anime/echo",
         worker_id: str = None
     ):
         self.echo_url = echo_url.rstrip('/')

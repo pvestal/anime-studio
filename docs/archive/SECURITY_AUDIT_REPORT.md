@@ -29,7 +29,7 @@ The Tower Anime Production system has **CRITICAL SECURITY VULNERABILITIES** that
 
 ### 1. HARDCODED DATABASE CREDENTIALS (CRITICAL)
 - **File:** `database.py:24`
-- **Issue:** Database password `***REMOVED***` hardcoded in source
+- **Issue:** Database password `tower_echo_brain_secret_key_2025` hardcoded in source
 - **Risk:** Complete database compromise, credential exposure in git history
 - **Impact:** Anyone with code access has full database access
 

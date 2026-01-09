@@ -62,7 +62,7 @@ Database Tracking: 100%
 
 ## 🔧 FIXES APPLIED DURING TESTING
 
-1. **Database Connection**: Fixed all services using localhost instead of ***REMOVED***
+1. **Database Connection**: Fixed all services using localhost instead of 192.168.50.135
 2. **WebSocket Handler**: Fixed method signature (removed 'path' parameter)
 3. **File Organizer**: Added NULL handling for non-UUID project IDs
 4. **Database Schema**: Created anime_files table with proper indexes
@@ -96,7 +96,7 @@ curl -X POST http://localhost:8330/api/anime/generate \
 ls -la /mnt/1TB-storage/anime-projects/unorganized/images/$(date +%Y%m%d)/
 
 # Verify database
-PGPASSWORD=***REMOVED*** psql -h localhost -U patrick -d anime_production \
+PGPASSWORD=tower_echo_brain_secret_key_2025 psql -h localhost -U patrick -d anime_production \
   -c "SELECT COUNT(*) FROM anime_api.anime_files WHERE created_at > NOW() - INTERVAL '1 hour';"
 
 # Test WebSocket

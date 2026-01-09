@@ -291,7 +291,7 @@ const loadBudgetStatus = async () => {
 
 const loadGpuStatus = async () => {
   try {
-    const response = await fetch('http://***REMOVED***:8188/system_stats')
+    const response = await fetch('http://192.168.50.135:8188/system_stats')
     if (response.ok) {
       const data = await response.json()
       const device = data.devices[0]

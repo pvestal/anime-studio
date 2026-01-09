@@ -324,7 +324,7 @@ async def generate(
         generation_params_id=params_id,
         seed_used=seed,
         estimated_time_seconds=time_estimates.get(request.job_type, 30.0),
-        websocket_url=f"ws://***REMOVED***:8328/ws/jobs/{job_id}"
+        websocket_url=f"ws://192.168.50.135:8328/ws/jobs/{job_id}"
     )
 
 
@@ -375,7 +375,7 @@ async def reproduce_generation(
         generation_params_id=None,
         seed_used=seed,
         estimated_time_seconds=12.0,
-        websocket_url=f"ws://***REMOVED***:8328/ws/jobs/{new_job_id}"
+        websocket_url=f"ws://192.168.50.135:8328/ws/jobs/{new_job_id}"
     )
 
 
