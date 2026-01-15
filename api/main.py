@@ -585,6 +585,571 @@ async def cancel_echo_brain_job(job_id: str, db: Session = Depends(get_db)):
 # END ECHO BRAIN INTEGRATION ENDPOINTS
 # =============================================================================
 
+
+# =============================================================================
+# ANIMATION SERVICES ENDPOINTS
+# Pose Manager, Shot Assembler, and Keyframe Animator
+# =============================================================================
+
+# Global instances (initialized on first use)
+_pose_manager = None
+_shot_assembler = None
+_keyframe_animator = None
+
+DATABASE_URL_ASYNC = f"postgresql://patrick:{os.getenv('DATABASE_PASSWORD', 'tower_echo_brain_secret_key_2025')}@localhost/anime_production"
+
+
+async def get_pose_manager():
+    """Get or create PoseManager instance."""
+    global _pose_manager
+    if _pose_manager is None:
+        from services.animation.pose_manager import create_pose_manager
+        _pose_manager = await create_pose_manager(DATABASE_URL_ASYNC)
+    return _pose_manager
+
+
+async def get_shot_assembler():
+    """Get or create ShotAssembler instance."""
+    global _shot_assembler
+    if _shot_assembler is None:
+        from services.animation.shot_assembler import create_shot_assembler
+        _shot_assembler = await create_shot_assembler(DATABASE_URL_ASYNC)
+    return _shot_assembler
+
+
+async def get_keyframe_animator():
+    """Get or create KeyframeAnimator instance."""
+    global _keyframe_animator
+    if _keyframe_animator is None:
+        from services.animation.keyframe_animator import create_keyframe_animator
+        _keyframe_animator = await create_keyframe_animator(DATABASE_URL_ASYNC)
+    return _keyframe_animator
+
+
+# --- Pose Manager Endpoints ---
+
+class PoseCreateRequest(BaseModel):
+    character_id: int
+    name: str
+    category: str = "neutral"
+    emotion: Optional[str] = None
+    tags: List[str] = []
+    description: str = ""
+    keypoints: Optional[List[List[float]]] = None  # 25x3 array
+
+
+class PoseSequenceRequest(BaseModel):
+    name: str
+    character_id: int
+    pose_ids: List[int]
+    durations_ms: List[int]
+    interpolation_types: Optional[List[str]] = None
+    loop: bool = False
+    description: str = ""
+
+
+@app.get("/api/anime/poses/{character_id}")
+async def get_character_poses(
+    character_id: int,
+    category: Optional[str] = None,
+    emotion: Optional[str] = None
+):
+    """Get all poses for a character with optional filtering."""
+    try:
+        pose_manager = await get_pose_manager()
+        from services.animation.pose_manager import PoseCategory, EmotionType
+
+        cat = PoseCategory(category) if category else None
+        emo = EmotionType(emotion) if emotion else None
+
+        poses = await pose_manager.get_poses_by_character(
+            character_id, category=cat, emotion=emo
+        )
+
+        return [
+            {
+                "id": p.id,
+                "name": p.name,
+                "category": p.category.value,
+                "emotion": p.emotion.value if p.emotion else None,
+                "tags": p.tags,
+                "description": p.description,
+                "reference_image_path": p.reference_image_path
+            }
+            for p in poses
+        ]
+    except Exception as e:
+        logger.error(f"Error getting poses: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/anime/poses")
+async def create_pose(request: PoseCreateRequest):
+    """Create a new pose in the library."""
+    try:
+        pose_manager = await get_pose_manager()
+        from services.animation.pose_manager import PoseCategory, EmotionType, OpenPoseKeypoints
+        import numpy as np
+
+        category = PoseCategory(request.category)
+        emotion = EmotionType(request.emotion) if request.emotion else None
+
+        # Create keypoints from request or use placeholder
+        if request.keypoints:
+            keypoints = OpenPoseKeypoints(keypoints=np.array(request.keypoints, dtype=np.float32))
+        else:
+            keypoints = OpenPoseKeypoints(keypoints=np.zeros((25, 3), dtype=np.float32))
+
+        pose_id = await pose_manager.store_pose(
+            character_id=request.character_id,
+            name=request.name,
+            keypoints=keypoints,
+            category=category,
+            emotion=emotion,
+            tags=request.tags,
+            description=request.description
+        )
+
+        return {"id": pose_id, "name": request.name, "status": "created"}
+    except Exception as e:
+        logger.error(f"Error creating pose: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/anime/poses/{character_id}/stats")
+async def get_pose_library_stats(character_id: int):
+    """Get statistics about a character's pose library."""
+    try:
+        pose_manager = await get_pose_manager()
+        stats = await pose_manager.get_pose_library_stats(character_id)
+        return stats
+    except Exception as e:
+        logger.error(f"Error getting pose stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/anime/poses/sequences")
+async def create_pose_sequence(request: PoseSequenceRequest):
+    """Create a reusable pose sequence."""
+    try:
+        pose_manager = await get_pose_manager()
+
+        sequence_id = await pose_manager.create_sequence(
+            name=request.name,
+            character_id=request.character_id,
+            pose_ids=request.pose_ids,
+            durations_ms=request.durations_ms,
+            interpolation_types=request.interpolation_types,
+            loop=request.loop,
+            description=request.description
+        )
+
+        return {"id": sequence_id, "name": request.name, "status": "created"}
+    except Exception as e:
+        logger.error(f"Error creating sequence: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/anime/poses/sequences/{sequence_id}")
+async def get_pose_sequence(sequence_id: int):
+    """Get a pose sequence by ID."""
+    try:
+        pose_manager = await get_pose_manager()
+        sequence = await pose_manager.get_sequence(sequence_id)
+        if not sequence:
+            raise HTTPException(status_code=404, detail="Sequence not found")
+        return sequence
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting sequence: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/anime/poses/{pose_id}/controlnet-image")
+async def generate_controlnet_image(pose_id: int, width: int = 512, height: int = 768):
+    """Generate a ControlNet-compatible pose image."""
+    try:
+        pose_manager = await get_pose_manager()
+        pose = await pose_manager.get_pose(pose_id)
+        if not pose:
+            raise HTTPException(status_code=404, detail="Pose not found")
+
+        image_path = await pose_manager.generate_controlnet_image(
+            pose.keypoints, width, height
+        )
+
+        return {"pose_id": pose_id, "image_path": image_path}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating ControlNet image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Shot Assembler Endpoints ---
+
+class AssemblyCreateRequest(BaseModel):
+    name: str
+    scene_id: Optional[int] = None
+    episode_id: Optional[int] = None
+    project_id: Optional[int] = None
+
+
+class AddShotRequest(BaseModel):
+    video_path: str
+    duration_ms: int
+    shot_order: Optional[int] = None
+    start_time_ms: int = 0
+    end_time_ms: Optional[int] = None
+    transition_type: str = "cut"
+    transition_duration_ms: int = 0
+
+
+class AddAudioRequest(BaseModel):
+    audio_path: str
+    track_type: str  # dialogue, music, sfx, ambient, voiceover
+    start_time_ms: int
+    duration_ms: Optional[int] = None
+    volume: float = 1.0
+    fade_in_ms: int = 0
+    fade_out_ms: int = 0
+
+
+@app.post("/api/anime/assemblies")
+async def create_assembly(request: AssemblyCreateRequest):
+    """Create a new shot assembly."""
+    try:
+        assembler = await get_shot_assembler()
+
+        assembly_id = await assembler.create_assembly(
+            name=request.name,
+            scene_id=request.scene_id,
+            episode_id=request.episode_id,
+            project_id=request.project_id
+        )
+
+        return {"id": assembly_id, "name": request.name, "status": "created"}
+    except Exception as e:
+        logger.error(f"Error creating assembly: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/anime/assemblies/{assembly_id}")
+async def get_assembly(assembly_id: int):
+    """Get assembly information."""
+    try:
+        assembler = await get_shot_assembler()
+        assembly = await assembler.get_assembly(assembly_id)
+        if not assembly:
+            raise HTTPException(status_code=404, detail="Assembly not found")
+        return assembly
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting assembly: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/anime/assemblies/{assembly_id}/shots")
+async def add_shot_to_assembly(assembly_id: int, request: AddShotRequest):
+    """Add a shot to an assembly."""
+    try:
+        assembler = await get_shot_assembler()
+        from services.animation.shot_assembler import TransitionType, TransitionSpec
+
+        transition = TransitionSpec(
+            transition_type=TransitionType(request.transition_type),
+            duration_ms=request.transition_duration_ms
+        )
+
+        shot_id = await assembler.add_shot(
+            assembly_id=assembly_id,
+            video_path=request.video_path,
+            duration_ms=request.duration_ms,
+            shot_order=request.shot_order,
+            start_time_ms=request.start_time_ms,
+            end_time_ms=request.end_time_ms,
+            transition=transition
+        )
+
+        return {"id": shot_id, "assembly_id": assembly_id, "status": "added"}
+    except Exception as e:
+        logger.error(f"Error adding shot: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/anime/assemblies/{assembly_id}/shots")
+async def get_assembly_shots(assembly_id: int):
+    """Get all shots in an assembly."""
+    try:
+        assembler = await get_shot_assembler()
+        shots = await assembler.get_assembly_shots(assembly_id)
+        return shots
+    except Exception as e:
+        logger.error(f"Error getting shots: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/anime/assemblies/{assembly_id}/audio")
+async def add_audio_to_assembly(assembly_id: int, request: AddAudioRequest):
+    """Add an audio track to an assembly."""
+    try:
+        assembler = await get_shot_assembler()
+        from services.animation.shot_assembler import AudioTrackType
+
+        track_id = await assembler.add_audio_track(
+            assembly_id=assembly_id,
+            audio_path=request.audio_path,
+            track_type=AudioTrackType(request.track_type),
+            start_time_ms=request.start_time_ms,
+            duration_ms=request.duration_ms,
+            volume=request.volume,
+            fade_in_ms=request.fade_in_ms,
+            fade_out_ms=request.fade_out_ms
+        )
+
+        return {"id": track_id, "assembly_id": assembly_id, "status": "added"}
+    except Exception as e:
+        logger.error(f"Error adding audio: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/anime/assemblies/{assembly_id}/assemble")
+async def execute_assembly(
+    assembly_id: int,
+    output_filename: Optional[str] = None,
+    include_background: bool = True
+):
+    """Execute the assembly and produce final video."""
+    try:
+        assembler = await get_shot_assembler()
+
+        result = await assembler.assemble(
+            assembly_id=assembly_id,
+            output_filename=output_filename,
+            include_background=include_background
+        )
+
+        if not result.success:
+            raise HTTPException(status_code=500, detail=result.error)
+
+        return {
+            "assembly_id": assembly_id,
+            "output_path": result.output_path,
+            "duration_ms": result.duration_ms,
+            "shots_count": result.shots_count,
+            "transitions_count": result.transitions_count,
+            "audio_tracks_count": result.audio_tracks_count,
+            "status": "completed"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing assembly: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/anime/assemblies/simple")
+async def simple_assembly(
+    video_paths: List[str],
+    output_filename: str,
+    transition: str = "cut",
+    transition_duration_ms: int = 500
+):
+    """Quick assembly of video files with uniform transitions."""
+    try:
+        assembler = await get_shot_assembler()
+        from services.animation.shot_assembler import TransitionType
+
+        result = await assembler.assemble_shots_simple(
+            video_paths=video_paths,
+            output_filename=output_filename,
+            transition=TransitionType(transition),
+            transition_duration_ms=transition_duration_ms
+        )
+
+        if not result.success:
+            raise HTTPException(status_code=500, detail=result.error)
+
+        return {
+            "output_path": result.output_path,
+            "duration_ms": result.duration_ms,
+            "shots_count": result.shots_count,
+            "status": "completed"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in simple assembly: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Keyframe Animator Endpoints ---
+
+class AnimationClipRequest(BaseModel):
+    name: str
+    character_id: int
+    duration_ms: int
+    fps: int = 30
+    width: int = 1280
+    height: int = 720
+    base_prompt: str = ""
+    negative_prompt: str = "low quality, blurry, distorted"
+
+
+class KeyframeRequest(BaseModel):
+    time_ms: int
+    pose_id: Optional[int] = None
+    motion_curve: str = "ease_in_out"
+    hold_frames: int = 0
+    prompt_override: Optional[str] = None
+
+
+@app.post("/api/anime/animations/clips")
+async def create_animation_clip(request: AnimationClipRequest):
+    """Create a new animation clip."""
+    try:
+        animator = await get_keyframe_animator()
+
+        clip_id = await animator.create_clip(
+            name=request.name,
+            character_id=request.character_id,
+            duration_ms=request.duration_ms,
+            fps=request.fps,
+            width=request.width,
+            height=request.height,
+            base_prompt=request.base_prompt,
+            negative_prompt=request.negative_prompt
+        )
+
+        return {"id": clip_id, "name": request.name, "status": "created"}
+    except Exception as e:
+        logger.error(f"Error creating clip: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/anime/animations/clips/{clip_id}/keyframes")
+async def add_keyframe(clip_id: int, request: KeyframeRequest):
+    """Add a keyframe to an animation clip."""
+    try:
+        animator = await get_keyframe_animator()
+        from services.animation.keyframe_animator import MotionCurve
+
+        keyframe_id = await animator.add_keyframe(
+            clip_id=clip_id,
+            time_ms=request.time_ms,
+            pose_id=request.pose_id,
+            motion_curve=MotionCurve(request.motion_curve),
+            hold_frames=request.hold_frames,
+            prompt_override=request.prompt_override
+        )
+
+        return {"id": keyframe_id, "clip_id": clip_id, "time_ms": request.time_ms, "status": "added"}
+    except Exception as e:
+        logger.error(f"Error adding keyframe: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/anime/animations/clips/{clip_id}/keyframes/from-sequence/{sequence_id}")
+async def add_keyframes_from_sequence(clip_id: int, sequence_id: int, start_time_ms: int = 0):
+    """Add keyframes from a pose sequence."""
+    try:
+        animator = await get_keyframe_animator()
+
+        keyframe_ids = await animator.add_keyframes_from_sequence(
+            clip_id=clip_id,
+            sequence_id=sequence_id,
+            start_time_ms=start_time_ms
+        )
+
+        return {
+            "clip_id": clip_id,
+            "sequence_id": sequence_id,
+            "keyframes_added": len(keyframe_ids),
+            "keyframe_ids": keyframe_ids
+        }
+    except Exception as e:
+        logger.error(f"Error adding keyframes from sequence: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/anime/animations/clips/{clip_id}/generate")
+async def generate_animation(clip_id: int, use_framepack: bool = True):
+    """Generate the full animation from keyframes."""
+    try:
+        animator = await get_keyframe_animator()
+
+        result = await animator.generate_animation(
+            clip_id=clip_id,
+            use_framepack=use_framepack
+        )
+
+        if not result.success:
+            raise HTTPException(status_code=500, detail=result.error)
+
+        return {
+            "clip_id": clip_id,
+            "output_path": result.output_path,
+            "duration_ms": result.duration_ms,
+            "frames_generated": result.frames_generated,
+            "quality_score": result.quality_score,
+            "status": "completed"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating animation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Scene Background Endpoints ---
+
+class SceneBackgroundRequest(BaseModel):
+    background_image_path: str
+    depth_map_path: Optional[str] = None
+    parallax_enabled: bool = False
+
+
+@app.post("/api/anime/scenes/{scene_id}/background")
+async def set_scene_background(scene_id: int, request: SceneBackgroundRequest):
+    """Set persistent background for a scene."""
+    try:
+        assembler = await get_shot_assembler()
+
+        await assembler.set_scene_background(
+            scene_id=scene_id,
+            background_image_path=request.background_image_path,
+            depth_map_path=request.depth_map_path,
+            parallax_enabled=request.parallax_enabled
+        )
+
+        return {"scene_id": scene_id, "status": "background_set"}
+    except Exception as e:
+        logger.error(f"Error setting background: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/anime/scenes/{scene_id}/background")
+async def get_scene_background(scene_id: int):
+    """Get background info for a scene."""
+    try:
+        assembler = await get_shot_assembler()
+        background = await assembler.get_scene_background(scene_id)
+        if not background:
+            raise HTTPException(status_code=404, detail="No background set for scene")
+        return background
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting background: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# END ANIMATION SERVICES ENDPOINTS
+# =============================================================================
+
 @app.get("/api/anime/projects", response_model=List[AnimeProjectResponse])
 async def get_projects(db: Session = Depends(get_db)):
     """Get all anime projects"""
