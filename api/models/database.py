@@ -2,7 +2,8 @@
 Database models for Tower Anime Production API
 """
 import os
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Float
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Float, Boolean, ForeignKey
+from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import sessionmaker, Session
@@ -26,16 +27,65 @@ class AnimeProject(Base):
     name = Column(String, index=True)
     description = Column(Text)
     style = Column(String, default="anime")
-    characters = Column(JSONB, default=list)
+    characters = Column(JSONB, default=list)  # Legacy field, use character_list relationship
     status = Column(String, default="active")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    character_list = relationship("Character", back_populates="project")
+
+class Character(Base):
+    __tablename__ = "characters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    age = Column(Integer)
+    personality = Column(Text)
+    background = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("AnimeProject", back_populates="character_list")
+
+class Scene(Base):
+    __tablename__ = "scenes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    title = Column(String, nullable=False)
+    description = Column(Text)
+    visual_description = Column(Text)
+    scene_number = Column(Integer, default=1)
+    status = Column(String, default="draft")
+    prompt = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("AnimeProject")
+
+class Episode(Base):
+    __tablename__ = "episodes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    title = Column(String, nullable=False)
+    episode_number = Column(Integer)
+    description = Column(Text)
+    script = Column(Text)
+    status = Column(String, default="draft")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("AnimeProject")
 
 class ProductionJob(Base):
     __tablename__ = "production_jobs"
 
     id = Column(String, primary_key=True)
-    project_id = Column(Integer)
+    project_id = Column(Integer, ForeignKey("projects.id"))
     job_type = Column(String)
     prompt = Column(Text)
     parameters = Column(JSONB)
@@ -45,6 +95,18 @@ class ProductionJob(Base):
     error_message = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime)
+
+    # Relationships
+    project = relationship("AnimeProject")
+
+class SystemConfig(Base):
+    __tablename__ = "system_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, nullable=False)
+    value = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 # Database dependency
 def get_db():

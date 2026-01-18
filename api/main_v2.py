@@ -10,8 +10,9 @@ from fastapi.staticfiles import StaticFiles
 import logging
 
 # Import modular components
-from api.routers import auth, projects
+from api.routers import auth, projects, characters
 from api.models.database import Base, engine
+from api.services.error_handler import create_error_response, APIError, log_error
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -38,6 +39,14 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router)
 app.include_router(projects.router)
+app.include_router(characters.router)
+
+# Global exception handler
+@app.exception_handler(APIError)
+async def api_error_handler(request, exc: APIError):
+    """Global API error handler"""
+    log_error(exc, {"url": str(request.url), "method": request.method})
+    return create_error_response(exc)
 
 # Health check endpoints
 @app.get("/health")
