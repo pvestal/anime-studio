@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 # Add pipeline to path
 sys.path.append('/opt/tower-anime-production/pipeline')
 sys.path.append('/opt/tower-anime-production/quality')
+sys.path.append('/opt/tower-anime-production/services')
 
 # Import integrated pipeline
 try:
@@ -45,6 +46,14 @@ try:
     PIPELINE_AVAILABLE = True
 except ImportError:
     PIPELINE_AVAILABLE = False
+
+# Import Echo Brain service
+try:
+    from echo_brain_integration import echo_brain_service
+    ECHO_BRAIN_AVAILABLE = True
+except ImportError:
+    logger.warning("Echo Brain service not available")
+    ECHO_BRAIN_AVAILABLE = False
 
 # Database Setup
 DATABASE_URL = f"postgresql://patrick:{os.getenv('DATABASE_PASSWORD', '***REMOVED***')}@localhost/anime_production"
@@ -918,41 +927,30 @@ async def generate_character_shot(
     else:
         profile_name = "tokyo_debt_realism"  # Default fallback
 
-    # Get profile settings - use model_path not file_path
-    profile_query = text("""
-        SELECT m.model_path as checkpoint, l.model_path as lora
-        FROM generation_profiles gp
-        LEFT JOIN ai_models m ON gp.checkpoint_id = m.id
-        LEFT JOIN ai_models l ON gp.lora_id = l.id
-        WHERE gp.name = :profile_name
+    # Get character's actual LoRA from generation profile
+    character_query = text("""
+        SELECT am.model_path as lora_path, am.model_name as lora_name
+        FROM characters c
+        JOIN generation_profiles gp ON c.generation_profile_id = gp.id
+        JOIN ai_models am ON gp.lora_id = am.id
+        WHERE c.id = :char_id
     """)
-    profile = db.execute(profile_query, {"profile_name": profile_name}).fetchone()
+    character_lora = db.execute(character_query, {"char_id": character_id}).fetchone()
 
-    # Generate using our fixed workflow
-    if request.generation_type == "video":
-        # For non-Mei projects, don't use Mei's LoRA!
-        if "mei" not in char.name.lower() and char.project_id != 24:
-            # Use base model without character-specific LoRA for other projects
-            result = await generate_with_fixed_animatediff_workflow(
-                prompt=prompt,
-                generation_type="video",
-                checkpoint=profile.checkpoint if profile else "realisticVision_v51.safetensors",
-                lora_name=None  # No LoRA for non-Mei characters
-            )
-        else:
-            result = await generate_with_fixed_animatediff_workflow(
-                prompt=prompt,
-                generation_type="video",
-                checkpoint=profile.checkpoint if profile else "realisticVision_v51.safetensors",
-                lora_name=profile.lora if profile else "mei_working_v1.safetensors"
-            )
+    # Generate using character's specific LoRA
+    if character_lora:
+        lora_to_use = character_lora.lora_path
+        print(f"✅ Using character-specific LoRA: {lora_to_use}")
     else:
-        result = await generate_with_fixed_animatediff_workflow(
-            prompt=prompt,
-            generation_type="image",
-            checkpoint=profile.checkpoint if profile else "realisticVision_v51.safetensors",
-            lora_name=profile.lora if profile else "mei_working_v1.safetensors"
-        )
+        lora_to_use = None
+        print(f"⚠️ No LoRA found for character {char.name}")
+
+    result = await generate_with_fixed_animatediff_workflow(
+        prompt=prompt,
+        generation_type=request.generation_type,
+        checkpoint="AOM3A1B.safetensors",  # Use anime checkpoint
+        lora_name=lora_to_use
+    )
 
     # Store generation in production_jobs table
     job = ProductionJob(
@@ -1662,9 +1660,457 @@ async def generate_character_action(
 try:
     from echo_brain import echo_brain_router
     app.include_router(echo_brain_router)
-    logger.info("Echo Brain Creative AI system integrated")
+    logger.info("Echo Brain Creative AI system integrated (legacy)")
 except ImportError as e:
-    logger.warning(f"Echo Brain module not available: {e}")
+    logger.warning(f"Echo Brain legacy module not available: {e}")
+
+# Import new comprehensive Echo Brain endpoints
+try:
+    from echo_brain_endpoints import router as echo_brain_comprehensive_router
+    app.include_router(echo_brain_comprehensive_router)
+    logger.info("✅ Echo Brain Comprehensive API system integrated")
+except ImportError as e:
+    logger.warning(f"Echo Brain comprehensive endpoints not available: {e}")
+    logger.warning("Creating fallback routes...")
+
+# Echo Brain Integration Endpoints
+if ECHO_BRAIN_AVAILABLE:
+    @app.get("/api/echo-brain/status")
+    async def get_echo_brain_status():
+        """Check if Echo Brain is available."""
+        return echo_brain_service.check_status()
+
+    @app.post("/api/echo-brain/configure")
+    async def configure_echo_brain(config: dict):
+        """Configure Echo Brain settings."""
+        if "model" in config:
+            echo_brain_service.config.model = config["model"]
+        if "temperature" in config:
+            echo_brain_service.config.temperature = config["temperature"]
+        if "enabled" in config:
+            echo_brain_service.config.enabled = config["enabled"]
+
+        return {"message": "Configuration updated", "config": config}
+
+    @app.post("/api/echo-brain/scenes/suggest")
+    async def suggest_scene_details(request: dict):
+        """Get Echo Brain suggestions for a scene."""
+        project_id = request.get("project_id", 1)
+
+        # Get project context from database
+        import psycopg2.extras
+        conn = psycopg2.connect(
+            host="localhost",
+            database="anime_production",
+            user="patrick",
+            password=os.getenv('DATABASE_PASSWORD', 'default_password')
+        )
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Get project basic info
+        cursor.execute("""
+            SELECT name, type, style_preset, metadata
+            FROM projects WHERE id = %s
+        """, (project_id,))
+        project = cursor.fetchone() or {}
+
+        # Get characters
+        cursor.execute("""
+            SELECT name, personality, description, traits
+            FROM characters WHERE project_id = %s
+        """, (project_id,))
+        characters = cursor.fetchall()
+
+        # Build context
+        context = {
+            "project_name": project.get("name", "Unknown"),
+            "genre": project.get("type", "anime"),
+            "style": project.get("style_preset", "anime"),
+            "characters": characters,
+            "project_id": project_id
+        }
+
+        # Get suggestions
+        suggestions = echo_brain_service.suggest_scene_details(
+            context,
+            request.get("current_prompt", "")
+        )
+
+        # Store suggestion in database for reference
+        cursor.execute("""
+            INSERT INTO echo_brain_suggestions
+            (project_id, request_type, request_data, response_data)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+        """, (
+            project_id,
+            "scene_suggestion",
+            json.dumps(request),
+            json.dumps(suggestions)
+        ))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return {
+            "suggestions": suggestions,
+            "context_summary": {
+                "project": context["project_name"],
+                "characters_considered": len(characters)
+            }
+        }
+
+    @app.post("/api/echo-brain/characters/{character_id}/dialogue")
+    async def generate_character_dialogue(character_id: int, request: dict):
+        """Generate dialogue for a specific character."""
+        import psycopg2.extras
+        conn = psycopg2.connect(
+            host="localhost",
+            database="anime_production",
+            user="patrick",
+            password=os.getenv('DATABASE_PASSWORD', 'default_password')
+        )
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Get character info
+        cursor.execute("""
+            SELECT name, personality, background, traits
+            FROM characters WHERE id = %s
+        """, (character_id,))
+        character = cursor.fetchone()
+
+        if not character:
+            raise HTTPException(status_code=404, detail="Character not found")
+
+        # Generate dialogue
+        dialogue = echo_brain_service.generate_dialogue(
+            character,
+            request.get("scene_context", ""),
+            request.get("emotion", "neutral")
+        )
+
+        # Store in database
+        cursor.execute("""
+            INSERT INTO echo_brain_suggestions
+            (character_id, request_type, request_data, response_data)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+        """, (
+            character_id,
+            "dialogue_generation",
+            json.dumps(request),
+            json.dumps(dialogue)
+        ))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return {
+            "character": character["name"],
+            "dialogue": dialogue,
+            "character_traits": {
+                "personality": character.get("personality", ""),
+                "background": character.get("background", "")
+            }
+        }
+
+    @app.post("/api/echo-brain/episodes/{episode_id}/continue")
+    async def continue_episode(episode_id: str, request: dict):
+        """Suggest continuation for an episode."""
+        import psycopg2.extras
+        conn = psycopg2.connect(
+            host="localhost",
+            database="anime_production",
+            user="patrick",
+            password=os.getenv('DATABASE_PASSWORD', 'default_password')
+        )
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Get episode info
+        cursor.execute("""
+            SELECT e.id, e.episode_number, e.title, e.description as summary,
+                   p.name as project_name, p.type as genre
+            FROM episodes e
+            JOIN projects p ON e.project_id = p.id
+            WHERE e.id = %s
+        """, (episode_id,))
+        episode = cursor.fetchone()
+
+        if not episode:
+            raise HTTPException(status_code=404, detail="Episode not found")
+
+        # Get scenes for this episode
+        cursor.execute("""
+            SELECT scene_number, prompt, model_used, status
+            FROM scenes WHERE episode_id = %s
+            ORDER BY scene_number
+        """, (episode_id,))
+        scenes = cursor.fetchall()
+
+        # Build episode context
+        episode_context = {
+            "title": episode["title"],
+            "summary": episode["summary"],
+            "project_name": episode["project_name"],
+            "genre": episode["genre"],
+            "scenes": scenes
+        }
+
+        # Get continuation suggestions
+        suggestions = echo_brain_service.continue_episode(
+            episode_context,
+            request.get("direction", "continue")
+        )
+
+        # Store in database
+        cursor.execute("""
+            INSERT INTO echo_brain_suggestions
+            (episode_id, request_type, request_data, response_data)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+        """, (
+            episode_id,
+            "episode_continuation",
+            json.dumps(request),
+            json.dumps(suggestions)
+        ))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return {
+            "episode": episode["title"],
+            "current_scenes": len(scenes),
+            "suggestions": suggestions
+        }
+
+    @app.post("/api/echo-brain/storyline/analyze")
+    async def analyze_storyline(request: dict):
+        """Analyze storyline for consistency and improvements."""
+        import psycopg2.extras
+        conn = psycopg2.connect(
+            host="localhost",
+            database="anime_production",
+            user="patrick",
+            password=os.getenv('DATABASE_PASSWORD', 'default_password')
+        )
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Get episodes for analysis
+        episode_ids = request.get("episode_ids", [])
+        if not episode_ids:
+            # Get all episodes from project if no specific ones requested
+            project_id = request.get("project_id", 24)
+            cursor.execute("""
+                SELECT id, title, description, episode_number
+                FROM episodes WHERE project_id = %s
+                ORDER BY episode_number
+            """, (project_id,))
+            episodes = cursor.fetchall()
+        else:
+            # Convert episode_ids to tuple for SQL query
+            cursor.execute("""
+                SELECT id, title, description, episode_number
+                FROM episodes WHERE id = ANY(%s)
+                ORDER BY episode_number
+            """, (episode_ids,))
+            episodes = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        # Analyze storyline
+        analysis = echo_brain_service.analyze_storyline(
+            episodes,
+            request.get("focus", "consistency")
+        )
+
+        return {
+            "episodes_analyzed": len(episodes),
+            "analysis": analysis
+        }
+
+    @app.post("/api/echo-brain/projects/{project_id}/brainstorm")
+    async def brainstorm_project(project_id: int, request: dict):
+        """Brainstorm new ideas for a project."""
+        import psycopg2.extras
+        conn = psycopg2.connect(
+            host="localhost",
+            database="anime_production",
+            user="patrick",
+            password=os.getenv('DATABASE_PASSWORD', 'default_password')
+        )
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Get project info
+        cursor.execute("""
+            SELECT name, type, style_preset
+            FROM projects WHERE id = %s
+        """, (project_id,))
+        project = cursor.fetchone() or {}
+
+        cursor.close()
+        conn.close()
+
+        # Get brainstorming ideas
+        ideas = echo_brain_service.brainstorm_ideas(
+            {"name": project.get("name"), "genre": project.get("type", "anime")},
+            request.get("theme", "action"),
+            request.get("constraints", [])
+        )
+
+        # Store in database
+        conn = psycopg2.connect(
+            host="localhost",
+            database="anime_production",
+            user="patrick",
+            password=os.getenv('DATABASE_PASSWORD', 'default_password')
+        )
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO echo_brain_suggestions
+            (project_id, request_type, request_data, response_data)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+        """, (
+            project_id,
+            "brainstorm",
+            json.dumps(request),
+            json.dumps(ideas)
+        ))
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return {
+            "project": project.get("name"),
+            "ideas": ideas
+        }
+
+    @app.post("/api/echo-brain/episodes/{episode_id}/batch-suggest")
+    async def batch_suggest_scenes(episode_id: str, request: dict):
+        """Batch suggest improvements for multiple scenes."""
+        import psycopg2.extras
+        conn = psycopg2.connect(
+            host="localhost",
+            database="anime_production",
+            user="patrick",
+            password=os.getenv('DATABASE_PASSWORD', 'default_password')
+        )
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Get scenes for this episode
+        cursor.execute("""
+            SELECT id, scene_number, prompt
+            FROM scenes WHERE episode_id = %s
+            ORDER BY scene_number
+        """, (episode_id,))
+        scenes = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        # Batch process suggestions
+        suggestions = echo_brain_service.batch_suggest_scenes(
+            scenes,
+            request.get("focus", "consistency")
+        )
+
+        return {
+            "episode_id": episode_id,
+            "suggestions": suggestions
+        }
+
+    @app.post("/api/echo-brain/suggestions/{suggestion_id}/feedback")
+    async def provide_feedback(suggestion_id: int, feedback: dict):
+        """Provide feedback on an Echo Brain suggestion."""
+        conn = psycopg2.connect(
+            host="localhost",
+            database="anime_production",
+            user="patrick",
+            password=os.getenv('DATABASE_PASSWORD', 'default_password')
+        )
+        cursor = conn.cursor()
+
+        # Update the suggestion with feedback
+        cursor.execute("""
+            UPDATE echo_brain_suggestions
+            SET user_feedback = %s
+            WHERE id = %s
+            RETURNING id
+        """, (json.dumps(feedback), suggestion_id))
+
+        if cursor.fetchone():
+            conn.commit()
+            result = {"message": "Feedback saved", "suggestion_id": suggestion_id}
+        else:
+            result = {"error": "Suggestion not found"}
+
+        cursor.close()
+        conn.close()
+        return result
+
+else:
+    # Create fallback routes if Echo Brain is unavailable
+    @app.get("/api/echo-brain/status")
+    async def echo_brain_fallback_status():
+        return {
+            "status": "unavailable",
+            "error": "Echo Brain service not installed",
+            "timestamp": datetime.utcnow().isoformat(),
+            "capabilities": {}
+        }
+
+    @app.post("/api/echo-brain/suggest/scenes")
+    async def echo_brain_fallback_scenes(request: dict):
+        return {
+            "success": False,
+            "error": "Echo Brain service not available",
+            "suggestions": [
+                {
+                    "title": "Fallback Scene 1",
+                    "description": "A character development scene focusing on personal growth",
+                    "source": "fallback_template",
+                    "visual_focus": "Character expressions",
+                    "emotional_tone": "introspective"
+                },
+                {
+                    "title": "Fallback Scene 2",
+                    "description": "An action sequence to advance the plot",
+                    "source": "fallback_template",
+                    "visual_focus": "Dynamic movement",
+                    "emotional_tone": "exciting"
+                }
+            ],
+            "fallback_used": True,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+# Create Echo Brain suggestions table on startup
+@app.on_event("startup")
+async def create_echo_brain_tables():
+    """Create echo_brain_suggestions table if it doesn't exist"""
+    try:
+        with get_db() as db:
+            cursor = db.connection.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS echo_brain_suggestions (
+                    id SERIAL PRIMARY KEY,
+                    project_id INTEGER REFERENCES projects(id),
+                    episode_id INTEGER REFERENCES episodes(id),
+                    character_id INTEGER REFERENCES characters(id),
+                    scene_id INTEGER REFERENCES scenes(id),
+                    request_type VARCHAR(100),
+                    request_data JSONB,
+                    response_data JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    user_feedback JSONB DEFAULT NULL
+                )
+            """)
+            db.commit()
+            logger.info("Echo Brain suggestions table ready")
+    except Exception as e:
+        logger.warning(f"Could not create echo_brain_suggestions table: {e}")
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="/opt/tower-anime-production/static"), name="static")
