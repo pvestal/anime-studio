@@ -363,7 +363,7 @@ class SceneOrchestrator:
         with psycopg2.connect(**DB_CONFIG) as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO scene_assets (scene_id, asset_type, file_path, metadata)
+                    INSERT INTO scene_assets (scene_id, asset_type, file_path, generation_params)
                     VALUES (%s::uuid, 'final_video', %s, %s)
                     ON CONFLICT (scene_id, asset_type) DO UPDATE
                     SET file_path = EXCLUDED.file_path, created_at = NOW()
@@ -375,7 +375,7 @@ class SceneOrchestrator:
         with psycopg2.connect(**DB_CONFIG) as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
-                    SELECT file_path, metadata
+                    SELECT file_path, generation_params
                     FROM scene_assets
                     WHERE scene_id = %s::uuid AND asset_type IN ('image', 'video')
                     ORDER BY created_at
@@ -390,7 +390,7 @@ class SceneOrchestrator:
         with psycopg2.connect(**DB_CONFIG) as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
-                    SELECT file_path, metadata
+                    SELECT file_path, generation_params
                     FROM scene_assets
                     WHERE scene_id = %s::uuid AND asset_type = 'audio'
                     ORDER BY created_at DESC

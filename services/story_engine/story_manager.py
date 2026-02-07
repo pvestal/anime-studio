@@ -173,7 +173,10 @@ class StoryManager:
                 values = []
                 for key, value in updates.items():
                     set_clauses.append(f"{key} = %s")
-                    if isinstance(value, (dict, list)):
+                    # Handle arrays for PostgreSQL text[] or other array columns
+                    if key in ["personality_tags"] and isinstance(value, list):
+                        values.append(value)  # psycopg2 handles Python lists -> PostgreSQL arrays
+                    elif isinstance(value, (dict, list)):
                         values.append(json.dumps(value))
                     else:
                         values.append(value)
@@ -276,8 +279,8 @@ class StoryManager:
                     INSERT INTO scenes
                         (id, episode_id, scene_number, narrative_text, setting_description,
                          emotional_tone, characters_present, dialogue, narration,
-                         camera_directions, audio_mood, visual_style_override, generation_status)
-                    VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')
+                         camera_directions, audio_mood, generation_status)
+                    VALUES (%s::uuid, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft')
                     RETURNING *
                 """, (
                     scene_id, data.episode_id, data.sequence_order, data.narrative_text,
@@ -285,7 +288,6 @@ class StoryManager:
                     data.characters_present,
                     json.dumps([d.model_dump() for d in data.dialogue]),
                     data.narration, data.camera_directions, data.audio_mood,
-                    json.dumps(data.visual_style_override) if data.visual_style_override else None,
                 ))
                 scene = dict(cur.fetchone())
 

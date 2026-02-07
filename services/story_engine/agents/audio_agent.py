@@ -28,12 +28,13 @@ except ImportError:
 
 # Voice mapping for characters
 DEFAULT_VOICES = {
-    "Patrick": "en-US-JasonNeural",  # Professional male voice
-    "Claude": "en-GB-RyanNeural",    # British accent for AI
-    "DeepSeek": "en-US-EricNeural",  # Another distinct male voice
-    "Echo": "en-US-JennyNeural",     # Female voice for Echo
-    "The Void": "en-US-GuyNeural",   # Deep, ominous voice
-    "default": "en-US-AriaNeural"    # Default female voice
+    "Patrick": "en-US-BrianNeural",      # Approachable, casual male voice (the human protagonist)
+    "Claude": "en-US-ChristopherNeural", # Reliable, authoritative voice (overly helpful AI)
+    "Claude Code": "en-US-AndrewNeural", # Warm, confident voice (the practical version)
+    "DeepSeek": "en-US-EricNeural",      # Different male voice (the terse coder)
+    "Echo": "en-US-AvaNeural",           # Expressive female voice (the system that won't work)
+    "The Void": "en-US-GuyNeural",       # Deep, ominous voice
+    "default": "en-US-AriaNeural"        # Default female voice
 }
 
 
@@ -138,22 +139,10 @@ class AudioAgent:
 
     async def _generate_tts(self, text: str, voice: str, output_file: str, emotion: Optional[str] = None) -> None:
         """Generate TTS using edge-tts."""
-        # Adjust rate and pitch based on emotion
-        rate = "+0%"
-        pitch = "+0Hz"
-
-        if emotion:
-            if emotion.lower() in ["excited", "angry", "urgent"]:
-                rate = "+10%"
-                pitch = "+50Hz"
-            elif emotion.lower() in ["sad", "tired", "depressed"]:
-                rate = "-10%"
-                pitch = "-30Hz"
-            elif emotion.lower() in ["confused", "questioning"]:
-                pitch = "+30Hz"
-
         # Create TTS with edge-tts
-        communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+        # Note: edge-tts may not support rate/pitch directly in Communicate
+        # Using default parameters for now
+        communicate = edge_tts.Communicate(text, voice)
         await communicate.save(output_file)
 
     def _mix_audio_tracks(self, dialogue_tracks: List[Dict], output_file: str, audio_mood: str = "neutral") -> float:
