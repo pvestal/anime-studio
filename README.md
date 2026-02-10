@@ -2,13 +2,14 @@
 
 Unified anime production system with Echo Brain integration, SSOT content management, and comprehensive testing.
 
-## Status ✅
-- **API Service**: Healthy (8328)
-- **Echo Brain Integration**: 75% test success rate
-- **SSOT Content Management**: Active
-- **Echo Orchestration Engine**: Functional
-- **Frontend**: Vue.js development server ready
-- **Authentication**: JWT-based with Vault integration
+## Status 🟡
+- **API Service**: ✅ Running on port 8328 (tower-anime-production.service)
+- **Echo Brain Integration**: ✅ MCP API at 8309 functional
+- **Quality Contract**: ✅ video_contract.py validates structural, motion, visual gates
+- **SSOT Orchestrator**: ✅ ssot_generation_orchestrator.py manages character generation
+- **Video Generation**: ⚠️ AnimateDiff requires batch_size≥16 (smoke test issue)
+- **Character LoRAs**: ⚠️ Not properly integrated in pipeline
+- **Authentication**: ✅ JWT-based with Vault integration
 
 ## Current Capabilities
 
@@ -45,10 +46,12 @@ open http://localhost:8309/docs
 ```
 
 ## Testing Status
-- ✅ Echo Brain Integration: 75% success rate
-- ✅ SSOT Content Management: Database tables created
-- ✅ Authentication: JWT + Vault integration
-- ✅ All minor issues resolved
+- ✅ E2E Generation: 100% pass rate (fixed with KSampler seed randomization)
+- ✅ Quality Contract: Validates frame count, motion (optical flow), visual quality
+- ✅ SSOT Recording: generation_validation + generation_quality_feedback tables
+- ⚠️ Video Generation: Works with batch_size≥16, fails with batch_size=1
+- ✅ API Service: Swagger docs at http://localhost:8328/docs
+- ✅ Workflow Fix: All 12 workflows have SaveImage nodes for output tracking
 
 ## Architecture
 
@@ -68,22 +71,42 @@ open http://localhost:8309/docs
 - Personal preference learning
 
 ### `/quality/` - Quality Assessment
-- Automated quality scoring
-- Human feedback integration
-- Continuous improvement tracking
+- **video_contract.py**: Validates structural, motion, and visual quality gates
+- **echo_brain_reviewer.py**: Learning loop with pattern analysis via Ollama
+- **generation_quality_feedback table**: Tracks all quality metrics and learned patterns
+- Automated quality scoring with hard pass/fail gates
+- Human feedback integration for override scores
+- Continuous improvement through Echo Brain analysis
 
 ### `/personal/` - Personal Creative Tools
 - Personal media analysis
 - Creative enlightenment features
 - Biometric integration for mood-based generation
 
+## Known Issues & Solutions
+
+### 🔴 Critical: Video Generation Quality
+**Problem**: AnimateDiff produces 1-frame "videos" when batch_size < 16
+**Root Cause**: Smoke test overrides batch_size=1 for speed, breaking motion generation
+**Solution**: Fixed in tower_anime_smoke_test.py - detects AnimateDiff and preserves batch_size≥16
+
+### 🟡 Warning: Character LoRA Integration
+**Problem**: Character-specific LoRAs not being loaded in generation pipeline
+**Impact**: Generic output instead of character-accurate generation
+**Required**: Integration with character_generation_settings and lora_path fields
+
+### 🟢 Fixed: ComfyUI Cache Issue
+**Problem**: Identical parameters returned cached empty results
+**Solution**: Randomize KSampler seed on every generation
+
 ## Integration Points
 
-- **Port**: 8300 (following Tower service pattern)
-- **Database**: tower_consolidated.anime_production schema
+- **API**: Port 8328 (tower-anime-production.service)
+- **Database**: anime_production (PostgreSQL)
 - **Auth**: Tower auth service (port 8088)
 - **ComfyUI**: Port 8188 integration
-- **Echo Brain**: AI assistance integration
+- **Echo Brain**: Port 8309 (MCP + API)
+- **SSOT Orchestrator**: ssot_generation_orchestrator.py
 
 ## Development
 
