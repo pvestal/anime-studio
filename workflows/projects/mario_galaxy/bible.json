@@ -1,0 +1,120 @@
+{
+  "project_name": "Super Mario Galaxy Anime Adventure",
+  "genre": "animated adventure, family comedy, space fantasy",
+  "premise": "Mario, Luigi, and their new friend Yoshi join Princess Peach and Toad on an adventure into outer space where they face off against Bowser Jr., who plans to retrieve and free his shrunken, imprisoned father Bowser. Along the way they meet Rosalina, cosmic guardian of the stars.",
+
+  "visual_style": {
+    "art_style": "Illumination Studios 3D CGI, Pixar-quality rendering",
+    "aesthetic": "bright colorful 3D animated characters, smooth rounded designs, expressive faces, family-friendly theatrical quality",
+    "color_palette": {
+      "primary": ["bright reds", "vivid greens", "royal blues", "princess pinks", "golden yellows"],
+      "secondary": ["cosmic purples", "star whites", "lava oranges", "cloud whites", "grass greens"],
+      "environmental": ["deep space blues and purples", "nebula pinks", "starfield whites", "planetary greens and browns", "lava reds"]
+    },
+    "cinematography": {
+      "shot_types": ["sweeping cosmic vistas", "character close-ups with exaggerated expressions", "action chase sequences", "comedic reaction shots"],
+      "camera_angles": ["low angles for heroic moments", "wide establishing shots of galaxies", "over-shoulder for dialogue", "dynamic tracking for platforming action"],
+      "visual_metaphors": ["stars as hope and guidance", "gravity as adventure and freedom", "cosmic scale vs small heroes", "light vs darkness"],
+      "lighting": "bright key lighting, rim lighting on characters, cosmic glow effects, volumetric star light, cinematic theatrical lighting"
+    },
+    "comfyui_settings": {
+      "model": "realistic_vision_v51.safetensors",
+      "resolution": "768x768",
+      "steps": 40,
+      "cfg": 8.5,
+      "sampler": "dpmpp_2m",
+      "scheduler": "karras",
+      "style_modifiers": ["3D CGI rendering", "Pixar quality textures", "cinematic lighting", "ray traced", "subsurface scattering", "theatrical release quality"]
+    }
+  },
+
+  "world_setting": {
+    "location": {
+      "primary": "Outer space - various galaxies and cosmic observatories",
+      "areas": [
+        "Mushroom Kingdom - colorful starting point, Peach's castle",
+        "Gateway Galaxy - hub world with cosmic observatory",
+        "Good Egg Galaxy - grassy planetoids with friendly creatures",
+        "Battlerock Galaxy - Bowser Jr.'s fortress territory",
+        "Comet Observatory - Rosalina's home among the stars",
+        "Bowser's Galaxy Reactor - final confrontation location"
+      ],
+      "atmosphere": "vibrant cosmic wonder, floating platforms in space, gravity-defying planetoids, stars everywhere"
+    },
+    "time_period": "fantasy timeless (presented as 2026 theatrical film)",
+    "source_material": {
+      "games": ["Super Mario Galaxy (2007)", "Super Mario Galaxy 2 (2010)"],
+      "film_predecessor": "The Super Mario Bros. Movie (2023)",
+      "studio": "Illumination Entertainment / Nintendo",
+      "directors": ["Aaron Horvath", "Michael Jelenic"],
+      "writer": "Matthew Fogel"
+    }
+  },
+
+  "narrative_guidelines": {
+    "tone": "family-friendly adventure comedy with heart, moments of awe and wonder, comedic villain dynamics",
+    "themes": ["friendship and teamwork", "courage against overwhelming odds", "family bonds (Bowser/Bowser Jr.)", "exploring the unknown", "small heroes in a vast universe"],
+    "story_arc": "Bowser Jr. seeks to free his imprisoned father while Mario's group pursues across galaxies, culminating in a cosmic showdown",
+    "humor_style": "physical comedy, character-driven jokes, voice actor personality (Chris Pratt energy, Jack Black bombast, Charlie Day anxiety)"
+  },
+
+  "characters_summary": {
+    "heroes": {
+      "Mario": "Italian plumber hero, thick black mustache, red cap M logo, blue overalls, stocky brave leader (Chris Pratt)",
+      "Luigi": "Mario's taller brother, thin black mustache, green cap L logo, nervous but brave, adult proportions (Charlie Day)",
+      "Princess Peach": "Mushroom Kingdom ruler, pink gown, golden crown, blonde hair, elegant and capable (Anya Taylor-Joy)",
+      "Toad": "Loyal mushroom retainer, spotted cap, blue vest, enthusiastic small companion (Keegan-Michael Key)",
+      "Yoshi": "Green dinosaur companion, red saddle shell, long tongue, first speaking role, loyal brave (Kazumi Totaka)",
+      "Rosalina": "Cosmic guardian, platinum blonde hair over one eye, blue gown, star wand, serene ethereal (Brie Larson)"
+    },
+    "villains": {
+      "Bowser": "Koopa King, massive dragon-turtle, red mane, spiked shell, imprisoned/shrunken (Jack Black)",
+      "Bowser Jr.": "Bowser's son, orange mohawk, white bib bandana, magic paintbrush, bratty schemer (Benny Safdie)",
+      "Kamek": "Magikoopa wizard, blue robes, round glasses, Bowser's advisor (Kevin Michael Richardson)"
+    },
+    "supporting": {
+      "Luma": "Star-shaped cosmic creature, Rosalina's companion, glowing pastel yellow",
+      "Baby Mario": "Infant Mario, oversized red cap, adorable",
+      "Baby Luigi": "Infant Luigi, oversized green cap, timid",
+      "Birdo": "Pink dinosaur creature, snout with round mouth, red bow",
+      "Mouser": "Mouse villain with sunglasses, bomb thrower",
+      "Lakitu": "Koopa on smiling cloud, goggles, throws Spinies"
+    }
+  },
+
+  "visual_direction": {
+    "character_design": "Smooth rounded 3D forms, large expressive eyes, exaggerated proportions for comedy, Illumination house style",
+    "environment_design": "Colorful cosmic environments, floating planetoids, gravity-defying landscapes, vibrant nebulae",
+    "action_choreography": "Platforming-inspired action, gravity mechanics, power-up transformations, comedic physics"
+  },
+
+  "content_rating": "PG - family friendly, cartoon action violence, comedic peril",
+
+  "production_notes": {
+    "echo_brain_optimal_settings": "768x768, 40 steps, CFG 8.5, DPM++ 2M Karras, realisticVision_v51",
+    "known_accuracy_issues": [
+      "Luigi tends to generate too young/teenage - must emphasize adult proportions and mustache",
+      "Mario can lose mustache detail - always include 'thick black mustache' prominently",
+      "Bowser Jr. needs explicit bandana bib detail to distinguish from generic Koopa",
+      "Generic anime boy is common failure mode - use strong negatives against young/child/teenager"
+    ],
+    "negative_prompt_guidance": "Must include: generic anime boy, young teenager, photographic, child, minor, underage, deformed, bad anatomy",
+    "reference_sources": ["YouTube trailer vFeJf5QMzJU (IMAX Trailer 2)", "IMDB tt28650488"]
+  },
+
+  "reference_materials": {
+    "primary_game": "Super Mario Galaxy (Nintendo Wii, 2007)",
+    "sequel_game": "Super Mario Galaxy 2 (Nintendo Wii, 2010)",
+    "predecessor_film": "The Super Mario Bros. Movie (Illumination, 2023)",
+    "official_trailers": [
+      "Official Trailer 1 - Nintendo Direct Nov 2025",
+      "Yoshi First Look - Jan 2026",
+      "Official Trailer 2 / IMAX - Jan 2026 (vFeJf5QMzJU)",
+      "Super Bowl Trailer - Feb 2026"
+    ]
+  },
+
+  "version": "1.0",
+  "created": "2026-02-12",
+  "last_updated": "2026-02-12"
+}

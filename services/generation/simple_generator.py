@@ -21,7 +21,7 @@ class SimpleAnimeGenerator:
     def __init__(self, comfyui_host: str = "localhost", comfyui_port: int = 8188):
         self.comfyui_url = f"http://{comfyui_host}:{comfyui_port}"
         self.client_id = str(uuid.uuid4())
-        self.output_base = "/mnt/1TB-storage/ComfyUI/output"
+        self.output_base = "/opt/ComfyUI/output"
 
     def ensure_project_directories(self, character_name: str = "default"):
         """Ensure project directory structure exists"""
@@ -407,7 +407,7 @@ async def generate_with_tracking(
             try:
                 from character_consistency import check_character_consistency
 
-                full_output_path = f"/mnt/1TB-storage/ComfyUI/output/{output_path}"
+                full_output_path = f"/opt/ComfyUI/output/{output_path}"
                 if Path(full_output_path).exists():
                     consistency_result = await check_character_consistency(
                         full_output_path,

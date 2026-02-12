@@ -1,7 +1,7 @@
 """Environment-based configuration for Tower Anime Production.
 
-All configuration is loaded from environment variables with sensible defaults
-for local development on the Tower server (RTX 3060 12GB, Ryzen 9 24-core, 96GB DDR6).
+All configuration is loaded from Vault with environment variable fallbacks.
+Vault path: secret/anime/database
 """
 
 import os
@@ -9,20 +9,27 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
+from config.vault_client import get_database_config
+
+
+def _load_db_config():
+    """Load database config from Vault (or env var fallback) once."""
+    return get_database_config()
+
+
+# Resolve at import time so all dataclass instances share the same credentials
+_db = _load_db_config()
+
 
 @dataclass
 class DatabaseConfig:
-    """PostgreSQL database configuration."""
+    """PostgreSQL database configuration loaded from Vault."""
 
-    host: str = field(default_factory=lambda: os.getenv("DB_HOST", "localhost"))
-    port: int = field(default_factory=lambda: int(os.getenv("DB_PORT", "5432")))
-    name: str = field(default_factory=lambda: os.getenv("DB_NAME", "anime_production"))
-    user: str = field(default_factory=lambda: os.getenv("DB_USER", "patrick"))
-    password: str = field(
-        default_factory=lambda: os.getenv(
-            "DB_PASSWORD", "tower_echo_brain_secret_key_2025"
-        )
-    )
+    host: str = field(default_factory=lambda: _db["host"])
+    port: int = field(default_factory=lambda: _db["port"])
+    name: str = field(default_factory=lambda: _db["database"])
+    user: str = field(default_factory=lambda: _db["user"])
+    password: str = field(default_factory=lambda: _db["password"])
 
     @property
     def url(self) -> str:
@@ -57,7 +64,7 @@ class ComfyUIConfig:
     port: int = field(default_factory=lambda: int(os.getenv("COMFYUI_PORT", "8188")))
     output_dir: Path = field(
         default_factory=lambda: Path(
-            os.getenv("COMFYUI_OUTPUT_DIR", "/mnt/1TB-storage/ComfyUI/output")
+            os.getenv("COMFYUI_OUTPUT_DIR", "/opt/ComfyUI/output")
         )
     )
     models_dir: Path = field(
@@ -94,8 +101,6 @@ class EchoBrainConfig:
         """Get Echo Brain base URL."""
         return f"http://{self.host}:{self.port}"
 
-
-@dataclass
 
 @dataclass
 class LoraStudioConfig:

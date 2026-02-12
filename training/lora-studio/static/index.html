@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tower LoRA Studio - Dataset Editor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 600;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 10px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .btn {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5a67d8;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: #48bb78;
+            color: white;
+        }
+
+        .btn-danger {
+            background: #f56565;
+            color: white;
+        }
+
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .video-item {
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+
+        .video-item:hover {
+            transform: scale(1.05);
+        }
+
+        .video-item.selected {
+            border: 3px solid #667eea;
+        }
+
+        .video-item video {
+            width: 100%;
+            height: 100px;
+            object-fit: cover;
+        }
+
+        .video-label {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 5px;
+            font-size: 11px;
+        }
+
+        .status-bar {
+            background: #f7fafc;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            transition: width 0.5s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 10px 20px;
+            background: #f7fafc;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .tab.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .keyword-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .chip {
+            padding: 5px 15px;
+            background: #edf2f7;
+            border-radius: 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .chip .remove {
+            cursor: pointer;
+            color: #f56565;
+            font-weight: bold;
+        }
+
+        @media (max-width: 768px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Tower LoRA Studio</h1>
+            <p>Train custom LoRAs for LTX video generation</p>
+        </div>
+
+        <div class="main-grid">
+            <!-- Dataset Configuration Panel -->
+            <div class="panel">
+                <h2>Dataset Configuration</h2>
+
+                <div class="tabs">
+                    <button class="tab active" onclick="showTab('create')">Create New</button>
+                    <button class="tab" onclick="showTab('existing')">Edit Existing</button>
+                </div>
+
+                <div id="create-tab">
+                    <div class="form-group">
+                        <label>LoRA Name</label>
+                        <input type="text" id="lora-name" placeholder="e.g., mei_character_v2">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Character/Concept</label>
+                        <select id="character-select">
+                            <option value="">Select character...</option>
+                            <option value="mei">Mei (Tokyo Student)</option>
+                            <option value="kai">Kai (Cyberpunk Warrior)</option>
+                            <option value="ryuu">Ryuu (Dragon Master)</option>
+                            <option value="custom">Custom Character</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Trigger Word</label>
+                        <input type="text" id="trigger-word" placeholder="e.g., mei tokyo student">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Concept Type</label>
+                        <select id="concept-type">
+                            <option value="character">Character</option>
+                            <option value="style">Style</option>
+                            <option value="action">Action</option>
+                            <option value="intimate">Intimate</option>
+                            <option value="violence">Violence/Combat</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Keywords</label>
+                        <input type="text" id="keyword-input" placeholder="Press Enter to add">
+                        <div class="keyword-chips" id="keyword-chips"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Training Steps</label>
+                        <input type="range" id="steps-range" min="50" max="1000" value="200">
+                        <span id="steps-value">200</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Learning Rate</label>
+                        <input type="number" id="learning-rate" value="0.0002" step="0.0001">
+                    </div>
+
+                    <div class="form-group">
+                        <label>LoRA Rank</label>
+                        <select id="lora-rank">
+                            <option value="16">16 (Fast, Less Detail)</option>
+                            <option value="32" selected>32 (Balanced)</option>
+                            <option value="64">64 (Character Focus)</option>
+                            <option value="128">128 (Maximum Detail)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="existing-tab" style="display: none;">
+                    <div class="form-group">
+                        <label>Select Existing LoRA</label>
+                        <select id="existing-lora">
+                            <option value="">Loading...</option>
+                        </select>
+                    </div>
+                    <div id="lora-details"></div>
+                </div>
+
+                <button class="btn btn-primary" onclick="submitTraining()">Start Training</button>
+            </div>
+
+            <!-- Video Selection Panel -->
+            <div class="panel">
+                <h2>Select Training Videos</h2>
+
+                <div class="form-group">
+                    <label>Filter by Character</label>
+                    <select id="video-filter" onchange="filterVideos()">
+                        <option value="">All Videos</option>
+                        <option value="mei">Mei Videos</option>
+                        <option value="kai">Kai Videos</option>
+                        <option value="ryuu">Ryuu Videos</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Selected Videos: <span id="selected-count">0</span></label>
+                    <div class="video-grid" id="video-grid">
+                        <!-- Videos will be loaded here -->
+                    </div>
+                </div>
+
+                <div class="status-bar">
+                    <h3>Training Status</h3>
+                    <div id="training-status">
+                        <p>No active training</p>
+                    </div>
+                    <div class="progress-bar" style="display: none;" id="progress-bar">
+                        <div class="progress-fill" id="progress-fill">0%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Training Queue -->
+        <div class="panel" style="margin-top: 30px;">
+            <h2>Training Queue</h2>
+            <div id="training-queue">
+                <p>No jobs in queue</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedVideos = new Set();
+        let keywords = [];
+
+        // Initialize
+        window.onload = function() {
+            loadVideos();
+            loadExistingLoras();
+            setupEventListeners();
+            updateTrainingStatus();
+            setInterval(updateTrainingStatus, 5000);
+        };
+
+        function setupEventListeners() {
+            document.getElementById('steps-range').addEventListener('input', function(e) {
+                document.getElementById('steps-value').textContent = e.target.value;
+            });
+
+            document.getElementById('keyword-input').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    addKeyword(e.target.value);
+                    e.target.value = '';
+                }
+            });
+
+            document.getElementById('character-select').addEventListener('change', function(e) {
+                if (e.target.value) {
+                    document.getElementById('trigger-word').value = e.target.value + ' character';
+                    filterVideos();
+                }
+            });
+        }
+
+        function showTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+
+            if (tab === 'create') {
+                document.getElementById('create-tab').style.display = 'block';
+                document.getElementById('existing-tab').style.display = 'none';
+            } else {
+                document.getElementById('create-tab').style.display = 'none';
+                document.getElementById('existing-tab').style.display = 'block';
+            }
+        }
+
+        function addKeyword(keyword) {
+            if (keyword && !keywords.includes(keyword)) {
+                keywords.push(keyword);
+                updateKeywordChips();
+            }
+        }
+
+        function removeKeyword(keyword) {
+            keywords = keywords.filter(k => k !== keyword);
+            updateKeywordChips();
+        }
+
+        function updateKeywordChips() {
+            const container = document.getElementById('keyword-chips');
+            container.innerHTML = keywords.map(k =>
+                `<div class="chip">${k} <span class="remove" onclick="removeKeyword('${k}')">×</span></div>`
+            ).join('');
+        }
+
+        function loadVideos() {
+            fetch('/api/lora/videos')
+                .then(r => r.json())
+                .then(videos => {
+                    const grid = document.getElementById('video-grid');
+                    grid.innerHTML = videos.map((v, i) => `
+                        <div class="video-item" data-path="${v.path}" onclick="toggleVideo(${i})">
+                            <video src="${v.url}" muted></video>
+                            <div class="video-label">${v.name}</div>
+                        </div>
+                    `).join('');
+                })
+                .catch(() => {
+                    // Fallback mock data
+                    const mockVideos = [
+                        {name: 'mei_scene_1.mp4', character: 'mei'},
+                        {name: 'mei_scene_2.mp4', character: 'mei'},
+                        {name: 'kai_combat_1.mp4', character: 'kai'},
+                        {name: 'ryuu_action.mp4', character: 'ryuu'}
+                    ];
+                    const grid = document.getElementById('video-grid');
+                    grid.innerHTML = mockVideos.map((v, i) => `
+                        <div class="video-item" data-name="${v.name}" onclick="toggleVideo(${i})">
+                            <div style="background: linear-gradient(45deg, #667eea, #764ba2); height: 100px; display: flex; align-items: center; justify-content: center; color: white;">
+                                Video ${i + 1}
+                            </div>
+                            <div class="video-label">${v.name}</div>
+                        </div>
+                    `).join('');
+                });
+        }
+
+        function toggleVideo(index) {
+            const item = document.querySelectorAll('.video-item')[index];
+            if (selectedVideos.has(index)) {
+                selectedVideos.delete(index);
+                item.classList.remove('selected');
+            } else {
+                selectedVideos.add(index);
+                item.classList.add('selected');
+            }
+            document.getElementById('selected-count').textContent = selectedVideos.size;
+        }
+
+        function filterVideos() {
+            const filter = document.getElementById('video-filter').value;
+            // Implementation for filtering videos
+        }
+
+        function loadExistingLoras() {
+            fetch('/api/loras')
+                .then(r => r.json())
+                .then(loras => {
+                    const select = document.getElementById('existing-lora');
+                    select.innerHTML = '<option value="">Select a LoRA...</option>' +
+                        loras.map(l => `<option value="${l.name}">${l.name}</option>`).join('');
+                })
+                .catch(() => {
+                    document.getElementById('existing-lora').innerHTML =
+                        '<option value="">Failed to load LoRAs</option>';
+                });
+        }
+
+        function submitTraining() {
+            const data = {
+                lora_name: document.getElementById('lora-name').value,
+                trigger_word: document.getElementById('trigger-word').value,
+                concept_type: document.getElementById('concept-type').value,
+                keywords: keywords,
+                steps: parseInt(document.getElementById('steps-range').value),
+                learning_rate: parseFloat(document.getElementById('learning-rate').value),
+                rank: parseInt(document.getElementById('lora-rank').value),
+                videos: Array.from(selectedVideos)
+            };
+
+            fetch('/api/lora/train/submit', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            })
+            .then(r => r.json())
+            .then(result => {
+                alert(`Training started! Job ID: ${result.job_id}`);
+                updateTrainingStatus();
+            })
+            .catch(err => {
+                alert('Failed to start training: ' + err.message);
+            });
+        }
+
+        function updateTrainingStatus() {
+            fetch('/api/training/queue')
+                .then(r => r.json())
+                .then(jobs => {
+                    if (jobs.length > 0) {
+                        const active = jobs.find(j => j.status === 'running');
+                        if (active) {
+                            document.getElementById('training-status').innerHTML = `
+                                <div class="status-item">
+                                    <span>Job: ${active.job_id}</span>
+                                    <span>Step ${active.current_step}/${active.total_steps}</span>
+                                </div>
+                                <div class="status-item">
+                                    <span>Loss: ${active.current_loss?.toFixed(4) || 'N/A'}</span>
+                                    <span>${(active.progress * 100).toFixed(1)}%</span>
+                                </div>
+                            `;
+                            document.getElementById('progress-bar').style.display = 'block';
+                            document.getElementById('progress-fill').style.width = `${active.progress * 100}%`;
+                            document.getElementById('progress-fill').textContent = `${(active.progress * 100).toFixed(1)}%`;
+                        }
+
+                        // Update queue
+                        document.getElementById('training-queue').innerHTML = jobs.map(j => `
+                            <div class="status-item" style="padding: 10px; background: #f7fafc; border-radius: 8px; margin-bottom: 10px;">
+                                <span>${j.lora_name} (${j.status})</span>
+                                <span>${j.status === 'completed' ? '✅' : j.status === 'failed' ? '❌' : '⏳'}</span>
+                            </div>
+                        `).join('');
+                    }
+                })
+                .catch(() => {
+                    // Silent fail - server might not be running
+                });
+        }
+    </script>
+</body>
+</html>

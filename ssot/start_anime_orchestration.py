@@ -223,7 +223,7 @@ Group=patrick
 WorkingDirectory=/opt/tower-echo-brain
 Environment=PYTHONPATH=/opt/tower-echo-brain/src
 Environment=ECHO_BRAIN_DB_PASSWORD={self.db_config['password']}
-ExecStart=/usr/bin/python3 /opt/tower-echo-brain/scripts/start_anime_orchestration.py --port {self.args.port} --host {self.args.host}
+ExecStart=/usr/bin/python3 /opt/tower-anime-production/ssot/start_anime_orchestration.py --port {self.args.port} --host {self.args.host}
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal

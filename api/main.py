@@ -44,8 +44,9 @@ try:
 except ImportError:
     PIPELINE_AVAILABLE = False
 
-# Database Setup
-DATABASE_URL = f"postgresql://patrick:{os.getenv('DATABASE_PASSWORD', 'tower_echo_brain_secret_key_2025')}@localhost/anime_production"
+# Database Setup - credentials loaded from Vault (secret/anime/database)
+from config.vault_client import get_database_url
+DATABASE_URL = get_database_url()
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

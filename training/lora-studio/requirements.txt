@@ -1,0 +1,60 @@
+# Tower LoRA Studio Requirements
+# Python 3.11+ required
+
+# Core Dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+python-multipart==0.0.6
+
+# Database
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.23
+
+# Image Processing
+Pillow==10.1.0
+opencv-python==4.8.1.78
+torchvision==0.16.0
+
+# Machine Learning
+torch==2.1.0+cu118
+transformers==4.35.2
+diffusers==0.24.0
+accelerate==0.25.0
+xformers==0.0.22
+safetensors==0.4.1
+
+# LoRA Training
+kohya-ss-lib-trainer==1.0.0
+bitsandbytes==0.41.3
+lion-pytorch==0.1.2
+
+# ComfyUI Integration
+aiohttp==3.9.1
+websocket-client==1.7.0
+
+# Utilities
+numpy==1.24.4
+scipy==1.11.4
+tqdm==4.66.1
+PyYAML==6.0.1
+python-dotenv==1.0.0
+
+# Monitoring
+tensorboard==2.15.1
+wandb==0.16.1
+
+# Style Validation
+scikit-image==0.22.0
+matplotlib==3.8.2
+
+# API Documentation
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Development
+pytest==7.4.3
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.0

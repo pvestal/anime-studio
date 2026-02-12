@@ -18,7 +18,7 @@ Usage:
     python3 rebuild_story_bible_ssot.py --dry-run      # Preview without changes
     python3 rebuild_story_bible_ssot.py --incremental   # Only index new/changed rows
 
-Place at: /opt/tower-echo-brain/scripts/rebuild_story_bible_ssot.py
+Place at: /opt/tower-anime-production/ssot/rebuild_story_bible_ssot.py
 """
 
 import argparse

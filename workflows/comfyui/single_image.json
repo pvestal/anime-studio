@@ -39,7 +39,7 @@
   },
   "4": {
     "inputs": {
-      "ckpt_name": "AOM3A1B.safetensors"
+      "ckpt_name": "cyberrealistic_v9.safetensors"
     },
     "class_type": "CheckpointLoaderSimple",
     "_meta": {

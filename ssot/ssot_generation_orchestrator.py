@@ -23,7 +23,7 @@ Usage:
     python3 ssot_generation_orchestrator.py --plan-only "Mei romantic Tokyo scene"
     python3 ssot_generation_orchestrator.py --dry-run "cyberpunk battle"
 
-Place at: /opt/tower-echo-brain/scripts/ssot_generation_orchestrator.py
+Place at: /opt/tower-anime-production/ssot/ssot_generation_orchestrator.py
 """
 
 import argparse

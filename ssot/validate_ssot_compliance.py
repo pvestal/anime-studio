@@ -15,7 +15,7 @@ Usage:
     python3 validate_ssot_compliance.py --verbose
     python3 validate_ssot_compliance.py --fix    # Report what needs re-indexing
 
-Place at: /opt/tower-echo-brain/scripts/validate_ssot_compliance.py
+Place at: /opt/tower-anime-production/ssot/validate_ssot_compliance.py
 """
 
 import argparse

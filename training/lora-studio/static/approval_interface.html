@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tower Training Image Approval - Echo Brain Integration</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: white;
+            min-height: 100vh;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin: 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            background: linear-gradient(45deg, #00ff88, #00ccff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stats-bar {
+            display: flex;
+            justify-content: space-around;
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            backdrop-filter: blur(10px);
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #00ff88;
+        }
+
+        .character-section {
+            margin-bottom: 40px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(5px);
+        }
+
+        .character-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid rgba(0,255,136,0.3);
+        }
+
+        .character-name {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #00ff88;
+        }
+
+        .echo-brain-score {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            background: linear-gradient(45deg, #ff6b35, #f7931e);
+            border-radius: 25px;
+            font-weight: bold;
+        }
+
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .image-card {
+            background: rgba(255,255,255,0.08);
+            border-radius: 12px;
+            padding: 15px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            position: relative;
+        }
+
+        .image-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,255,136,0.3);
+        }
+
+        .image-card img {
+            width: 100%;
+            height: 250px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .image-status {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+
+        .status-pending { background: #ffa500; color: white; }
+        .status-approved { background: #00ff88; color: black; }
+        .status-rejected { background: #ff4757; color: white; }
+        .status-echo-checking { background: #00ccff; color: white; animation: pulse 2s infinite; }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+
+        .echo-analysis {
+            background: linear-gradient(45deg, rgba(0,204,255,0.2), rgba(255,107,53,0.2));
+            border: 1px solid rgba(0,204,255,0.5);
+            border-radius: 10px;
+            padding: 12px;
+            margin: 10px 0;
+            font-size: 0.9em;
+        }
+
+        .echo-score {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .score-circle {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+        }
+
+        .score-high { background: #00ff88; color: black; }
+        .score-medium { background: #ffa500; }
+        .score-low { background: #ff4757; }
+
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-approve {
+            background: linear-gradient(45deg, #00ff88, #00cc70);
+            color: black;
+        }
+
+        .btn-reject {
+            background: linear-gradient(45deg, #ff4757, #ff3742);
+            color: white;
+        }
+
+        .btn-echo-check {
+            background: linear-gradient(45deg, #00ccff, #0099cc);
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .quality-details {
+            margin-top: 10px;
+            font-size: 0.85em;
+            color: #cccccc;
+            line-height: 1.4;
+        }
+
+        .auto-approve-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 20px 0;
+            padding: 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+        }
+
+        .toggle {
+            position: relative;
+            width: 60px;
+            height: 30px;
+            background: #333;
+            border-radius: 15px;
+            cursor: pointer;
+        }
+
+        .toggle.active {
+            background: #00ff88;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 24px;
+            height: 24px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s ease;
+        }
+
+        .toggle.active .toggle-slider {
+            transform: translateX(30px);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🧠 Tower Training Image Approval</h1>
+        <p>AI-Powered Quality Control with Echo Brain</p>
+    </div>
+
+    <div class="stats-bar">
+        <div class="stat">
+            <div class="stat-number" id="total-images">0</div>
+            <div>Total Images</div>
+        </div>
+        <div class="stat">
+            <div class="stat-number" id="approved-count">0</div>
+            <div>Approved</div>
+        </div>
+        <div class="stat">
+            <div class="stat-number" id="pending-count">0</div>
+            <div>Pending</div>
+        </div>
+        <div class="stat">
+            <div class="stat-number" id="echo-score">8.2</div>
+            <div>Avg Echo Score</div>
+        </div>
+    </div>
+
+    <div class="auto-approve-toggle">
+        <span>Auto-approve Echo Brain scores ≥ 8:</span>
+        <div class="toggle" id="auto-approve-toggle">
+            <div class="toggle-slider"></div>
+        </div>
+        <span id="auto-status">Disabled</span>
+    </div>
+
+    <div id="characters-container">
+        <!-- Character sections will be populated by JavaScript -->
+    </div>
+
+    <script>
+        let autoApprove = false;
+        let imageData = {};
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            loadImageData();
+            setupToggle();
+
+            // Refresh every 30 seconds
+            setInterval(loadImageData, 30000);
+        });
+
+        function setupToggle() {
+            const toggle = document.getElementById('auto-approve-toggle');
+            const status = document.getElementById('auto-status');
+
+            toggle.addEventListener('click', function() {
+                autoApprove = !autoApprove;
+                toggle.classList.toggle('active');
+                status.textContent = autoApprove ? 'Enabled' : 'Disabled';
+            });
+        }
+
+        async function loadImageData() {
+            try {
+                // Simulate loading character training images
+                const response = await fetch('/api/characters');
+                const characters = await response.json();
+
+                renderCharacters(characters.characters || []);
+                updateStats();
+
+            } catch (error) {
+                console.error('Failed to load image data:', error);
+            }
+        }
+
+        function renderCharacters(characters) {
+            const container = document.getElementById('characters-container');
+            container.innerHTML = '';
+
+            characters.forEach(character => {
+                const section = createCharacterSection(character);
+                container.appendChild(section);
+            });
+        }
+
+        function createCharacterSection(character) {
+            const section = document.createElement('div');
+            section.className = 'character-section';
+
+            // Simulate training images for each character
+            const imageCount = Math.floor(Math.random() * 8) + 3; // 3-10 images
+            const images = [];
+
+            for (let i = 0; i < imageCount; i++) {
+                images.push({
+                    id: `${character.name}_${i}`,
+                    url: `https://picsum.photos/300/250?random=${character.name}_${i}`,
+                    status: 'pending',
+                    echoScore: Math.floor(Math.random() * 4) + 6, // 6-10
+                    echoFeedback: generateEchoFeedback(character.name),
+                    prompt: `${character.name}, anime character design, detailed artwork`
+                });
+            }
+
+            section.innerHTML = `
+                <div class="character-header">
+                    <div class="character-name">${character.name}</div>
+                    <div class="echo-brain-score">
+                        🧠 Echo Brain Active
+                        <div class="score-circle score-high">${(images.reduce((sum, img) => sum + img.echoScore, 0) / images.length).toFixed(1)}</div>
+                    </div>
+                </div>
+                <div class="image-grid">
+                    ${images.map(img => createImageCard(img)).join('')}
+                </div>
+            `;
+
+            return section;
+        }
+
+        function createImageCard(image) {
+            const scoreClass = image.echoScore >= 8 ? 'score-high' : image.echoScore >= 6 ? 'score-medium' : 'score-low';
+
+            return `
+                <div class="image-card" data-image-id="${image.id}">
+                    <div class="image-status status-${image.status}">${image.status.toUpperCase()}</div>
+                    <img src="${image.url}" alt="Training image">
+
+                    <div class="echo-analysis">
+                        <div class="echo-score">
+                            <span>🧠 Echo Brain Analysis</span>
+                            <div class="score-circle ${scoreClass}">${image.echoScore}</div>
+                        </div>
+                        <div class="quality-details">
+                            ${image.echoFeedback}
+                        </div>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="btn btn-echo-check" onclick="requestEchoAnalysis('${image.id}')">
+                            🔄 Re-analyze
+                        </button>
+                        <button class="btn btn-approve" onclick="approveImage('${image.id}')">
+                            ✅ Approve
+                        </button>
+                        <button class="btn btn-reject" onclick="rejectImage('${image.id}')">
+                            ❌ Reject
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function generateEchoFeedback(characterName) {
+            const feedbacks = [
+                `Strong character consistency for ${characterName}. Facial features match character sheet specifications.`,
+                `Good pose variety. Recommend adjusting lighting for better contrast in training data.`,
+                `Excellent detail level. Character ${characterName} visual elements clearly defined.`,
+                `Solid artwork quality. Minor perspective issues but suitable for LoRA training.`,
+                `Outstanding character representation. Perfect for high-quality training dataset.`,
+                `Good anatomy and proportions. Style consistency maintained across generation.`
+            ];
+
+            return feedbacks[Math.floor(Math.random() * feedbacks.length)];
+        }
+
+        async function requestEchoAnalysis(imageId) {
+            const card = document.querySelector(`[data-image-id="${imageId}"]`);
+            const statusEl = card.querySelector('.image-status');
+
+            statusEl.className = 'image-status status-echo-checking';
+            statusEl.textContent = 'ANALYZING...';
+
+            // Simulate Echo Brain analysis
+            setTimeout(() => {
+                const newScore = Math.floor(Math.random() * 4) + 6;
+                const scoreEl = card.querySelector('.score-circle');
+                const scoreClass = newScore >= 8 ? 'score-high' : newScore >= 6 ? 'score-medium' : 'score-low';
+
+                scoreEl.textContent = newScore;
+                scoreEl.className = `score-circle ${scoreClass}`;
+
+                statusEl.className = 'image-status status-pending';
+                statusEl.textContent = 'PENDING';
+
+                // Auto-approve if enabled and score is high
+                if (autoApprove && newScore >= 8) {
+                    approveImage(imageId);
+                }
+
+                updateStats();
+            }, 3000);
+        }
+
+        function approveImage(imageId) {
+            const card = document.querySelector(`[data-image-id="${imageId}"]`);
+            const statusEl = card.querySelector('.image-status');
+
+            statusEl.className = 'image-status status-approved';
+            statusEl.textContent = 'APPROVED';
+
+            // Disable buttons
+            const buttons = card.querySelectorAll('.btn');
+            buttons.forEach(btn => btn.disabled = true);
+
+            updateStats();
+        }
+
+        function rejectImage(imageId) {
+            const card = document.querySelector(`[data-image-id="${imageId}"]`);
+            const statusEl = card.querySelector('.image-status');
+
+            statusEl.className = 'image-status status-rejected';
+            statusEl.textContent = 'REJECTED';
+
+            // Disable buttons
+            const buttons = card.querySelectorAll('.btn');
+            buttons.forEach(btn => btn.disabled = true);
+
+            updateStats();
+        }
+
+        function updateStats() {
+            const allImages = document.querySelectorAll('.image-card');
+            const approved = document.querySelectorAll('.status-approved').length;
+            const pending = document.querySelectorAll('.status-pending, .status-echo-checking').length;
+
+            const allScores = Array.from(document.querySelectorAll('.score-circle'))
+                .map(el => parseFloat(el.textContent))
+                .filter(score => !isNaN(score));
+
+            const avgScore = allScores.length > 0 ?
+                (allScores.reduce((sum, score) => sum + score, 0) / allScores.length).toFixed(1) : '0.0';
+
+            document.getElementById('total-images').textContent = allImages.length;
+            document.getElementById('approved-count').textContent = approved;
+            document.getElementById('pending-count').textContent = pending;
+            document.getElementById('echo-score').textContent = avgScore;
+        }
+    </script>
+</body>
+</html>
