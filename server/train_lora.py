@@ -68,9 +68,33 @@ def update_job_status(job_id: str, status: str, **extra):
         logger.warning(f"Failed to update job status: {e}")
 
 
+def detect_model_type(checkpoint_path: str) -> str:
+    """Auto-detect whether a checkpoint is SD1.5 or SDXL.
+
+    SDXL checkpoints have dual text encoder keys (conditioner.embedders.1.*).
+    SD1.5 checkpoints have only cond_stage_model.* keys.
+    """
+    from safetensors.torch import load_file
+    try:
+        # Only load metadata/keys, not full weights
+        state_dict = load_file(checkpoint_path)
+        keys = set(state_dict.keys())
+        del state_dict
+        gc.collect()
+        # SDXL has dual text encoder — look for the second conditioner
+        if any(k.startswith("conditioner.embedders.1.") for k in keys):
+            return "sdxl"
+        return "sd15"
+    except Exception as e:
+        logger.warning(f"Could not auto-detect model type from {checkpoint_path}: {e}")
+        # Fall back to model profile registry
+        from packages.core.model_profiles import get_model_profile
+        profile = get_model_profile(Path(checkpoint_path).name)
+        return profile["architecture"]
+
+
 def train(args):
-    """Main training loop."""
-    from diffusers import StableDiffusionPipeline
+    """Main training loop — supports both SD1.5 and SDXL checkpoints."""
     from diffusers.utils import convert_state_dict_to_kohya
     from peft import LoraConfig, get_peft_model_state_dict
     from safetensors.torch import save_file
@@ -81,27 +105,51 @@ def train(args):
     # Register signal handler for graceful shutdown
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
-    update_job_status(args.job_id, "running", started_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
-    logger.info(f"Job {args.job_id}: Loading checkpoint {args.checkpoint}")
+    # Determine model type
+    model_type = args.model_type
+    if model_type == "auto":
+        model_type = detect_model_type(args.checkpoint)
+    is_sdxl = model_type == "sdxl"
+
+    update_job_status(
+        args.job_id, "running",
+        started_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+        model_type=model_type,
+    )
+    logger.info(f"Job {args.job_id}: Loading {model_type.upper()} checkpoint {args.checkpoint}")
 
     try:
-        # Load the base SD pipeline from single file
-        pipe = StableDiffusionPipeline.from_single_file(
-            args.checkpoint,
-            torch_dtype=torch.float16,
-            safety_checker=None,
-            requires_safety_checker=False,
-        )
+        # Load the base pipeline from single file
+        if is_sdxl:
+            from diffusers import StableDiffusionXLPipeline
+            pipe = StableDiffusionXLPipeline.from_single_file(
+                args.checkpoint,
+                torch_dtype=torch.float16,
+            )
+        else:
+            from diffusers import StableDiffusionPipeline
+            pipe = StableDiffusionPipeline.from_single_file(
+                args.checkpoint,
+                torch_dtype=torch.float16,
+                safety_checker=None,
+                requires_safety_checker=False,
+            )
 
         tokenizer = pipe.tokenizer
         text_encoder = pipe.text_encoder
         vae = pipe.vae
         unet = pipe.unet
 
+        # SDXL: second text encoder + tokenizer
+        tokenizer_2 = getattr(pipe, "tokenizer_2", None) if is_sdxl else None
+        text_encoder_2 = getattr(pipe, "text_encoder_2", None) if is_sdxl else None
+
         # Freeze everything except LoRA layers
         vae.requires_grad_(False)
         text_encoder.requires_grad_(False)
         unet.requires_grad_(False)
+        if text_encoder_2 is not None:
+            text_encoder_2.requires_grad_(False)
 
         # Move frozen components to GPU in eval mode
         vae.to("cuda", dtype=torch.float16)
@@ -109,6 +157,9 @@ def train(args):
         unet.to("cuda", dtype=torch.float16)
         vae.eval()
         text_encoder.eval()
+        if text_encoder_2 is not None:
+            text_encoder_2.to("cuda", dtype=torch.float16)
+            text_encoder_2.eval()
 
         # Apply LoRA to UNet
         lora_config = LoraConfig(
@@ -120,7 +171,7 @@ def train(args):
         unet.add_adapter(lora_config)
         unet.train()
 
-        # Enable gradient checkpointing to save VRAM
+        # Enable gradient checkpointing to save VRAM (critical for SDXL at 1024)
         unet.enable_gradient_checkpointing()
 
         # Count trainable parameters
@@ -128,8 +179,12 @@ def train(args):
         total = sum(p.numel() for p in unet.parameters())
         logger.info(f"Trainable params: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
-        # Dataset
-        dataset = LoRADataset(args.dataset_dir, tokenizer, resolution=args.resolution)
+        # Dataset (pass tokenizer_2 for SDXL dual encoding)
+        dataset = LoRADataset(
+            args.dataset_dir, tokenizer,
+            resolution=args.resolution,
+            tokenizer_2=tokenizer_2,
+        )
         if len(dataset) == 0:
             raise RuntimeError("No approved images found in dataset")
 
@@ -161,8 +216,9 @@ def train(args):
         torch.cuda.empty_cache()
 
         logger.info(
-            f"Training: {len(dataset)} images, {args.epochs} epochs, "
-            f"{total_steps} optimizer steps, LR={args.learning_rate}"
+            f"Training ({model_type}): {len(dataset)} images, {args.epochs} epochs, "
+            f"{total_steps} optimizer steps, LR={args.learning_rate}, "
+            f"rank={args.lora_rank}, resolution={args.resolution}"
         )
 
         global_step = 0
@@ -187,6 +243,14 @@ def train(args):
                     encoder_output = text_encoder(input_ids)
                     encoder_hidden_states = encoder_output[0]
 
+                    # SDXL: concatenate hidden states from both text encoders
+                    if is_sdxl and text_encoder_2 is not None:
+                        input_ids_2 = batch["input_ids_2"].to("cuda")
+                        encoder_output_2 = text_encoder_2(input_ids_2)
+                        encoder_hidden_states = torch.cat(
+                            [encoder_hidden_states, encoder_output_2[0]], dim=-1
+                        )
+
                 # Sample noise and timesteps
                 noise = torch.randn_like(latents)
                 timesteps = torch.randint(
@@ -197,12 +261,30 @@ def train(args):
                 # Add noise to latents
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
+                # Build UNet kwargs
+                unet_kwargs = {
+                    "encoder_hidden_states": encoder_hidden_states,
+                }
+                # SDXL needs added_cond_kwargs with pooled text embeddings + time_ids
+                if is_sdxl and text_encoder_2 is not None:
+                    # Pooled output from text_encoder_2 (OpenCLIP-G)
+                    pooled_output = encoder_output_2[1]
+                    # Time IDs: [orig_h, orig_w, crop_top, crop_left, target_h, target_w]
+                    time_ids = torch.tensor(
+                        [[args.resolution, args.resolution, 0, 0, args.resolution, args.resolution]],
+                        dtype=torch.float16, device="cuda",
+                    )
+                    unet_kwargs["added_cond_kwargs"] = {
+                        "text_embeds": pooled_output,
+                        "time_ids": time_ids,
+                    }
+
                 # Predict noise with UNet (mixed precision)
                 with torch.autocast("cuda", dtype=torch.float16):
                     noise_pred = unet(
                         noisy_latents,
                         timesteps,
-                        encoder_hidden_states=encoder_hidden_states,
+                        **unet_kwargs,
                     ).sample
 
                 # MSE loss against target noise
@@ -279,6 +361,7 @@ def train(args):
             best_loss=round(best_loss, 6),
             final_loss=round(loss_history[-1], 6) if loss_history else None,
             total_steps=global_step,
+            model_type=model_type,
         )
 
     except Exception as e:
@@ -306,12 +389,15 @@ def main():
     parser.add_argument("--resolution", type=int, default=512, help="Training resolution")
     parser.add_argument("--lora-rank", type=int, default=32, help="LoRA rank (r)")
     parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps")
+    parser.add_argument("--model-type", choices=["auto", "sd15", "sdxl"], default="auto",
+                        help="Model architecture (auto-detect from checkpoint if 'auto')")
 
     args = parser.parse_args()
 
     logger.info(f"=== LoRA Training: {args.character_slug} ===")
     logger.info(f"Job ID: {args.job_id}")
     logger.info(f"Checkpoint: {args.checkpoint}")
+    logger.info(f"Model type: {args.model_type}")
     logger.info(f"Dataset: {args.dataset_dir}")
     logger.info(f"Output: {args.output}")
     logger.info(f"Epochs: {args.epochs}, LR: {args.learning_rate}, Resolution: {args.resolution}")

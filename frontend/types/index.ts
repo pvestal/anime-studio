@@ -343,6 +343,36 @@ export interface StyleUpdate {
   height?: number
   positive_prompt_template?: string
   negative_prompt_template?: string
+  reason?: string
+}
+
+export interface StyleHistoryEntry {
+  id: number
+  checkpoint_model: string | null
+  cfg_scale: number | null
+  steps: number | null
+  sampler: string | null
+  scheduler: string | null
+  width: number | null
+  height: number | null
+  switched_at: string | null
+  reason: string | null
+  generation_count: number
+  avg_quality_at_switch: number | null
+  live_total: number
+  live_approved: number
+  live_avg_quality: number | null
+}
+
+export interface StyleCheckpointStats {
+  checkpoint_model: string
+  total: number
+  approved: number
+  rejected: number
+  approval_rate: number
+  avg_quality: number | null
+  first_used: string | null
+  last_used: string | null
 }
 
 // --- Echo Brain Narrator Assist ---

@@ -11,6 +11,8 @@ import type {
   ProjectUpdate,
   StorylineUpsert,
   StyleUpdate,
+  StyleHistoryEntry,
+  StyleCheckpointStats,
   WorldSettings,
   WorldSettingsUpsert,
   CheckpointFile,
@@ -80,6 +82,14 @@ export const storyApi = {
       method: 'PUT',
       body: JSON.stringify(data),
     })
+  },
+
+  async getStyleHistory(projectId: number): Promise<{ history: StyleHistoryEntry[] }> {
+    return request(`/projects/${projectId}/style-history`)
+  },
+
+  async getStyleStats(projectId: number): Promise<{ project_name: string; checkpoints: StyleCheckpointStats[] }> {
+    return request(`/projects/${projectId}/style-stats`)
   },
 
   // --- World Settings ---

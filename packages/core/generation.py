@@ -27,6 +27,7 @@ from packages.core.db import get_char_project_map
 from packages.core.events import event_bus, GENERATION_SUBMITTED
 from packages.core.audit import log_generation
 from packages.core.model_selector import recommend_params
+from packages.core.model_profiles import get_model_profile, translate_prompt
 from packages.lora_training.feedback import get_feedback_negatives, register_pending_image
 from packages.visual_pipeline.comfyui import (
     build_comfyui_workflow,
@@ -105,6 +106,24 @@ def build_character_negatives(appearance_data) -> str:
 
 # --- Main entry point ---
 
+async def _get_style_override(style_name: str) -> dict | None:
+    """Fetch a generation style by name from the DB."""
+    from packages.core.db import connect_direct
+    try:
+        conn = await connect_direct()
+        row = await conn.fetchrow(
+            "SELECT * FROM generation_styles WHERE style_name = $1", style_name
+        )
+        await conn.close()
+        if not row:
+            logger.warning(f"style_override '{style_name}' not found in generation_styles")
+            return None
+        return dict(row)
+    except Exception as e:
+        logger.error(f"Failed to fetch style '{style_name}': {e}")
+        return None
+
+
 async def generate_batch(
     character_slug: str,
     count: int = 1,
@@ -114,10 +133,13 @@ async def generate_batch(
     include_feedback_negatives: bool = True,
     include_learned_negatives: bool = True,
     fire_events: bool = True,
+    style_override: str | None = None,
 ) -> list[dict]:
     """Generate N images using the full visual pipeline, poll, copy to dataset, register.
 
     This is the single shared generation function that all callers use.
+    When style_override is provided, overrides checkpoint/cfg/steps/sampler/resolution
+    from the named generation_styles row (e.g. "pony_nsfw_xl").
     Returns a list of result dicts, one per submitted job.
     """
     # 1. Get DB info
@@ -126,6 +148,16 @@ async def generate_batch(
     if not db_info:
         raise ValueError(f"Character '{character_slug}' not found in DB")
 
+    # Apply style override if requested
+    if style_override:
+        style = await _get_style_override(style_override)
+        if style:
+            logger.info(f"generate_batch: applying style_override '{style_override}'")
+            for key in ("checkpoint_model", "cfg_scale", "steps", "sampler", "scheduler",
+                        "width", "height", "positive_prompt_template", "negative_prompt_template"):
+                if style.get(key) is not None:
+                    db_info[key] = style[key]
+
     checkpoint = db_info.get("checkpoint_model")
     if not checkpoint:
         raise ValueError(f"No checkpoint model configured for {character_slug}")
@@ -133,19 +165,51 @@ async def generate_batch(
     project_name = db_info.get("project_name")
     design_prompt = prompt_override or db_info.get("design_prompt", "")
 
-    # 2. Build negative prompt: DB template + learned + feedback + character negatives
+    # 2. Get model profile for checkpoint-aware pipeline
+    profile = get_model_profile(
+        checkpoint,
+        db_architecture=db_info.get("model_architecture"),
+        db_prompt_format=db_info.get("prompt_format"),
+    )
+    logger.info(f"generate_batch: using profile '{profile['style_label']}' for {checkpoint}")
+
+    # 3. Build negative prompt: profile defaults > DB template, + learned + feedback + character
     base_negative = (
         db_info.get("negative_prompt_template")
-        or "worst quality, low quality, blurry, deformed"
+        or profile["quality_negative"]
     )
+
+    # Get recommendations and apply if confidence >= medium
+    use_cfg = db_info.get("cfg_scale")
+    use_steps = db_info.get("steps")
+    use_sampler = db_info.get("sampler")
+    use_scheduler = db_info.get("scheduler")
 
     if include_learned_negatives:
         try:
-            rec = await recommend_params(character_slug, project_name=project_name)
+            rec = await recommend_params(
+                character_slug, project_name=project_name,
+                checkpoint_model=checkpoint,
+            )
             learned_neg = rec.get("learned_negatives", "")
             if learned_neg:
                 base_negative = f"{base_negative}, {learned_neg}"
                 logger.info(f"generate_batch: added learned negatives for {character_slug}")
+
+            # Apply recommended params when confidence >= medium
+            if rec.get("confidence") in ("medium", "high"):
+                if rec.get("cfg_scale") and not style_override:
+                    use_cfg = rec["cfg_scale"]
+                if rec.get("steps") and not style_override:
+                    use_steps = rec["steps"]
+                if rec.get("sampler") and not style_override:
+                    use_sampler = rec["sampler"]
+                if rec.get("scheduler") and not style_override:
+                    use_scheduler = rec["scheduler"]
+                logger.info(
+                    f"generate_batch: applying learned params for {character_slug} "
+                    f"(confidence={rec['confidence']}, cfg={use_cfg}, steps={use_steps})"
+                )
         except Exception:
             pass
 
@@ -159,10 +223,10 @@ async def generate_batch(
     if char_neg:
         base_negative = f"{base_negative}, {char_neg}"
 
-    # Sampler normalization
-    norm_sampler, norm_scheduler = normalize_sampler(
-        db_info.get("sampler"), db_info.get("scheduler")
-    )
+    # Sampler normalization — cascade: recommend_params > DB > profile defaults
+    use_cfg = use_cfg or profile.get("default_cfg") or 7.0
+    use_steps = use_steps or profile.get("default_steps") or 25
+    norm_sampler, norm_scheduler = normalize_sampler(use_sampler, use_scheduler)
 
     # Prepare pose pool
     if pose_variation:
@@ -181,28 +245,25 @@ async def generate_batch(
     for i in range(count):
         pose = poses[i] if i < len(poses) else random.choice(POSE_VARIATIONS)
 
-        # Build full prompt: style_preamble + positive_template + design_prompt + pose + solo
-        prompt_parts = []
-        if not prompt_override:
-            style_preamble = db_info.get("style_preamble")
-            if style_preamble:
-                prompt_parts.append(style_preamble)
-            positive_template = db_info.get("positive_prompt_template")
-            if positive_template:
-                prompt_parts.append(positive_template)
-        prompt_parts.append(design_prompt)
-        if pose:
-            prompt_parts.append(pose)
-        prompt_parts.append("solo, 1person, single character, white background, simple background")
-        full_prompt = ", ".join(prompt_parts)
+        # Build full prompt: model-aware translation
+        if prompt_override:
+            # Manual override: still add solo/background but skip translation
+            full_prompt = f"{prompt_override}, {pose}, {profile['solo_suffix']}, {profile['background_suffix']}" if pose else f"{prompt_override}, {profile['solo_suffix']}, {profile['background_suffix']}"
+        else:
+            full_prompt = translate_prompt(
+                design_prompt=design_prompt,
+                appearance_data=db_info.get("appearance_data"),
+                profile=profile,
+                pose=pose,
+            )
 
         use_seed = (seed + i) if seed is not None else None
 
         workflow = build_comfyui_workflow(
             design_prompt=full_prompt,
             checkpoint_model=checkpoint,
-            cfg_scale=db_info.get("cfg_scale") or 7.0,
-            steps=db_info.get("steps") or 25,
+            cfg_scale=use_cfg,
+            steps=use_steps,
             sampler=norm_sampler,
             scheduler=norm_scheduler,
             width=db_info.get("width") or 512,
@@ -231,8 +292,8 @@ async def generate_batch(
             prompt=full_prompt,
             negative_prompt=base_negative,
             seed=actual_seed,
-            cfg_scale=db_info.get("cfg_scale"),
-            steps=db_info.get("steps"),
+            cfg_scale=use_cfg,
+            steps=use_steps,
             sampler=norm_sampler,
             scheduler=norm_scheduler,
             width=db_info.get("width"),
@@ -282,8 +343,9 @@ async def generate_batch(
                 "full_prompt": job["full_prompt"],
                 "negative_prompt": job["negative_prompt"],
                 "checkpoint_model": checkpoint,
-                "cfg_scale": db_info.get("cfg_scale"),
-                "steps": db_info.get("steps"),
+                "model_profile": profile["style_label"],
+                "cfg_scale": use_cfg,
+                "steps": use_steps,
                 "sampler": norm_sampler,
                 "scheduler": norm_scheduler,
                 "width": db_info.get("width"),

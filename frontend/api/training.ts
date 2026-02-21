@@ -349,8 +349,10 @@ export const trainingApi = {
   // --- Library ---
 
   async getLibrary(): Promise<{
-    images: Array<{ slug: string; characterName: string; name: string }>
-    characters: Array<{ slug: string; name: string; approved: number }>
+    images: Array<{ slug: string; characterName: string; name: string; project_name: string; checkpoint_model: string }>
+    characters: Array<{ slug: string; name: string; approved: number; project_name: string; checkpoint_model: string }>
+    projects: string[]
+    models: string[]
   }> {
     return request('/library')
   },

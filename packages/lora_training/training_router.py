@@ -136,7 +136,8 @@ async def generate_variant(character_slug: str, image_name: str, body: VariantRe
 @training_router.post("/regenerate/{character_slug}")
 async def regenerate_character(character_slug: str, count: int = 1,
                                seed: Optional[int] = None,
-                               prompt_override: Optional[str] = None):
+                               prompt_override: Optional[str] = None,
+                               style_override: Optional[str] = None):
     """Manually trigger image regeneration for a character."""
     import asyncio
     from packages.core.generation import generate_batch
@@ -152,11 +153,14 @@ async def regenerate_character(character_slug: str, count: int = 1,
             count=count,
             seed=seed,
             prompt_override=prompt_override,
+            style_override=style_override,
         )
     )
     msg = f"Regeneration started for {character_slug} ({count} images)"
     if seed is not None:
         msg += f" with seed={seed}"
+    if style_override:
+        msg += f" with style={style_override}"
     logger.info(msg)
     return {"message": msg}
 
@@ -209,8 +213,24 @@ async def start_training(training: TrainingRequest):
     if not gpu_ready:
         raise HTTPException(status_code=503, detail=f"GPU not available: {gpu_msg}")
 
+    # Auto-detect architecture from model profile
+    from packages.core.model_profiles import get_model_profile
+    _profile = get_model_profile(checkpoint_name)
+    is_sdxl = _profile["architecture"] == "sdxl"
+    model_type = _profile["architecture"]
+
+    # Set architecture-appropriate defaults
+    if is_sdxl:
+        resolution = training.resolution if training.resolution != 512 else 1024
+        lora_rank = training.lora_rank or 64
+        lora_suffix = "_xl_lora"
+    else:
+        resolution = training.resolution
+        lora_rank = training.lora_rank or 32
+        lora_suffix = "_lora"
+
     job_id = f"train_{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    output_path = Path("/opt/ComfyUI/models/loras") / f"{safe_name}_lora.safetensors"
+    output_path = Path("/opt/ComfyUI/models/loras") / f"{safe_name}{lora_suffix}.safetensors"
 
     job = {
         "job_id": job_id,
@@ -220,7 +240,9 @@ async def start_training(training: TrainingRequest):
         "approved_images": approved_count,
         "epochs": training.epochs,
         "learning_rate": training.learning_rate,
-        "resolution": training.resolution,
+        "resolution": resolution,
+        "lora_rank": lora_rank,
+        "model_type": model_type,
         "checkpoint": checkpoint_name,
         "output_path": str(output_path),
         "created_at": datetime.now().isoformat(),
@@ -267,7 +289,9 @@ async def start_training(training: TrainingRequest):
         f"--output={output_path}",
         f"--epochs={training.epochs}",
         f"--learning-rate={training.learning_rate}",
-        f"--resolution={training.resolution}",
+        f"--resolution={resolution}",
+        f"--lora-rank={lora_rank}",
+        f"--model-type={model_type}",
     ]
 
     log_fh = open(log_file, "w")
@@ -286,12 +310,18 @@ async def start_training(training: TrainingRequest):
             break
     save_training_jobs(jobs)
 
-    logger.info(f"Training launched: {job_id} (pid={proc.pid}) for {training.character_name} ({approved_count} images)")
+    logger.info(
+        f"Training launched: {job_id} (pid={proc.pid}) for {training.character_name} "
+        f"({approved_count} images, {model_type}, rank={lora_rank}, res={resolution})"
+    )
     return {
         "message": "Training job started",
         "job_id": job_id,
         "approved_images": approved_count,
         "checkpoint": checkpoint_name,
+        "model_type": model_type,
+        "lora_rank": lora_rank,
+        "resolution": resolution,
         "output": str(output_path),
         "log_file": str(log_file),
         "gpu": gpu_msg,
@@ -456,13 +486,17 @@ async def list_trained_loras():
             job_by_path[job["output_path"]] = job
 
     if lora_dir.exists():
+        # Match both SD1.5 (*_lora.safetensors) and SDXL (*_xl_lora.safetensors)
         for f in sorted(lora_dir.glob("*_lora.safetensors")):
             stat = f.stat()
-            slug = f.stem.replace("_lora", "")
+            is_xl = f.stem.endswith("_xl_lora")
+            slug = f.stem.replace("_xl_lora", "") if is_xl else f.stem.replace("_lora", "")
+            architecture = "sdxl" if is_xl else "sd15"
             related_job = job_by_path.get(str(f))
             loras.append({
                 "filename": f.name,
                 "slug": slug,
+                "architecture": architecture,
                 "path": str(f),
                 "size_mb": round(stat.st_size / (1024 * 1024), 1),
                 "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),

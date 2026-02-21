@@ -5,8 +5,25 @@ import logging
 from pathlib import Path
 
 from packages.core.config import COMFYUI_URL, COMFYUI_OUTPUT_DIR, BASE_PATH
+from packages.core.model_profiles import get_model_profile
 
 logger = logging.getLogger(__name__)
+
+
+def _find_lora(character_slug: str, checkpoint_model: str) -> Path | None:
+    """Find the architecture-matched LoRA for a character.
+
+    SDXL checkpoints use *_xl_lora.safetensors, SD1.5 uses *_lora.safetensors.
+    Returns None if no matching LoRA exists (never cross-architecture).
+    """
+    lora_dir = Path("/opt/ComfyUI/models/loras")
+    profile = get_model_profile(checkpoint_model)
+    if profile["architecture"] == "sdxl":
+        xl_path = lora_dir / f"{character_slug}_xl_lora.safetensors"
+        return xl_path if xl_path.exists() else None
+    else:
+        sd_path = lora_dir / f"{character_slug}_lora.safetensors"
+        return sd_path if sd_path.exists() else None
 
 
 def build_comfyui_workflow(
@@ -76,9 +93,9 @@ def build_comfyui_workflow(
     ts = int(_time.time())
     prefix = f"lora_{character_slug}_{ts}"
 
-    # Inject LoraLoader if a trained LoRA exists for this character
-    lora_path = Path("/opt/ComfyUI/models/loras") / f"{character_slug}_lora.safetensors"
-    if lora_path.exists():
+    # Inject LoraLoader if an architecture-matched LoRA exists for this character
+    lora_path = _find_lora(character_slug, checkpoint_model)
+    if lora_path is not None:
         workflow["10"] = {
             "inputs": {
                 "lora_name": lora_path.name,
@@ -97,11 +114,13 @@ def build_comfyui_workflow(
         workflow["7"]["inputs"]["clip"] = ["10", 1]
         logger.info(f"LoRA injected: {lora_path.name} for {character_slug}")
 
-    # Inject IP-Adapter if reference images exist for this character
+    # Inject IP-Adapter if reference images exist and the model profile has an adapter
+    profile = get_model_profile(checkpoint_model)
     ref_dir = BASE_PATH / character_slug / "reference_images"
-    ipadapter_model = Path("/opt/ComfyUI/models/ipadapter/ip-adapter-plus_sd15.safetensors")
+    ip_adapter_name = profile.get("ip_adapter_model")
+    ipadapter_model = Path(f"/opt/ComfyUI/models/ipadapter/{ip_adapter_name}") if ip_adapter_name else None
     clip_vision_model = Path("/opt/ComfyUI/models/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors")
-    if ref_dir.exists() and ipadapter_model.exists() and clip_vision_model.exists():
+    if ipadapter_model and ipadapter_model.exists() and ref_dir.exists() and clip_vision_model.exists():
         ref_images = sorted(ref_dir.glob("*.png")) + sorted(ref_dir.glob("*.jpg"))
         if ref_images:
             import random as _rand
@@ -114,7 +133,7 @@ def build_comfyui_workflow(
                 shutil.copy2(ref_img, ref_dest)
 
             # Determine which node provides the model (LoRA or checkpoint)
-            model_source = ["10", 0] if lora_path.exists() else ["4", 0]
+            model_source = ["10", 0] if lora_path is not None else ["4", 0]
 
             # Load CLIP Vision
             workflow["20"] = {

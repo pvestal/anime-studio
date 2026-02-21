@@ -26,11 +26,13 @@ from .framepack import (
     router as framepack_router,
     MOTION_PRESETS,
 )
+from .ltx_video import router as ltx_router
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 router.include_router(framepack_router)
+router.include_router(ltx_router)
 
 # --- Scene Builder: CRUD Endpoints ---
 
@@ -333,6 +335,112 @@ async def remove_scene_audio(scene_id: str):
             WHERE id = $1
         """, sid)
         return {"message": "Audio track removed from scene", "scene_id": scene_id}
+    finally:
+        await conn.close()
+
+
+@router.post("/scenes/{scene_id}/generate-music")
+async def generate_scene_music(scene_id: str):
+    """Generate AI music for a scene based on its mood via ACE-Step.
+
+    Reads the scene's mood and target_duration from DB, builds a music
+    generation caption, submits to ACE-Step, and returns a task_id for polling.
+    """
+    import urllib.request as _req
+    sid = uuid.UUID(scene_id)
+    conn = await connect_direct()
+    try:
+        scene = await conn.fetchrow(
+            "SELECT mood, target_duration_seconds, title FROM scenes WHERE id = $1", sid)
+        if not scene:
+            raise HTTPException(status_code=404, detail="Scene not found")
+
+        mood = (scene["mood"] or "ambient").split(",")[0].strip().lower()
+        duration = scene["target_duration_seconds"] or 30
+
+        # Import mood mapping from audio router
+        from packages.audio_composition.router import MOOD_PROMPTS, _build_music_caption
+        caption = _build_music_caption(mood, "orchestral anime soundtrack")
+
+        payload = json.dumps({
+            "prompt": caption,
+            "lyrics": "",
+            "duration": float(duration),
+            "format": "wav",
+            "instrumental": True,
+            "infer_steps": 60,
+            "guidance_scale": 15.0,
+        }).encode()
+        req = _req.Request(
+            "http://localhost:8440/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = _req.urlopen(req, timeout=30)
+        result = json.loads(resp.read())
+        task_id = result.get("task_id")
+
+        # Store task_id for later path resolution
+        await conn.execute(
+            "UPDATE scenes SET generated_music_task_id = $2 WHERE id = $1",
+            sid, task_id,
+        )
+
+        return {
+            "task_id": task_id,
+            "scene_id": scene_id,
+            "scene_title": scene["title"],
+            "mood": mood,
+            "caption": caption,
+            "duration": duration,
+            "status": "pending",
+            "poll_url": f"/api/audio/generate-music/{task_id}/status",
+        }
+    except urllib.error.URLError as e:
+        raise HTTPException(status_code=503, detail=f"ACE-Step unavailable: {e}")
+    finally:
+        await conn.close()
+
+
+@router.post("/scenes/{scene_id}/attach-music")
+async def attach_scene_music(scene_id: str, body: dict):
+    """Attach a generated or uploaded music file to a scene.
+
+    Accepts task_id (resolves from ACE-Step) or path (direct file path).
+    """
+    import urllib.request as _req
+    sid = uuid.UUID(scene_id)
+    conn = await connect_direct()
+    try:
+        music_path = body.get("path")
+
+        if not music_path and body.get("task_id"):
+            # Resolve from ACE-Step
+            try:
+                poll_req = _req.Request(f"http://localhost:8440/status/{body['task_id']}")
+                poll_resp = _req.urlopen(poll_req, timeout=10)
+                status = json.loads(poll_resp.read())
+                if status.get("status") == "completed" and status.get("output_path"):
+                    music_path = status["output_path"]
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"Cannot resolve ACE-Step task: {e}")
+
+        if not music_path or not Path(music_path).exists():
+            raise HTTPException(status_code=400, detail="No valid music path provided")
+
+        # Copy to music cache for durability
+        from .builder import MUSIC_CACHE
+        dest = MUSIC_CACHE / f"scene_{scene_id}_{Path(music_path).name}"
+        if not dest.exists():
+            import shutil
+            shutil.copy2(music_path, str(dest))
+
+        await conn.execute(
+            "UPDATE scenes SET generated_music_path = $2 WHERE id = $1",
+            sid, str(dest),
+        )
+
+        return {"scene_id": scene_id, "music_path": str(dest), "status": "attached"}
     finally:
         await conn.close()
 

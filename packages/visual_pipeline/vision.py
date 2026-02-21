@@ -82,21 +82,52 @@ _VISION_REVIEW_PROMPT = """You are evaluating an image for use in LoRA training 
 
 The character this image SHOULD contain: {character_name}
 Character description: {design_prompt}
-{feature_checklist}
+Expected gender: {expected_gender}
+{style_context}{feature_checklist}{common_errors_section}
 Look at the image carefully and answer these questions with HONEST scores from 0 to 10. Do NOT default to middle scores — a blurry crowd scene should score LOW, a crisp solo portrait should score HIGH.
 
 Questions:
 - character_match: How well does the visible character match the expected character? Check all key colors and features listed above. Wrong colors or missing key features = LOW score. (0=completely wrong character, 10=perfect match with correct colors and features)
 - is_human: Does this character have HUMAN features? Even in cartoon/CGI/3D style, check: Does it have smooth human-like skin (not scales, fur, or shell)? A human-shaped face with a human nose? Human body proportions (arms, legs, torso like a person)? If YES to these → answer true. A character is HUMAN even if it's a cute cartoon or Pixar-style 3D render. Only answer false if the character is clearly an ANIMAL, CREATURE, ROBOT, or OBJECT (has fur, scales, shell, beak, snout, wings, non-human body shape).
+- gender_match: Does the character's APPARENT GENDER match the expected gender ("{expected_gender}")? Check body shape, facial features, chest, jawline, and overall presentation. Answer true if it matches, false if it clearly does not. If expected gender is "unknown", always answer true.
 - solo: Is ONLY one character visible? Answer true or false. If you see 2+ characters, answer false.
 - clarity: Is the image sharp and clear? (0=very blurry/dark, 10=crystal clear)
 - completeness: What body portion is shown? Answer exactly one of: full, upper, face, partial
-- training_value: How useful is this specific image for training a LoRA model of this character? Wrong colors or species = 0. (0=useless, 10=perfect training image)
+- training_value: How useful is this specific image for training a LoRA model of this character? Wrong colors or species = 0. Wrong gender = 0. (0=useless, 10=perfect training image)
+- has_anatomical_defects: Does the image have obvious anatomical problems? Check for: extra fingers (more than 5 per hand), merged/fused limbs, distorted face (melted features, asymmetric eyes, misshapen mouth), extra limbs, missing limbs that should be visible. Answer true if ANY defect is present, false if anatomy looks correct.
+- common_error_hits: List which known problems (from the KNOWN PROBLEMS section above, if any) are present in this image. Use an empty list if none or no known problems were listed.
 - caption: Write one sentence describing what you see — the character, their pose, expression, and background.
-- issues: List specific problems (wrong colors, wrong species, missing features, etc). If none, use an empty list.
+- issues: List specific problems (wrong colors, wrong species, wrong gender, extra fingers, distorted face, missing features, etc). If none, use an empty list.
 
 Return ONLY valid JSON:
-{{"character_match": <0-10>, "is_human": <true/false>, "solo": <true/false>, "clarity": <0-10>, "completeness": "<full|upper|face|partial>", "training_value": <0-10>, "caption": "<sentence>", "issues": [<strings>]}}"""
+{{"character_match": <0-10>, "is_human": <true/false>, "gender_match": <true/false>, "solo": <true/false>, "clarity": <0-10>, "completeness": "<full|upper|face|partial>", "training_value": <0-10>, "has_anatomical_defects": <true/false>, "common_error_hits": [<strings>], "caption": "<sentence>", "issues": [<strings>]}}"""
+
+
+def _extract_gender(design_prompt: str) -> str:
+    """Extract expected gender from design_prompt prefix tag or keywords.
+
+    Design prompts typically start with '1man', '1woman', '1creature', etc.
+    Falls back to keyword scanning if no prefix tag found.
+    Returns 'male', 'female', 'non-human', or 'unknown'.
+    """
+    if not design_prompt:
+        return "unknown"
+    prompt_lower = design_prompt.lower().strip()
+    # Check prefix tags first (most reliable)
+    if prompt_lower.startswith(("1man", "1boy", "1male")):
+        return "male"
+    if prompt_lower.startswith(("1woman", "1girl", "1female")):
+        return "female"
+    if prompt_lower.startswith("1creature"):
+        return "non-human"
+    # Keyword fallback
+    gender_male = any(w in prompt_lower for w in (" man,", " man ", " male,", " male ", " boy,", " boy "))
+    gender_female = any(w in prompt_lower for w in (" woman,", " woman ", " female,", " female ", " girl,", " girl "))
+    if gender_male and not gender_female:
+        return "male"
+    if gender_female and not gender_male:
+        return "female"
+    return "unknown"
 
 
 def build_feature_checklist(appearance_data: dict) -> str:
@@ -230,16 +261,42 @@ def _verify_species(image_path: Path, species: str, appearance_data: dict) -> bo
 
 
 def vision_review_image(image_path: Path, character_name: str, design_prompt: str,
-                        model: str | None = None, appearance_data: dict | None = None) -> dict:
+                        model: str | None = None, appearance_data: dict | None = None,
+                        model_profile: dict | None = None) -> dict:
     """Assess an image for LoRA training quality using the configured vision model."""
     import base64
     import urllib.request as _ur
 
+    expected_gender = _extract_gender(design_prompt)
     feature_checklist = build_feature_checklist(appearance_data or {})
+
+    # Build model-aware style context
+    style_context = ""
+    if model_profile:
+        style_context = (
+            f"\nIMPORTANT: This image was generated by a {model_profile.get('style_label', 'unknown')} model.\n"
+            f"Expected visual style: {model_profile.get('vision_style_hint', 'generated image')}.\n"
+            f"Do NOT penalize for matching this style (e.g., anime eyes are correct for an anime model, "
+            f"Pixar-style rendering is correct for a 3D cartoon model).\n"
+        )
+
+    # Build common_errors hard check section
+    common_errors_section = ""
+    common_errors = (appearance_data or {}).get("common_errors", [])
+    if common_errors:
+        err_lines = "\n".join(f"- {e}" for e in common_errors)
+        common_errors_section = (
+            f"\nCheck for these KNOWN PROBLEMS with this character:\n{err_lines}\n"
+            f"For each: does this image show this problem? If YES, it is a critical issue.\n"
+        )
+
     prompt = _VISION_REVIEW_PROMPT.format(
         character_name=character_name,
         design_prompt=design_prompt or "no design prompt available",
+        expected_gender=expected_gender,
         feature_checklist=feature_checklist,
+        style_context=style_context,
+        common_errors_section=common_errors_section,
     )
     img_data = base64.b64encode(image_path.read_bytes()).decode()
     payload = json.dumps({
@@ -274,10 +331,13 @@ def vision_review_image(image_path: Path, character_name: str, design_prompt: st
     # Ensure expected keys exist with defaults
     review.setdefault("character_match", 5)
     review.setdefault("is_human", None)
+    review.setdefault("gender_match", True)
     review.setdefault("solo", True)
     review.setdefault("clarity", 5)
     review.setdefault("completeness", "unknown")
     review.setdefault("training_value", 5)
+    review.setdefault("has_anatomical_defects", False)
+    review.setdefault("common_error_hits", [])
     review.setdefault("caption", "")
     review.setdefault("issues", [])
 
@@ -305,6 +365,33 @@ def vision_review_image(image_path: Path, character_name: str, design_prompt: st
                     f"WRONG SPECIES: expected {species}, image shows wrong species"
                 ]
 
+    # Hard gender gate: wrong gender → zero out scores
+    if expected_gender in ("male", "female") and not review.get("gender_match", True):
+        logger.info(f"Gender rejection for {image_path.name}: "
+                    f"expected '{expected_gender}', vision says wrong gender")
+        review["character_match"] = 0
+        review["training_value"] = 0
+        review["issues"] = list(review["issues"]) + [
+            f"WRONG GENDER: expected {expected_gender}"
+        ]
+
+    # Hard anatomy gate: visible defects → tank training_value
+    if review.get("has_anatomical_defects", False):
+        logger.info(f"Anatomy rejection for {image_path.name}: defects detected")
+        review["training_value"] = min(review["training_value"], 2)
+        review["issues"] = list(review["issues"]) + [
+            "ANATOMICAL DEFECTS: extra/merged fingers, distorted face, or malformed limbs"
+        ]
+
+    # Hard common_error gate: known problems hit → cap training_value
+    error_hits = review.get("common_error_hits", [])
+    if error_hits:
+        logger.info(f"Common error hits for {image_path.name}: {error_hits}")
+        review["training_value"] = min(review["training_value"], 2)
+        review["issues"] = list(review["issues"]) + [
+            f"KNOWN PROBLEM: {hit}" for hit in error_hits
+        ]
+
     return review
 
 
@@ -321,10 +408,17 @@ VISION_ISSUE_TO_REJECTION = {
     "wrong character": "wrong_appearance",
     "not recognizable": "wrong_appearance",
     "wrong species": "wrong_appearance",
+    "wrong gender": "wrong_appearance",
     "wrong style": "wrong_style",
     "inconsistent": "wrong_style",
     "awkward pose": "wrong_pose",
     "unnatural": "wrong_pose",
+    "extra fingers": "bad_quality",
+    "extra limbs": "bad_quality",
+    "merged": "bad_quality",
+    "fused": "bad_quality",
+    "anatomical defects": "bad_quality",
+    "malformed": "bad_quality",
 }
 
 
@@ -340,6 +434,12 @@ def vision_issues_to_categories(review: dict) -> list[str]:
     # Low character match -> wrong_appearance
     if review.get("character_match", 10) < 4:
         cats.add("wrong_appearance")
+    # Wrong gender -> wrong_appearance
+    if not review.get("gender_match", True):
+        cats.add("wrong_appearance")
+    # Anatomical defects -> bad_quality
+    if review.get("has_anatomical_defects", False):
+        cats.add("bad_quality")
     # Scan issue strings for keyword matches
     for issue in review.get("issues", []):
         issue_lower = issue.lower()

@@ -175,12 +175,30 @@ def build_framepack_workflow(
     }
     nid += 1
 
+    # Node 6b: Downscale to safe resolution for RTX 3060 (max 544x704)
+    # Pony XL images are 832x1216 which OOMs at sampling — must resize first
+    max_w, max_h = 544, 704
+    resize_node = str(nid)
+    workflow[resize_node] = {
+        "class_type": "ImageScale",
+        "inputs": {
+            "image": [load_img_node, 0],
+            "width": max_w,
+            "height": max_h,
+            "upscale_method": "lanczos",
+            "crop": "center",
+        },
+    }
+    nid += 1
+    # Downstream nodes use the resized image instead of the raw load
+    img_source_node = resize_node
+
     # Node 7: VAEEncode source image -> start_latent
     vae_enc_node = str(nid)
     workflow[vae_enc_node] = {
         "class_type": "VAEEncode",
         "inputs": {
-            "pixels": [load_img_node, 0],
+            "pixels": [img_source_node, 0],
             "vae": [vae_node, 0],
         },
     }
@@ -200,7 +218,7 @@ def build_framepack_workflow(
         "class_type": "CLIPVisionEncode",
         "inputs": {
             "clip_vision": [clip_vis_load_node, 0],
-            "image": [load_img_node, 0],
+            "image": [img_source_node, 0],
             "crop": "center",
         },
     }

@@ -208,17 +208,29 @@ async def get_library():
             continue
 
         char_name = db_info["name"]
-        char_counts[slug] = {"slug": slug, "name": char_name, "approved": len(approved_names)}
+        project_name = db_info.get("project_name", "Unknown")
+        checkpoint_model = db_info.get("checkpoint_model", "unknown")
+        char_counts[slug] = {
+            "slug": slug, "name": char_name, "approved": len(approved_names),
+            "project_name": project_name, "checkpoint_model": checkpoint_model,
+        }
 
         for name in sorted(approved_names):
             images.append({
                 "slug": slug,
                 "characterName": char_name,
                 "name": name,
+                "project_name": project_name,
+                "checkpoint_model": checkpoint_model,
             })
 
     characters = sorted(char_counts.values(), key=lambda c: c["name"])
-    return {"images": images, "characters": characters}
+
+    # Deduplicated filter lists for frontend pills
+    projects = sorted({c["project_name"] for c in char_counts.values()})
+    models = sorted({c["checkpoint_model"] for c in char_counts.values() if c["checkpoint_model"]})
+
+    return {"images": images, "characters": characters, "projects": projects, "models": models}
 
 
 # ===================================================================

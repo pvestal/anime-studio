@@ -16,6 +16,8 @@ from packages.core.audit import log_generation, log_decision, log_rejection, log
 from packages.core.events import event_bus, GENERATION_SUBMITTED, IMAGE_REJECTED, IMAGE_APPROVED, REGENERATION_QUEUED
 from packages.core.model_selector import recommend_params
 
+from packages.core.model_profiles import get_model_profile, adjust_thresholds
+
 from .comfyui import build_comfyui_workflow, submit_comfyui_workflow, get_comfyui_progress
 from .vision import vision_review_image, vision_issues_to_categories
 
@@ -31,7 +33,23 @@ async def generate_for_character(character_slug: str, body: GenerateRequest):
     if not db_info:
         raise HTTPException(status_code=404, detail=f"Character '{character_slug}' not found")
 
-    checkpoint = db_info.get("checkpoint_model")
+    # Use style_override if provided, otherwise use project default
+    style_info = db_info
+    if body.style_override:
+        from packages.core.db import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT checkpoint_model, positive_prompt_template, negative_prompt_template, "
+                "cfg_scale, sampler, steps, width, height, scheduler "
+                "FROM generation_styles WHERE style_name = $1", body.style_override
+            )
+            if not row:
+                raise HTTPException(status_code=400, detail=f"Style '{body.style_override}' not found")
+            style_info = {**db_info, **dict(row)}
+            logger.info(f"Using style override '{body.style_override}' for {character_slug}")
+
+    checkpoint = style_info.get("checkpoint_model")
     if not checkpoint:
         raise HTTPException(status_code=400, detail="No checkpoint model configured for this character's project")
 
@@ -39,19 +57,28 @@ async def generate_for_character(character_slug: str, body: GenerateRequest):
     if not prompt:
         raise HTTPException(status_code=400, detail="No design_prompt and no prompt_override provided")
 
-    # Prepend style_preamble from world_settings (if set and no override)
-    style_preamble = db_info.get("style_preamble")
-    if style_preamble and not body.prompt_override:
+    # Prepend positive_prompt_template from style (quality tags)
+    style_preamble = style_info.get("positive_prompt_template") or db_info.get("style_preamble")
+    if style_preamble and body.prompt_override:
+        # For overrides, prepend the style's quality tags
+        prompt = f"{style_preamble}, {prompt}"
+    elif style_preamble and not body.prompt_override:
         prompt = f"{style_preamble}, {prompt}"
 
     norm_sampler, norm_scheduler = normalize_sampler(
-        db_info.get("sampler"), db_info.get("scheduler")
+        style_info.get("sampler"), style_info.get("scheduler")
     )
 
+    # Use style's negative template if no explicit negative given
+    style_negative = style_info.get("negative_prompt_template", "")
+    base_negative = body.negative_prompt or style_negative or "worst quality, low quality, blurry, deformed"
+
     # Auto-enhance negative prompt with learned rejection patterns from DB
-    base_negative = body.negative_prompt or "worst quality, low quality, blurry, deformed"
     try:
-        rec = await recommend_params(character_slug, project_name=db_info.get("project_name"))
+        rec = await recommend_params(
+            character_slug, project_name=db_info.get("project_name"),
+            checkpoint_model=checkpoint,
+        )
         learned_neg = rec.get("learned_negatives", "")
         if learned_neg:
             base_negative = f"{base_negative}, {learned_neg}"
@@ -62,12 +89,12 @@ async def generate_for_character(character_slug: str, body: GenerateRequest):
     workflow = build_comfyui_workflow(
         design_prompt=prompt,
         checkpoint_model=checkpoint,
-        cfg_scale=db_info.get("cfg_scale") or 7.0,
-        steps=db_info.get("steps") or 25,
+        cfg_scale=style_info.get("cfg_scale") or 7.0,
+        steps=style_info.get("steps") or 25,
         sampler=norm_sampler,
         scheduler=norm_scheduler,
-        width=db_info.get("width") or 512,
-        height=db_info.get("height") or 768,
+        width=style_info.get("width") or 512,
+        height=style_info.get("height") or 768,
         negative_prompt=base_negative,
         generation_type=body.generation_type,
         seed=body.seed,
@@ -191,6 +218,19 @@ async def vision_review(body: VisionReviewRequest):
 
     for slug in target_slugs:
         db_info = char_map[slug]
+        checkpoint = db_info.get("checkpoint_model", "unknown")
+
+        # Get model profile for model-aware vision review
+        profile = get_model_profile(
+            checkpoint,
+            db_architecture=db_info.get("model_architecture"),
+            db_prompt_format=db_info.get("prompt_format"),
+        )
+        # Adjust thresholds based on model type
+        effective_reject, effective_approve = adjust_thresholds(
+            profile, body.auto_reject_threshold, body.auto_approve_threshold
+        )
+
         char_dir = BASE_PATH / slug
         images_path = char_dir / "images"
         if not images_path.exists():
@@ -230,6 +270,7 @@ async def vision_review(body: VisionReviewRequest):
                     design_prompt=db_info.get("design_prompt", ""),
                     model=body.model,
                     appearance_data=db_info.get("appearance_data"),
+                    model_profile=profile,
                 )
             except Exception as e:
                 logger.warning(f"Vision review failed for {img_path.name}: {e}")
@@ -268,7 +309,7 @@ async def vision_review(body: VisionReviewRequest):
             # Update .txt caption if requested or if auto-approving (good caption for training)
             if review.get("caption"):
                 caption_path = img_path.with_suffix(".txt")
-                if body.update_captions or quality_score >= body.auto_approve_threshold:
+                if body.update_captions or quality_score >= effective_approve:
                     caption_path.write_text(review["caption"])
 
             # --- Auto-triage decision ---
@@ -281,7 +322,7 @@ async def vision_review(body: VisionReviewRequest):
                     action = "flagged_multi"  # signal for bulk-reject later
                 logger.info(f"Scored approved {slug}/{img_path.name} (Q:{quality_score:.0%}, solo={review.get('solo')})")
 
-            elif quality_score < body.auto_reject_threshold:
+            elif quality_score < effective_reject:
                 # AUTO-REJECT: bad image -> reject, record feedback, flag for regen
                 action = "rejected"
                 approval_status[img_path.name] = "rejected"
@@ -304,24 +345,27 @@ async def vision_review(body: VisionReviewRequest):
                     categories=categories, feedback_text=feedback_str,
                     negative_additions=neg_terms, quality_score=quality_score,
                     project_name=db_info.get("project_name"), source="vision",
+                    checkpoint_model=checkpoint,
                 )
                 await log_decision(
                     decision_type="auto_reject", character_slug=slug,
                     project_name=db_info.get("project_name"),
-                    input_context={"quality_score": quality_score, "threshold": body.auto_reject_threshold,
+                    input_context={"quality_score": quality_score, "threshold": effective_reject,
+                                   "model_profile": profile["style_label"],
                                    "issues": review.get("issues", [])[:5]},
                     decision_made="rejected", confidence_score=round(1.0 - quality_score, 2),
-                    reasoning=f"Quality {quality_score:.0%} below {body.auto_reject_threshold:.0%}. Issues: {', '.join(categories)}",
+                    reasoning=f"Quality {quality_score:.0%} below {effective_reject:.0%}. Issues: {', '.join(categories)}",
                 )
                 await event_bus.emit(IMAGE_REJECTED, {
                     "character_slug": slug, "image_name": img_path.name,
                     "quality_score": quality_score, "categories": categories,
                     "project_name": db_info.get("project_name"),
+                    "checkpoint_model": checkpoint,
                 })
 
-                logger.info(f"Auto-rejected {slug}/{img_path.name} (Q:{quality_score:.0%}, issues: {categories})")
+                logger.info(f"Auto-rejected {slug}/{img_path.name} (Q:{quality_score:.0%}, threshold:{effective_reject:.0%}, issues: {categories})")
 
-            elif quality_score >= body.auto_approve_threshold and review.get("solo", False):
+            elif quality_score >= effective_approve and review.get("solo", False):
                 # AUTO-APPROVE: high quality + solo character -> approve
                 action = "approved"
                 approval_status[img_path.name] = "approved"
@@ -333,19 +377,22 @@ async def vision_review(body: VisionReviewRequest):
                     character_slug=slug, image_name=img_path.name,
                     quality_score=quality_score, auto_approved=True,
                     vision_review=review, project_name=db_info.get("project_name"),
+                    checkpoint_model=checkpoint,
                 )
                 await log_decision(
                     decision_type="auto_approve", character_slug=slug,
                     project_name=db_info.get("project_name"),
                     input_context={"quality_score": quality_score, "solo": True,
-                                   "threshold": body.auto_approve_threshold},
+                                   "threshold": effective_approve,
+                                   "model_profile": profile["style_label"]},
                     decision_made="approved", confidence_score=quality_score,
-                    reasoning=f"Quality {quality_score:.0%} above {body.auto_approve_threshold:.0%}, solo confirmed",
+                    reasoning=f"Quality {quality_score:.0%} above {effective_approve:.0%}, solo confirmed",
                 )
                 await event_bus.emit(IMAGE_APPROVED, {
                     "character_slug": slug, "image_name": img_path.name,
                     "quality_score": quality_score,
                     "project_name": db_info.get("project_name"),
+                    "checkpoint_model": checkpoint,
                 })
 
                 logger.info(f"Auto-approved {slug}/{img_path.name} (Q:{quality_score:.0%})")

@@ -26,10 +26,11 @@ class LoRADataset(Dataset):
         resolution: Target image size (square crop)
     """
 
-    def __init__(self, dataset_dir: str | Path, tokenizer, resolution: int = 512):
+    def __init__(self, dataset_dir: str | Path, tokenizer, resolution: int = 512, tokenizer_2=None):
         self.dataset_dir = Path(dataset_dir)
         self.images_dir = self.dataset_dir / "images"
         self.tokenizer = tokenizer
+        self.tokenizer_2 = tokenizer_2
         self.resolution = resolution
 
         # Load approval status — only train on approved images
@@ -89,7 +90,20 @@ class LoRADataset(Dataset):
             return_tensors="pt",
         )
 
-        return {
+        result = {
             "pixel_values": pixel_values,
             "input_ids": tokens.input_ids.squeeze(0),
         }
+
+        # SDXL dual text encoder: return tokens from both CLIP-L and OpenCLIP-G
+        if self.tokenizer_2 is not None:
+            tokens_2 = self.tokenizer_2(
+                caption,
+                padding="max_length",
+                max_length=self.tokenizer_2.model_max_length,
+                truncation=True,
+                return_tensors="pt",
+            )
+            result["input_ids_2"] = tokens_2.input_ids.squeeze(0)
+
+        return result

@@ -18,17 +18,53 @@
       </div>
     </div>
 
+    <!-- Project filter pills -->
+    <div v-if="projectList.length > 1" style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; align-items: center;">
+      <span class="filter-label">Project</span>
+      <button
+        class="chip"
+        :class="{ active: !selectedProject }"
+        @click="selectedProject = ''"
+      >
+        All
+      </button>
+      <button
+        v-for="proj in projectList"
+        :key="proj"
+        class="chip"
+        :class="{ active: selectedProject === proj }"
+        @click="selectedProject = proj"
+      >
+        {{ proj }}
+      </button>
+    </div>
+
+    <!-- Model filter pills -->
+    <div v-if="modelList.length > 1" style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; align-items: center;">
+      <span class="filter-label">Model</span>
+      <button
+        v-for="model in modelList"
+        :key="model"
+        class="chip chip-small"
+        :class="{ active: selectedModel === model }"
+        @click="selectedModel = selectedModel === model ? '' : model"
+      >
+        {{ modelShortName(model) }}
+      </button>
+    </div>
+
     <!-- Character filter chips -->
-    <div v-if="characterList.length > 1" style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px;">
+    <div v-if="filteredCharacterList.length > 1" style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; align-items: center;">
+      <span class="filter-label">Character</span>
       <button
         class="chip"
         :class="{ active: !selectedSlug }"
         @click="selectedSlug = ''"
       >
-        All ({{ totalApproved }})
+        All ({{ filteredApproved }})
       </button>
       <button
-        v-for="ch in characterList"
+        v-for="ch in filteredCharacterList"
         :key="ch.slug"
         class="chip"
         :class="{ active: selectedSlug === ch.slug }"
@@ -294,7 +330,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { api } from '@/api/client'
 import type { ImageMetadata } from '@/types'
 
@@ -304,18 +340,26 @@ interface LibraryImage {
   name: string
   seed: number | null
   qualityScore: number | null
+  project_name: string
+  checkpoint_model: string
 }
 
 interface CharacterEntry {
   slug: string
   name: string
   approved: number
+  project_name: string
+  checkpoint_model: string
 }
 
 const loading = ref(false)
 const selectedSlug = ref('')
+const selectedProject = ref('')
+const selectedModel = ref('')
 const allImages = ref<LibraryImage[]>([])
 const characterList = ref<CharacterEntry[]>([])
+const projectList = ref<string[]>([])
+const modelList = ref<string[]>([])
 const detailImage = ref<LibraryImage | null>(null)
 const detailMeta = ref<ImageMetadata | null>(null)
 const seedCopied = ref(false)
@@ -329,9 +373,40 @@ const rejecting = ref(false)
 
 const totalApproved = computed(() => characterList.value.reduce((s, c) => s + c.approved, 0))
 
+const filteredCharacterList = computed(() => {
+  let list = characterList.value
+  if (selectedProject.value) {
+    list = list.filter(c => c.project_name === selectedProject.value)
+  }
+  if (selectedModel.value) {
+    list = list.filter(c => c.checkpoint_model === selectedModel.value)
+  }
+  return list
+})
+
+const filteredApproved = computed(() => filteredCharacterList.value.reduce((s, c) => s + c.approved, 0))
+
 const displayImages = computed(() => {
-  if (!selectedSlug.value) return allImages.value
-  return allImages.value.filter(img => img.slug === selectedSlug.value)
+  let imgs = allImages.value
+  if (selectedProject.value) {
+    imgs = imgs.filter(img => img.project_name === selectedProject.value)
+  }
+  if (selectedModel.value) {
+    imgs = imgs.filter(img => img.checkpoint_model === selectedModel.value)
+  }
+  if (selectedSlug.value) {
+    imgs = imgs.filter(img => img.slug === selectedSlug.value)
+  }
+  return imgs
+})
+
+function modelShortName(model: string): string {
+  return model.replace('.safetensors', '').replace(/_/g, ' ')
+}
+
+// Reset character filter when project/model filter changes
+watch([selectedProject, selectedModel], () => {
+  selectedSlug.value = ''
 })
 
 onMounted(() => {
@@ -343,12 +418,16 @@ async function refresh() {
   try {
     const data = await api.getLibrary()
     characterList.value = data.characters
+    projectList.value = data.projects || []
+    modelList.value = data.models || []
     allImages.value = data.images.map(img => ({
       slug: img.slug,
       characterName: img.characterName,
       name: img.name,
       seed: null,
       qualityScore: null,
+      project_name: img.project_name || '',
+      checkpoint_model: img.checkpoint_model || '',
     }))
   } catch (err) {
     console.error('Failed to load library:', err)
@@ -601,6 +680,18 @@ async function setAsReference() {
   background: var(--accent-primary);
   border-color: var(--accent-primary);
   color: #fff;
+}
+.chip-small {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.filter-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-width: 60px;
 }
 
 .panel-overlay {

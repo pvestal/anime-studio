@@ -46,6 +46,7 @@ class TrainingRequest(BaseModel):
     epochs: Optional[int] = 20
     learning_rate: Optional[float] = 1e-4
     resolution: Optional[int] = 512
+    lora_rank: Optional[int] = None  # Auto-set by router: 64 for SDXL, 32 for SD1.5
 
 
 class DatasetStatus(BaseModel):
@@ -61,6 +62,7 @@ class GenerateRequest(BaseModel):
     prompt_override: Optional[str] = None
     negative_prompt: Optional[str] = None
     seed: Optional[int] = None
+    style_override: Optional[str] = None  # e.g. "pony_nsfw_xl" to override project default
 
 
 class FramePackRequest(BaseModel):
@@ -109,7 +111,7 @@ class VisionReviewRequest(BaseModel):
     update_captions: bool = False
     max_images: int = 50
     auto_reject_threshold: float = 0.4
-    auto_approve_threshold: float = 0.65
+    auto_approve_threshold: float = 0.8
     regenerate: bool = True
     model: Optional[str] = None  # override VISION_MODEL
     include_approved: bool = False
@@ -171,6 +173,7 @@ class StyleUpdate(BaseModel):
     height: Optional[int] = None
     positive_prompt_template: Optional[str] = None
     negative_prompt_template: Optional[str] = None
+    reason: Optional[str] = None
 
 
 class BulkRejectRequest(BaseModel):
@@ -207,6 +210,8 @@ class ShotCreateRequest(BaseModel):
     use_f1: bool = False
     dialogue_text: Optional[str] = None
     dialogue_character_slug: Optional[str] = None
+    transition_type: str = "dissolve"  # dissolve, fade, fadeblack, wipeleft, slideup, etc.
+    transition_duration: float = 0.3  # seconds of crossfade overlap
 
 
 class ShotUpdateRequest(BaseModel):
@@ -222,6 +227,8 @@ class ShotUpdateRequest(BaseModel):
     use_f1: Optional[bool] = None
     dialogue_text: Optional[str] = None
     dialogue_character_slug: Optional[str] = None
+    transition_type: Optional[str] = None
+    transition_duration: Optional[float] = None
 
 
 class SceneUpdateRequest(BaseModel):
@@ -310,3 +317,17 @@ class VoiceSceneDialogueRequest(BaseModel):
     description: Optional[str] = None
     characters: Optional[List[str]] = None
     pause_seconds: Optional[float] = 0.5
+
+
+# --- Music Generation Models ---
+
+class MusicGenerateRequest(BaseModel):
+    scene_id: Optional[str] = None
+    mood: str = "ambient"
+    genre: str = "orchestral"
+    duration: float = 30.0
+    instrumental: bool = True
+    bpm: Optional[int] = None
+    key: Optional[str] = None
+    seed: Optional[int] = None
+    caption: Optional[str] = None  # free-form override

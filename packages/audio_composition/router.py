@@ -1,10 +1,11 @@
-"""Audio composition — voice extraction, segment management, transcription."""
+"""Audio composition — voice extraction, segment management, music generation."""
 
 import json
 import logging
 import re
 import shutil
 import subprocess
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -13,9 +14,33 @@ from fastapi.responses import FileResponse
 
 from packages.core.config import BASE_PATH
 from packages.core.db import get_char_project_map
+from packages.core.models import MusicGenerateRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+ACE_STEP_URL = "http://localhost:8440"
+MUSIC_CACHE = BASE_PATH / "output" / "music_cache"
+MUSIC_CACHE.mkdir(parents=True, exist_ok=True)
+
+# Mood → music generation caption mapping
+MOOD_PROMPTS = {
+    "tense": "dark suspenseful orchestral, low strings, building tension, minor key",
+    "romantic": "gentle piano melody, soft strings, warm intimate, slow tempo",
+    "seductive": "sensual jazz, soft saxophone, intimate atmosphere, slow groove, breathy",
+    "intimate": "gentle piano melody, soft strings, warm romantic atmosphere, slow tempo",
+    "action": "intense percussion, fast electronic, dramatic hits, driving rhythm",
+    "melancholy": "slow piano, minor key, ambient pads, emotional strings",
+    "comedic": "playful pizzicato, bouncy rhythm, lighthearted woodwinds",
+    "threatening": "deep bass drones, dark orchestral, heavy percussion, menacing",
+    "powerful": "epic orchestral, brass fanfare, powerful drums, dramatic crescendo",
+    "desperate": "dissonant strings, erratic piano, anxious tempo, building dread",
+    "vulnerable": "solo piano, fragile melody, sparse arrangement, melancholy",
+    "peaceful": "ambient pads, gentle harp, nature sounds, meditative, slow",
+    "dominant": "heavy beat, dark electronic, bass-heavy, aggressive confidence",
+    "provocative": "sultry bass, slow groove, jazz drums, smoky atmosphere",
+    "ambient": "atmospheric pads, gentle textures, ethereal, floating",
+}
 
 VOICE_BASE = BASE_PATH.parent
 
@@ -308,3 +333,106 @@ async def transcribe_voice_segments(project_name: str, body: dict = {}):
         "characters_matched": matched,
         "transcriptions": results,
     }
+
+
+# --- Music Generation (ACE-Step) ---
+
+
+def _ace_step_request(method: str, path: str, data: dict | None = None) -> dict:
+    """Make a request to the ACE-Step API."""
+    url = f"{ACE_STEP_URL}{path}"
+    if data is not None:
+        payload = json.dumps(data).encode()
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    else:
+        req = urllib.request.Request(url)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+    except urllib.error.URLError as e:
+        raise HTTPException(status_code=503, detail=f"ACE-Step unavailable: {e}")
+
+
+def _build_music_caption(mood: str, genre: str, bpm: int | None = None, key: str | None = None) -> str:
+    """Build a music generation caption from mood/genre parameters."""
+    base = MOOD_PROMPTS.get(mood, MOOD_PROMPTS["ambient"])
+    parts = [f"{genre} style", base]
+    if bpm:
+        parts.append(f"{bpm} bpm")
+    if key:
+        parts.append(f"key of {key}")
+    return ", ".join(parts)
+
+
+@router.post("/generate-music")
+async def generate_music(req: MusicGenerateRequest):
+    """Submit a music generation task to ACE-Step.
+
+    Returns immediately with a task_id for polling.
+    """
+    # Build caption from mood/genre or use free-form override
+    caption = req.caption or _build_music_caption(req.mood, req.genre, req.bpm, req.key)
+
+    ace_payload = {
+        "prompt": caption,
+        "lyrics": "",
+        "duration": req.duration,
+        "format": "wav",
+        "instrumental": req.instrumental,
+        "infer_steps": 60,
+        "guidance_scale": 15.0,
+    }
+    if req.seed is not None:
+        ace_payload["seed"] = req.seed
+
+    result = _ace_step_request("POST", "/generate", ace_payload)
+
+    return {
+        "task_id": result.get("task_id"),
+        "status": result.get("status", "pending"),
+        "caption": caption,
+        "duration": req.duration,
+        "scene_id": req.scene_id,
+    }
+
+
+@router.get("/generate-music/{task_id}/status")
+async def music_generation_status(task_id: str):
+    """Poll ACE-Step task status. When complete, copies audio to music cache."""
+    result = _ace_step_request("GET", f"/status/{task_id}")
+
+    if result.get("status") == "completed" and result.get("output_path"):
+        # Copy to local music cache
+        src = Path(result["output_path"])
+        if src.exists():
+            dest = MUSIC_CACHE / src.name
+            if not dest.exists():
+                shutil.copy2(src, dest)
+            result["cached_path"] = str(dest)
+
+    return result
+
+
+@router.get("/music")
+async def list_generated_music():
+    """List all generated music tracks in the cache."""
+    tracks = []
+    for f in sorted(MUSIC_CACHE.glob("*.wav")):
+        tracks.append({
+            "filename": f.name,
+            "size_kb": round(f.stat().st_size / 1024, 1),
+            "path": str(f),
+        })
+    return {"tracks": tracks, "total": len(tracks)}
+
+
+@router.get("/music/{filename}")
+async def serve_music(filename: str):
+    """Stream a generated music file."""
+    path = MUSIC_CACHE / filename
+    if not path.exists():
+        # Also check ACE-Step output dir
+        path = Path(f"/opt/tower-ace-step/output/{filename}")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Track not found")
+    return FileResponse(path, media_type="audio/wav", filename=filename)

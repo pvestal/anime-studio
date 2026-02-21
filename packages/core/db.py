@@ -492,6 +492,52 @@ async def run_migrations():
         ]:
             await conn.execute(idx_sql)
 
+        # --- Style Switching History ---
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS style_history (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                style_name VARCHAR(255) NOT NULL,
+                checkpoint_model VARCHAR(255),
+                cfg_scale FLOAT,
+                steps INTEGER,
+                sampler VARCHAR(100),
+                scheduler VARCHAR(100),
+                width INTEGER,
+                height INTEGER,
+                positive_prompt_template TEXT,
+                negative_prompt_template TEXT,
+                switched_at TIMESTAMP DEFAULT NOW(),
+                reason TEXT,
+                generation_count INTEGER DEFAULT 0,
+                avg_quality_at_switch FLOAT
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_style_history_project ON style_history(project_id)"
+        )
+
+        # Add checkpoint_model to rejections/approvals for per-checkpoint queries
+        for tbl in ("rejections", "approvals"):
+            await conn.execute(f"""
+                DO $$ BEGIN
+                    ALTER TABLE {tbl} ADD COLUMN checkpoint_model VARCHAR(255);
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$
+            """)
+
+        # Model-aware generation: override columns on generation_styles
+        for col, coltype in [
+            ("model_architecture", "VARCHAR(50)"),
+            ("prompt_format", "VARCHAR(50)"),
+        ]:
+            await conn.execute(f"""
+                DO $$ BEGIN
+                    ALTER TABLE generation_styles ADD COLUMN {col} {coltype};
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$
+            """)
+
         # Indexes for Phase 1 tables
         for idx_sql in [
             "CREATE INDEX IF NOT EXISTS idx_gen_history_character ON generation_history(character_slug)",
@@ -534,6 +580,7 @@ async def get_char_project_map() -> dict:
                    gs.checkpoint_model, gs.cfg_scale, gs.steps,
                    gs.width, gs.height, gs.sampler, gs.scheduler,
                    gs.positive_prompt_template, gs.negative_prompt_template,
+                   gs.model_architecture, gs.prompt_format,
                    ws.style_preamble
             FROM characters c
             JOIN projects p ON c.project_id = p.id
@@ -566,6 +613,8 @@ async def get_char_project_map() -> dict:
                     "positive_prompt_template": row["positive_prompt_template"],
                     "negative_prompt_template": row["negative_prompt_template"],
                     "style_preamble": row["style_preamble"],
+                    "model_architecture": row["model_architecture"],
+                    "prompt_format": row["prompt_format"],
                 }
         _char_project_cache = mapping
         _cache_time = _time.time()

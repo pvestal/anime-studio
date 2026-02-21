@@ -88,6 +88,7 @@
           :checkpoints="projectStore.checkpoints"
           :saving="projectStore.saving"
           :echo-context="echoContext"
+          :project-id="projectStore.currentProject.id"
           @save="handleUpdateStyle"
         />
 

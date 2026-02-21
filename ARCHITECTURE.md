@@ -1,4 +1,4 @@
-# Anime Studio v3.2 Architecture
+# Anime Studio v3.3 Architecture
 
 ## System Overview
 
@@ -15,10 +15,10 @@ graph TB
             CORE[core/<br/>DB, auth, config, GPU]
             STORY[story/<br/>15 routes]
             VIS[visual_pipeline/<br/>5 routes]
-            SCENE[scene_generation/<br/>19 routes]
+            SCENE[scene_generation/<br/>21 routes]
             EPISODE[episode_assembly/<br/>10 routes]
             TRAIN[lora_training/<br/>32 routes]
-            AUDIO[audio_composition/<br/>4 routes]
+            AUDIO[audio_composition/<br/>8 routes]
             ECHO_PKG[echo_integration/<br/>4 routes]
         end
 
@@ -36,6 +36,7 @@ graph TB
         ComfyUI[ComfyUI<br/>port 8188<br/>NVIDIA RTX 3060]
         Ollama[Ollama<br/>port 11434<br/>Gemma3:12b]
         Echo[Echo Brain<br/>port 8309<br/>AMD RX 9070 XT]
+        ACEStep[ACE-Step<br/>port 8440<br/>AMD RX 9070 XT]
         Jellyfin[Jellyfin<br/>port 8096<br/>media server]
         Qdrant[Qdrant<br/>port 6333<br/>54K+ vectors]
         PG[(PostgreSQL<br/>anime_production)]
@@ -48,6 +49,8 @@ graph TB
     VIS --> Ollama
     SCENE --> ComfyUI
     SCENE --> Ollama
+    SCENE --> ACEStep
+    AUDIO --> ACEStep
     EPISODE --> Jellyfin
     ECHO_PKG --> Echo
     CORE --> PG
@@ -82,10 +85,11 @@ packages/
     vision.py         # Image quality assessment, species verification, perceptual hash
     comfyui.py        # Workflow building, submission, progress tracking
 
-  scene_generation/   # 19 routes
-    router.py         # Scene/shot CRUD, generate, assemble, video serve, motion presets, story-to-scenes
-    builder.py        # Background generation task, continuity chaining, audio mixing
+  scene_generation/   # 21 routes
+    router.py         # Scene/shot CRUD, generate, assemble, video serve, motion presets, story-to-scenes, music
+    builder.py        # Progressive-gate generation, crossfade assembly, continuity chaining, audio mixing
     framepack.py      # FramePack workflow building, I2V pipeline, motion presets
+    ltx_video.py      # LTX-Video 2B workflow building, native LoRA support
     story_to_scenes.py # AI scene breakdown from storyline (Ollama gemma3:12b)
 
   episode_assembly/   # 10 routes
@@ -99,8 +103,8 @@ packages/
     ingest_router.py  # Image/video upload, ComfyUI scan, IP-Adapter refine
     feedback.py       # Rejection feedback loop, negative prompt building
 
-  audio_composition/  # 4 routes
-    router.py         # Audio analysis, silence detection
+  audio_composition/  # 8 routes
+    router.py         # Voice ingestion, transcription, ACE-Step music generation, music cache
 
   echo_integration/   # 4 routes
     router.py         # Echo Brain chat, prompt enhancement
@@ -167,6 +171,8 @@ erDiagram
         string final_video_path
         int total_shots
         int completed_shots
+        string generated_music_path
+        string generated_music_task_id
     }
 
     shots {
@@ -186,8 +192,11 @@ erDiagram
         int steps
         bool use_f1
         float generation_time_seconds
+        float quality_score
         text dialogue_text
         string dialogue_character_slug
+        string transition_type
+        float transition_duration
     }
 
     episodes {
@@ -303,7 +312,7 @@ Non-human characters (species contains "NOT human") get additional safeguards:
 
 Species checks defined for: turtle, koopa, dinosaur, star-shaped, mushroom, mouse, dragon.
 
-## Scene Builder Pipeline
+## Scene Builder Pipeline (Progressive Gates)
 
 ```mermaid
 sequenceDiagram
@@ -312,6 +321,8 @@ sequenceDiagram
     participant API as FastAPI
     participant DB as PostgreSQL
     participant ComfyUI
+    participant Ollama as Ollama (Vision)
+    participant ACEStep as ACE-Step (Music)
 
     User->>Frontend: Create scene + add shots
     Frontend->>API: POST /scenes (create)
@@ -332,30 +343,47 @@ sequenceDiagram
         alt First shot
             API->>API: Copy source_image to ComfyUI/input/
         else Subsequent shots
-            API->>API: Use previous shot's last_frame
+            API->>API: Use previous shot's last_frame (continuity chain)
         end
 
-        API->>ComfyUI: POST /prompt (FramePack workflow)
-        ComfyUI-->>API: {prompt_id}
+        rect rgb(255, 245, 230)
+            Note over API,Ollama: Progressive Quality Gates (up to 3 attempts)
+            loop Attempt 1→3 (loosening threshold: 0.6→0.45→0.3)
+                API->>ComfyUI: POST /prompt (FramePack workflow, +5 steps per retry)
+                ComfyUI-->>API: {prompt_id}
 
-        loop Poll every 5s
-            API->>ComfyUI: GET /history/{prompt_id}
+                loop Poll every 5s
+                    API->>ComfyUI: GET /history/{prompt_id}
+                end
+
+                ComfyUI-->>API: Completed + output video
+                API->>API: ffmpeg extract last frame
+                API->>Ollama: Vision quality check (1-10 score)
+                Ollama-->>API: quality_score
+
+                alt Score >= threshold
+                    Note over API: PASS — accept shot
+                else Score < threshold AND retries left
+                    Note over API: RETRY with new seed + more steps
+                else Score < threshold AND no retries
+                    Note over API: ACCEPT BEST — use highest-scoring attempt
+                end
+            end
         end
 
-        ComfyUI-->>API: Completed + output files
-
-        API->>API: ffmpeg extract last frame
-        API->>DB: Set shot completed + paths
+        API->>DB: Set shot completed + quality_score + paths
     end
 
-    API->>API: ffmpeg concat all shot videos
-    API->>DB: Set scene completed + final_video_path
-
-    loop Poll every 5s
-        Frontend->>API: GET /scenes/{id}/status
-        API->>DB: Query scene + shot statuses
-        API-->>Frontend: {generation_status, shots[]}
+    rect rgb(230, 245, 255)
+        Note over API: Scene Assembly
+        API->>API: ffmpeg xfade crossfade between shots (dissolve/fade/wipe)
+        API->>API: build_scene_dialogue (TTS per shot)
+        API->>ACEStep: Auto-generate music from scene mood (if no track assigned)
+        ACEStep-->>API: Generated WAV (30s, 48kHz stereo)
+        API->>API: ffmpeg amix (video + dialogue 100% + music 30%)
     end
+
+    API->>DB: Set scene completed + final_video_path + duration
 
     User->>Frontend: Play assembled video
     Frontend->>API: GET /scenes/{id}/video
@@ -390,20 +418,81 @@ graph TD
 |---------|--------|--------|-----------|
 | story | `/projects`, `/storyline`, `/world-settings`, `/generation-styles` | 15 | router.py |
 | visual_pipeline | `/approval/vision-review` | 5 | router.py, classification.py, vision.py, comfyui.py |
-| scene_generation | `/scenes`, `/scenes/motion-presets`, `/scenes/generate-from-story` | 19 | router.py, builder.py, framepack.py, story_to_scenes.py |
+| scene_generation | `/scenes`, `/scenes/motion-presets`, `/scenes/generate-from-story`, `/scenes/{id}/generate-music`, `/scenes/{id}/attach-music` | 21 | router.py, builder.py, framepack.py, ltx_video.py, story_to_scenes.py |
 | episode_assembly | `/episodes`, `/episodes/{id}/scenes`, `/episodes/{id}/assemble`, `/episodes/{id}/publish` | 10 | router.py, builder.py, publish.py |
 | lora_training | `/dataset`, `/approval`, `/training`, `/gallery`, `/ingest`, `/feedback` | 32 | router.py, training_router.py, ingest_router.py, feedback.py |
-| audio_composition | `/audio` | 4 | router.py |
+| audio_composition | `/audio`, `/audio/ingest/voice`, `/audio/voice/*`, `/audio/generate-music`, `/audio/music/*` | 8 | router.py |
 | echo_integration | `/echo` | 4 | router.py |
 | app.py | `/health`, `/gpu/status`, `/events/stats`, `/learning/*`, `/recommend/*`, `/drift`, `/quality/*`, `/correction/*`, `/replenishment/*` | 14 | — |
-| **Total** | | **103** | |
+| **Total** | | **109** | |
 
 ## Hardware
 
 | GPU | Service | Purpose |
 |-----|---------|---------|
-| NVIDIA RTX 3060 12GB | ComfyUI, Ollama | Image/video generation, Gemma3 vision review |
-| AMD RX 9070 XT | Echo Brain | Embedding generation (nomic-embed-text) |
+| NVIDIA RTX 3060 12GB | ComfyUI, Ollama | Image/video generation (FramePack, LTX-Video), Gemma3 vision review |
+| AMD RX 9070 XT 16GB | Echo Brain, ACE-Step | Embedding generation, AI music generation (ROCm 7.2) |
+
+## Ingestion → Production Pipeline (End-to-End)
+
+```mermaid
+graph TD
+    subgraph "INGESTION SOURCES"
+        YT_IMG[YouTube → Frames<br/>POST /ingest/youtube-project]
+        YT_AUD[YouTube → Voice<br/>POST /audio/ingest/voice]
+        UPLOAD[Manual Upload<br/>POST /ingest/image]
+        COMFY_SCAN[ComfyUI Scan<br/>POST /ingest/scan-comfyui]
+        AI_GEN[AI Generation<br/>POST /visual/generate]
+        MOVIE[Movie Upload<br/>POST /ingest/movie-upload]
+    end
+
+    subgraph "REGISTRATION"
+        YT_IMG --> REG[Register to<br/>datasets/slug/images/]
+        UPLOAD --> REG
+        COMFY_SCAN --> REG
+        AI_GEN --> REG
+        MOVIE --> |extract frames| REG
+        REG --> DEDUP[Dedup + classify]
+        DEDUP --> PENDING[approval_status.json<br/>status: pending]
+    end
+
+    subgraph "QUALITY REVIEW"
+        PENDING --> VISION[Vision Review<br/>Gemma3 auto-triage]
+        VISION --> GATE{Quality Score}
+        GATE --> |"≥ 0.65 + solo"| AUTO_APP[Auto-Approve]
+        GATE --> |"< 0.4"| AUTO_REJ[Auto-Reject]
+        GATE --> |"0.4 - 0.65"| MANUAL[Manual Review]
+        AUTO_REJ --> FEEDBACK[feedback.json<br/>categories + negatives]
+        FEEDBACK --> |regenerate| AI_GEN
+    end
+
+    subgraph "TRAINING"
+        AUTO_APP --> APPROVED[Approved Dataset]
+        MANUAL --> |human approve| APPROVED
+        APPROVED --> LORA[LoRA Training<br/>POST /training/start]
+    end
+
+    subgraph "VOICE PIPELINE"
+        YT_AUD --> SEGMENTS[Speech segments]
+        SEGMENTS --> WHISPER[Whisper transcription]
+        WHISPER --> VOICE_DATA[Voice samples<br/>+ transcriptions]
+    end
+
+    subgraph "SCENE PRODUCTION"
+        APPROVED --> |source images| SHOTS[Scene Shots<br/>POST /scenes/{id}/shots]
+        VOICE_DATA --> |dialogue| SHOTS
+        SHOTS --> PROG_GEN[Progressive Gate Generation<br/>FramePack I2V]
+        PROG_GEN --> |quality check + retry| PROG_GEN
+        PROG_GEN --> XFADE[Crossfade Assembly<br/>ffmpeg xfade dissolve]
+        XFADE --> AUDIO_MIX[Audio Mix<br/>dialogue + ACE-Step music]
+    end
+
+    subgraph "DISTRIBUTION"
+        AUDIO_MIX --> SCENE_VIDEO[Scene MP4]
+        SCENE_VIDEO --> EPISODE[Episode Assembly<br/>multi-scene concat]
+        EPISODE --> JELLYFIN[Jellyfin Publish<br/>S01E01 naming]
+    end
+```
 
 ## Episode Assembly Pipeline
 
@@ -449,16 +538,70 @@ graph LR
         DT[dialogue_text] --> TTS[Voice Synthesis<br/>per character]
     end
 
+    subgraph "Music Source (priority order)"
+        ACE[ACE-Step generated<br/>generated_music_path] --> MUSIC_SRC{Music<br/>available?}
+        APPLE[Apple Music preview<br/>audio_preview_url] --> MUSIC_SRC
+        AUTO[Auto-generate from<br/>scene mood via ACE-Step] --> MUSIC_SRC
+    end
+
     subgraph "Per Scene"
         TTS --> CONCAT_D[Concat dialogue WAVs]
-        MUSIC[Apple Music preview<br/>30s MP3] --> DOWNLOAD[Download preview URL]
+        MUSIC_SRC --> MUSIC_FILE[Music file<br/>WAV/M4A]
     end
 
     subgraph "Mix (ffmpeg amix)"
-        VIDEO[Scene video] --> MIX[ffmpeg 3-input mix]
+        VIDEO[Scene video<br/>with crossfade transitions] --> MIX[ffmpeg 3-input mix]
         CONCAT_D --> |100% volume| MIX
-        DOWNLOAD --> |30% volume<br/>fade in/out| MIX
+        MUSIC_FILE --> |30% volume<br/>fade in/out| MIX
         MIX --> FINAL[Final scene MP4<br/>with audio]
+    end
+```
+
+## Voice Pipeline
+
+```mermaid
+graph TD
+    subgraph "Ingestion"
+        YT[YouTube URL] --> DL[yt-dlp download]
+        DL --> EXTRACT[ffmpeg extract audio<br/>22050Hz mono WAV]
+        EXTRACT --> FILTER[Bandpass filter<br/>200-3000Hz voice]
+        FILTER --> SILENCE[ffmpeg silencedetect]
+        SILENCE --> SEGMENTS[Speech segments<br/>segment_001.wav...]
+    end
+
+    subgraph "Processing"
+        SEGMENTS --> WHISPER[Whisper transcription]
+        WHISPER --> MATCH[Character name matching]
+        MATCH --> META[extraction_meta.json<br/>transcriptions + character links]
+    end
+
+    subgraph "Usage in Scenes"
+        META --> DIALOGUE[Shot dialogue_text]
+        DIALOGUE --> SYNTH[Voice synthesis per character]
+        SYNTH --> SCENE_MIX[Scene audio mix]
+    end
+```
+
+## ACE-Step Music Generation
+
+```mermaid
+graph LR
+    subgraph "Trigger"
+        SCENE_MOOD[Scene mood<br/>tense/romantic/action...] --> CAPTION[Build music caption<br/>from MOOD_PROMPTS]
+        MANUAL[Manual caption<br/>free-form text] --> CAPTION
+    end
+
+    subgraph "ACE-Step (port 8440, AMD GPU)"
+        CAPTION --> SUBMIT[POST /generate<br/>task_id returned]
+        SUBMIT --> GEN[3.5B model inference<br/>~20s for 30s audio]
+        GEN --> OUTPUT[48kHz stereo WAV]
+    end
+
+    subgraph "Integration"
+        OUTPUT --> CACHE[music_cache/]
+        CACHE --> ATTACH[POST /scenes/{id}/attach-music]
+        ATTACH --> DB_STORE[(scenes.generated_music_path)]
+        DB_STORE --> ASSEMBLY[Scene assembly<br/>auto-picks during mix]
     end
 ```
 
@@ -475,6 +618,10 @@ graph LR
 - **Ollama KEEP_ALIVE=5m**: Models auto-unload after 5 minutes to free GPU memory for ComfyUI generation
 - **FramePack memory**: `gpu_memory_preservation=6.0` required for RTX 3060 (3.5 causes OOM)
 - **FramePack + LoRA incompatibility**: FramePack uses HunyuanVideo architecture, NOT Stable Diffusion — SD-based character LoRAs cannot be injected into video generation
+- **Progressive quality gates**: Shot generation retries up to 3x with loosening thresholds (0.6→0.45→0.3), +5 steps per retry, new seed each attempt, keeps best result
+- **Crossfade transitions**: Shots joined via ffmpeg `xfade` filter (dissolve/fade/fadeblack/wipeleft, 0.3s default overlap) — requires re-encoding but produces seamless results. Falls back to hard-cut if xfade fails
+- **ACE-Step music generation**: AI music (3.5B model) on AMD RX 9070 XT via ROCm 7.2 nightly. ~20s for 30s of 48kHz stereo WAV. Scene assembly auto-generates from mood if no track assigned
+- **Dual GPU architecture**: NVIDIA RTX 3060 for ComfyUI (image/video gen), AMD RX 9070 XT for ACE-Step (music gen) + Echo Brain (embeddings). No GPU conflicts, parallel execution
 - **Episode assembly**: ffmpeg concat demuxer (no re-encoding) for fast multi-scene joins
 - **Jellyfin publishing**: Symlinks (not copies) to avoid doubling disk usage; S01E01 naming convention
 - **Audio mixing**: Non-fatal — if TTS or music download fails, scene video is kept without audio

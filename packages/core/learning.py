@@ -372,6 +372,7 @@ async def _handle_rejection(data: dict):
         character_slug=slug,
         pattern_type="failure",
         project_name=data.get("project_name"),
+        checkpoint_model=data.get("checkpoint_model"),
         quality_score=data.get("quality_score"),
     )
 
@@ -389,6 +390,7 @@ async def _handle_approval(data: dict):
         character_slug=slug,
         pattern_type="success",
         project_name=data.get("project_name"),
+        checkpoint_model=data.get("checkpoint_model"),
         quality_score=data.get("quality_score"),
     )
 

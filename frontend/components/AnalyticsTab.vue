@@ -80,6 +80,22 @@
       </div>
     </div>
 
+    <!-- Checkpoint Rankings (top-level when project selected) -->
+    <div class="section" v-if="selectedProject && checkpointRankings.length > 0">
+      <h3>Checkpoint Rankings</h3>
+      <div class="checkpoint-card" v-for="(ckpt, idx) in checkpointRankings" :key="ckpt.checkpoint">
+        <div class="ckpt-rank">#{{ idx + 1 }}</div>
+        <div class="ckpt-info">
+          <div class="ckpt-name">{{ ckpt.checkpoint }}</div>
+          <div class="ckpt-stats">
+            Quality: {{ (ckpt.avg_quality * 100).toFixed(0) }}%
+            | {{ ckpt.approved }}/{{ ckpt.total }} approved
+            ({{ (ckpt.approval_rate * 100).toFixed(0) }}%)
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Autonomy & Learning (collapsible) -->
     <div class="section" v-if="learningStats">
       <div class="section-toggle" @click="showAutonomy = !showAutonomy">
@@ -137,21 +153,6 @@
             <div class="drift-details">
               Recent: {{ (alert.recent_avg * 100).toFixed(0) }}% ({{ alert.recent_count }} imgs)
               vs Overall: {{ (alert.overall_avg * 100).toFixed(0) }}% ({{ alert.total_count }} imgs)
-            </div>
-          </div>
-        </div>
-
-        <!-- Checkpoint Rankings -->
-        <div v-if="checkpointRankings.length > 0" style="margin-top: 12px;">
-          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px;">Checkpoint Rankings</div>
-          <div class="checkpoint-card" v-for="(ckpt, idx) in checkpointRankings" :key="ckpt.checkpoint">
-            <div class="ckpt-rank">#{{ idx + 1 }}</div>
-            <div class="ckpt-info">
-              <div class="ckpt-name">{{ ckpt.checkpoint }}</div>
-              <div class="ckpt-stats">
-                Quality: {{ (ckpt.avg_quality * 100).toFixed(0) }}%
-                | {{ ckpt.approved }}/{{ ckpt.total }} approved
-              </div>
             </div>
           </div>
         </div>

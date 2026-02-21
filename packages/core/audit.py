@@ -94,6 +94,7 @@ async def log_rejection(
     project_name: str = None,
     source: str = "vision",
     generation_history_id: int = None,
+    checkpoint_model: str = None,
 ):
     """Record a rejection to the rejections table."""
     try:
@@ -102,11 +103,13 @@ async def log_rejection(
             await conn.execute("""
                 INSERT INTO rejections
                     (character_slug, project_name, image_name, generation_history_id,
-                     categories, feedback_text, negative_additions, source, quality_score)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                     categories, feedback_text, negative_additions, source, quality_score,
+                     checkpoint_model)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
             """,
                 character_slug, project_name, image_name, generation_history_id,
                 categories, feedback_text, negative_additions, source, quality_score,
+                checkpoint_model,
             )
     except Exception as e:
         logger.warning(f"Failed to log rejection: {e}")
@@ -120,6 +123,7 @@ async def log_approval(
     vision_review: dict = None,
     project_name: str = None,
     generation_history_id: int = None,
+    checkpoint_model: str = None,
 ):
     """Record an approval to the approvals table."""
     try:
@@ -128,12 +132,13 @@ async def log_approval(
             await conn.execute("""
                 INSERT INTO approvals
                     (character_slug, project_name, image_name, generation_history_id,
-                     quality_score, auto_approved, vision_review)
-                VALUES ($1,$2,$3,$4,$5,$6,$7)
+                     quality_score, auto_approved, vision_review, checkpoint_model)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
             """,
                 character_slug, project_name, image_name, generation_history_id,
                 quality_score, auto_approved,
                 json.dumps(vision_review) if vision_review else None,
+                checkpoint_model,
             )
     except Exception as e:
         logger.warning(f"Failed to log approval: {e}")

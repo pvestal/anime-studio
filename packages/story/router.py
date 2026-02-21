@@ -1,6 +1,6 @@
 """Story package router — Characters, Projects, Storylines, World Settings."""
 
-import json, logging, re, urllib.request as _ur
+import asyncio, json, logging, re, urllib.request as _ur
 from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
@@ -418,29 +418,212 @@ async def upsert_storyline(project_id: int, body: StorylineUpsert):
 
 @router.put("/projects/{project_id}/style")
 async def update_style(project_id: int, body: StyleUpdate):
-    """Update the generation style for a project. Affects ALL characters."""
+    """Update the generation style for a project. Snapshots current style to style_history before applying changes."""
     try:
         conn = await connect_direct()
-        row = await conn.fetchrow("SELECT default_style FROM projects WHERE id=$1", project_id)
+        row = await conn.fetchrow(
+            "SELECT p.name, p.default_style FROM projects p WHERE p.id=$1", project_id)
         if not row:
             await conn.close()
             raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
         sn = row["default_style"]
+        project_name = row["name"]
         if not sn:
             await conn.close()
             raise HTTPException(status_code=400, detail="Project has no generation style")
+
         updates, params, idx = _dynamic_update(
             body, ("checkpoint_model", "cfg_scale", "steps", "sampler",
                    "width", "height", "positive_prompt_template", "negative_prompt_template"))
         if not updates:
             await conn.close()
             return {"message": "No fields to update"}
+
+        # Snapshot current style before updating
+        current = await conn.fetchrow(
+            "SELECT checkpoint_model, cfg_scale, steps, sampler, scheduler, "
+            "width, height, positive_prompt_template, negative_prompt_template "
+            "FROM generation_styles WHERE style_name=$1", sn)
+        if current:
+            # Get generation stats for this checkpoint
+            stats = await conn.fetchrow("""
+                SELECT COUNT(*) as gen_count, AVG(quality_score) as avg_quality
+                FROM generation_history
+                WHERE project_name=$1 AND checkpoint_model=$2
+                  AND quality_score IS NOT NULL
+            """, project_name, current["checkpoint_model"])
+
+            await conn.execute("""
+                INSERT INTO style_history
+                    (project_id, style_name, checkpoint_model, cfg_scale, steps,
+                     sampler, scheduler, width, height,
+                     positive_prompt_template, negative_prompt_template,
+                     reason, generation_count, avg_quality_at_switch)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+            """,
+                project_id, sn, current["checkpoint_model"],
+                float(current["cfg_scale"]) if current["cfg_scale"] else None,
+                current["steps"], current["sampler"], current["scheduler"],
+                current["width"], current["height"],
+                current["positive_prompt_template"], current["negative_prompt_template"],
+                body.reason,
+                stats["gen_count"] if stats else 0,
+                float(stats["avg_quality"]) if stats and stats["avg_quality"] else None,
+            )
+
+        # Apply the update (unchanged logic)
         params.append(sn)
-        await conn.execute(f"UPDATE generation_styles SET {','.join(updates)} WHERE style_name=${idx}", *params)
+        await conn.execute(
+            f"UPDATE generation_styles SET {','.join(updates)} WHERE style_name=${idx}", *params)
         await conn.close()
         invalidate_char_cache()
+
+        old_checkpoint = current["checkpoint_model"] if current else None
+        new_checkpoint = body.checkpoint_model
         logger.info(f"Updated style '{sn}' for project {project_id}: {','.join(updates)}")
+
+        # Fire-and-forget Echo Brain memory storage
+        if new_checkpoint and old_checkpoint and new_checkpoint != old_checkpoint:
+            asyncio.create_task(_store_style_switch_memory(
+                project_name, old_checkpoint, new_checkpoint, body.reason,
+                stats["gen_count"] if stats else 0,
+                float(stats["avg_quality"]) if stats and stats["avg_quality"] else None,
+            ))
+
         return {"message": f"Generation style updated for project {project_id}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _store_style_switch_memory(
+    project_name: str, old_ckpt: str, new_ckpt: str,
+    reason: str | None, gen_count: int, avg_quality: float | None,
+):
+    """Fire-and-forget: store style switch fact in Echo Brain."""
+    try:
+        quality_str = f"{avg_quality:.0%}" if avg_quality else "N/A"
+        content = (
+            f"Project '{project_name}' switched checkpoint from '{old_ckpt}' to '{new_ckpt}' "
+            f"on {datetime.now().strftime('%Y-%m-%d')}. "
+            f"Stats with old checkpoint: {gen_count} generations, {quality_str} avg quality."
+        )
+        if reason:
+            content += f" Reason: {reason}"
+        payload = json.dumps({
+            "method": "tools/call",
+            "params": {"name": "store_memory", "arguments": {"content": content}},
+        }).encode()
+        req = _ur.Request(
+            "http://localhost:8309/mcp", data=payload,
+            headers={"Content-Type": "application/json"})
+        _ur.urlopen(req, timeout=5)
+        logger.info(f"Stored style switch memory for {project_name}")
+    except Exception as e:
+        logger.debug(f"Echo Brain memory store failed (non-fatal): {e}")
+
+
+@router.get("/projects/{project_id}/style-history")
+async def get_style_history(project_id: int):
+    """Get past style snapshots with live per-checkpoint stats."""
+    try:
+        conn = await connect_direct()
+        if not await conn.fetchrow("SELECT id FROM projects WHERE id=$1", project_id):
+            await conn.close()
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+        project_name = await conn.fetchval("SELECT name FROM projects WHERE id=$1", project_id)
+
+        rows = await conn.fetch("""
+            SELECT id, style_name, checkpoint_model, cfg_scale, steps, sampler, scheduler,
+                   width, height, positive_prompt_template, negative_prompt_template,
+                   switched_at, reason, generation_count, avg_quality_at_switch
+            FROM style_history
+            WHERE project_id=$1
+            ORDER BY switched_at DESC
+        """, project_id)
+
+        history = []
+        for r in rows:
+            # Get live stats for this checkpoint from generation_history
+            live = await conn.fetchrow("""
+                SELECT COUNT(*) as total,
+                       COUNT(*) FILTER (WHERE status = 'approved') as approved,
+                       AVG(quality_score) FILTER (WHERE quality_score IS NOT NULL) as avg_quality
+                FROM generation_history
+                WHERE project_name=$1 AND checkpoint_model=$2
+            """, project_name, r["checkpoint_model"])
+
+            history.append({
+                "id": r["id"],
+                "checkpoint_model": r["checkpoint_model"],
+                "cfg_scale": float(r["cfg_scale"]) if r["cfg_scale"] else None,
+                "steps": r["steps"],
+                "sampler": r["sampler"],
+                "scheduler": r["scheduler"],
+                "width": r["width"],
+                "height": r["height"],
+                "switched_at": r["switched_at"].isoformat() if r["switched_at"] else None,
+                "reason": r["reason"],
+                "generation_count": r["generation_count"],
+                "avg_quality_at_switch": round(float(r["avg_quality_at_switch"]), 3) if r["avg_quality_at_switch"] else None,
+                "live_total": live["total"] if live else 0,
+                "live_approved": live["approved"] if live else 0,
+                "live_avg_quality": round(float(live["avg_quality"]), 3) if live and live["avg_quality"] else None,
+            })
+
+        await conn.close()
+        return {"history": history}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/projects/{project_id}/style-stats")
+async def get_style_stats(project_id: int):
+    """Aggregated per-checkpoint quality stats for a project."""
+    try:
+        conn = await connect_direct()
+        project_name = await conn.fetchval("SELECT name FROM projects WHERE id=$1", project_id)
+        if not project_name:
+            await conn.close()
+            raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+        rows = await conn.fetch("""
+            SELECT
+                checkpoint_model,
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE status = 'approved') as approved,
+                COUNT(*) FILTER (WHERE status = 'rejected') as rejected,
+                AVG(quality_score) FILTER (WHERE quality_score IS NOT NULL) as avg_quality,
+                MIN(generated_at) as first_used,
+                MAX(generated_at) as last_used
+            FROM generation_history
+            WHERE project_name = $1
+              AND checkpoint_model IS NOT NULL
+            GROUP BY checkpoint_model
+            ORDER BY avg_quality DESC NULLS LAST
+        """, project_name)
+
+        await conn.close()
+        return {
+            "project_name": project_name,
+            "checkpoints": [
+                {
+                    "checkpoint_model": r["checkpoint_model"],
+                    "total": r["total"],
+                    "approved": r["approved"],
+                    "rejected": r["rejected"],
+                    "approval_rate": round(r["approved"] / r["total"], 2) if r["total"] > 0 else 0,
+                    "avg_quality": round(float(r["avg_quality"]), 3) if r["avg_quality"] else None,
+                    "first_used": r["first_used"].isoformat() if r["first_used"] else None,
+                    "last_used": r["last_used"].isoformat() if r["last_used"] else None,
+                }
+                for r in rows
+            ],
+        }
     except HTTPException:
         raise
     except Exception as e:

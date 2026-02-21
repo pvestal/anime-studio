@@ -17,6 +17,11 @@ from .framepack import build_framepack_workflow, _submit_comfyui_workflow
 
 logger = logging.getLogger(__name__)
 
+# ACE-Step music generation server
+ACE_STEP_URL = "http://localhost:8440"
+MUSIC_CACHE = BASE_PATH / "output" / "music_cache"
+MUSIC_CACHE.mkdir(parents=True, exist_ok=True)
+
 # Scene output directory
 SCENE_OUTPUT_DIR = BASE_PATH.parent / "output" / "scenes"
 SCENE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -28,8 +33,15 @@ AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 # Track active scene generation tasks
 _scene_generation_tasks: dict[str, asyncio.Task] = {}
 
-# Quality gate threshold for shots
-_SHOT_QUALITY_THRESHOLD = 0.4
+# Progressive quality gate thresholds
+# Each retry loosens the gate so we don't loop forever
+_QUALITY_GATES = [
+    {"threshold": 0.6, "label": "high"},     # Attempt 1: aim high
+    {"threshold": 0.45, "label": "medium"},   # Attempt 2: acceptable
+    {"threshold": 0.3, "label": "low"},       # Attempt 3: minimum viable
+]
+_MAX_RETRIES = len(_QUALITY_GATES)
+_SHOT_QUALITY_THRESHOLD = _QUALITY_GATES[-1]["threshold"]  # absolute floor
 
 
 async def _quality_gate_check(frame_path: str) -> float | None:
@@ -96,8 +108,109 @@ async def extract_last_frame(video_path: str) -> str:
     return output_path
 
 
-async def concat_videos(video_paths: list, output_path: str) -> str:
-    """Concatenate videos using ffmpeg concat demuxer."""
+async def _probe_duration(video_path: str) -> float:
+    """Get video duration in seconds via ffprobe."""
+    proc = await asyncio.create_subprocess_exec(
+        "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+        "-of", "csv=p=0", video_path,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    return float(stdout.decode().strip()) if stdout.decode().strip() else 3.0
+
+
+async def concat_videos(
+    video_paths: list,
+    output_path: str,
+    transitions: list[dict] | None = None,
+) -> str:
+    """Concatenate videos with crossfade transitions between shots.
+
+    transitions: list of {"type": "dissolve", "duration": 0.3} per join point.
+                 Length should be len(video_paths) - 1. Falls back to dissolve 0.3s.
+    """
+    if len(video_paths) < 2:
+        # Single video — just copy it
+        if video_paths:
+            shutil.copy2(video_paths[0], output_path)
+        return output_path
+
+    # Default transitions: dissolve 0.3s between every pair
+    if not transitions:
+        transitions = [{"type": "dissolve", "duration": 0.3}] * (len(video_paths) - 1)
+
+    # Probe all video durations upfront
+    durations = []
+    for vp in video_paths:
+        durations.append(await _probe_duration(vp))
+
+    # Build ffmpeg xfade filter chain
+    # Each xfade: [prev][next]xfade=transition=TYPE:duration=D:offset=OFFSET
+    # offset = cumulative duration of previous outputs minus cumulative crossfade overlap
+    inputs = []
+    for vp in video_paths:
+        inputs.extend(["-i", vp])
+
+    filter_parts = []
+    cumulative_duration = durations[0]
+
+    for i in range(len(video_paths) - 1):
+        t = transitions[i] if i < len(transitions) else {"type": "dissolve", "duration": 0.3}
+        xfade_type = t.get("type", "dissolve")
+        xfade_dur = min(t.get("duration", 0.3), durations[i] * 0.4, durations[i + 1] * 0.4)
+        offset = cumulative_duration - xfade_dur
+
+        if i == 0:
+            src_label = "[0:v]"
+        else:
+            src_label = f"[v{i}]"
+
+        dst_label = f"[{i + 1}:v]"
+
+        if i == len(video_paths) - 2:
+            out_label = "[vout]"
+        else:
+            out_label = f"[v{i + 1}]"
+
+        filter_parts.append(
+            f"{src_label}{dst_label}xfade=transition={xfade_type}:"
+            f"duration={xfade_dur:.3f}:offset={offset:.3f}{out_label}"
+        )
+
+        # Next segment's cumulative = previous total + next duration - overlap
+        cumulative_duration = offset + xfade_dur + durations[i + 1] - xfade_dur
+        # Simplifies to: cumulative_duration = offset + durations[i + 1]
+        cumulative_duration = offset + durations[i + 1]
+
+    filter_complex = ";".join(filter_parts)
+
+    cmd = [
+        "ffmpeg", "-y",
+        *inputs,
+        "-filter_complex", filter_complex,
+        "-map", "[vout]",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+        "-pix_fmt", "yuv420p",
+        output_path,
+    ]
+
+    logger.info(f"Crossfade concat: {len(video_paths)} clips, filter={filter_complex[:200]}")
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        # Fallback to hard-cut concat if xfade fails
+        logger.warning(f"xfade concat failed, falling back to hard-cut: {stderr.decode()[-200:]}")
+        return await _concat_videos_hardcut(video_paths, output_path)
+
+    return output_path
+
+
+async def _concat_videos_hardcut(video_paths: list, output_path: str) -> str:
+    """Fallback: concatenate videos with hard cuts (no transitions)."""
     list_path = output_path.rsplit(".", 1)[0] + "_concat.txt"
     with open(list_path, "w") as f:
         for vp in video_paths:
@@ -303,6 +416,78 @@ async def build_scene_dialogue(conn, scene_id) -> str | None:
         return None
 
 
+async def _auto_generate_scene_music(scene_id: str, mood: str, duration: float = 30.0) -> str | None:
+    """Auto-generate music for a scene using ACE-Step. Returns path or None."""
+    import urllib.request
+
+    # Mood→caption mapping (matches audio_composition router)
+    mood_prompts = {
+        "tense": "dark suspenseful orchestral, low strings, building tension, minor key",
+        "romantic": "gentle piano melody, soft strings, warm intimate, slow tempo",
+        "seductive": "sensual jazz, soft saxophone, intimate atmosphere, slow groove",
+        "intimate": "gentle piano melody, soft strings, warm romantic atmosphere, slow tempo",
+        "action": "intense percussion, fast electronic, dramatic hits, driving rhythm",
+        "melancholy": "slow piano, minor key, ambient pads, emotional strings",
+        "comedic": "playful pizzicato, bouncy rhythm, lighthearted woodwinds",
+        "threatening": "deep bass drones, dark orchestral, heavy percussion, menacing",
+        "powerful": "epic orchestral, brass fanfare, powerful drums, dramatic crescendo",
+        "desperate": "dissonant strings, erratic piano, anxious tempo, building dread",
+        "vulnerable": "solo piano, fragile melody, sparse arrangement, melancholy",
+        "peaceful": "ambient pads, gentle harp, nature sounds, meditative, slow",
+        "ambient": "atmospheric pads, gentle textures, ethereal, floating",
+    }
+    caption = mood_prompts.get(mood, mood_prompts["ambient"])
+
+    payload = json.dumps({
+        "prompt": caption,
+        "lyrics": "",
+        "duration": duration,
+        "format": "wav",
+        "instrumental": True,
+        "infer_steps": 60,
+        "guidance_scale": 15.0,
+    }).encode()
+
+    req = urllib.request.Request(
+        f"{ACE_STEP_URL}/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        resp = urllib.request.urlopen(req, timeout=10)
+        result = json.loads(resp.read())
+        task_id = result.get("task_id")
+        if not task_id:
+            return None
+    except Exception:
+        return None  # ACE-Step unavailable — non-fatal
+
+    # Poll for completion (music gen takes ~20-70s)
+    import time as _time
+    start = _time.time()
+    while (_time.time() - start) < 120:
+        try:
+            poll_req = urllib.request.Request(f"{ACE_STEP_URL}/status/{task_id}")
+            poll_resp = urllib.request.urlopen(poll_req, timeout=10)
+            status = json.loads(poll_resp.read())
+            if status.get("status") == "completed" and status.get("output_path"):
+                src = Path(status["output_path"])
+                if src.exists():
+                    dest = MUSIC_CACHE / f"scene_{scene_id}_{src.name}"
+                    shutil.copy2(str(src), str(dest))
+                    logger.info(f"Auto-generated music for scene {scene_id}: {dest.name}")
+                    return str(dest)
+            elif status.get("status") == "failed":
+                logger.warning(f"ACE-Step generation failed for scene {scene_id}: {status.get('error')}")
+                return None
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+
+    logger.warning(f"ACE-Step generation timed out for scene {scene_id}")
+    return None
+
+
 async def apply_scene_audio(conn, scene_id, scene_video_path: str) -> str:
     """Build dialogue + download music + mix all audio into the scene video.
 
@@ -313,17 +498,30 @@ async def apply_scene_audio(conn, scene_id, scene_video_path: str) -> str:
         # Build dialogue audio from shot fields
         dialogue_path = await build_scene_dialogue(conn, scene_id)
 
-        # Download music preview if assigned
+        # Get music: prefer ACE-Step generated, then Apple Music preview
         music_path = None
         scene_row = await conn.fetchrow(
-            "SELECT audio_preview_url, audio_fade_in, audio_fade_out, audio_start_offset "
+            "SELECT audio_preview_url, audio_fade_in, audio_fade_out, "
+            "audio_start_offset, generated_music_path "
             "FROM scenes WHERE id = $1", scene_id,
         )
-        if scene_row and scene_row["audio_preview_url"]:
+        if scene_row and scene_row.get("generated_music_path"):
+            gmp = Path(scene_row["generated_music_path"])
+            if gmp.exists():
+                music_path = str(gmp)
+                logger.info(f"Scene {scene_id}: using ACE-Step generated music: {gmp.name}")
+        if not music_path and scene_row and scene_row["audio_preview_url"]:
             try:
                 music_path = await download_preview(scene_row["audio_preview_url"], str(scene_id))
             except Exception as dl_err:
                 logger.warning(f"Music download failed (non-fatal): {dl_err}")
+        if not music_path and scene_row:
+            # Auto-generate music from scene mood if ACE-Step is available
+            mood = scene_row.get("mood") or scene_row.get("audio_mood") or "ambient"
+            try:
+                music_path = await _auto_generate_scene_music(scene_id, mood)
+            except Exception as gen_err:
+                logger.warning(f"Auto music generation failed (non-fatal): {gen_err}")
 
         if not dialogue_path and not music_path:
             return scene_video_path
@@ -417,7 +615,10 @@ async def generate_scene(scene_id: str):
 
         for shot in shots:
             shot_id = shot["id"]
-            shot_start = _time.time()
+            shot_accepted = False
+            best_video = None
+            best_quality = 0.0
+            best_last_frame = None
 
             await conn.execute(
                 "UPDATE shots SET status = 'generating' WHERE id = $1", shot_id
@@ -427,98 +628,142 @@ async def generate_scene(scene_id: str):
                 scene_id, shot_id,
             )
 
-            try:
-                # Determine first frame: previous shot's last frame or source image
-                if prev_last_frame and Path(prev_last_frame).exists():
-                    first_frame_path = prev_last_frame
-                    image_filename = await copy_to_comfyui_input(first_frame_path)
-                else:
-                    source_path = shot["source_image_path"]
-                    image_filename = await copy_to_comfyui_input(source_path)
-                    first_frame_path = str(BASE_PATH / source_path) if not Path(source_path).is_absolute() else source_path
+            # Progressive gate: retry with loosening thresholds
+            for attempt in range(_MAX_RETRIES):
+                gate = _QUALITY_GATES[attempt]
+                shot_start = _time.time()
 
-                # Build prompt from motion_prompt (or generation_prompt fallback)
-                prompt_text = shot["motion_prompt"] or shot["generation_prompt"] or ""
-                shot_steps = shot["steps"] or 25
-                shot_seconds = float(shot["duration_seconds"] or 3)
-                shot_use_f1 = shot["use_f1"] if shot["use_f1"] is not None else False
-                shot_seed = shot["seed"]
+                try:
+                    # Determine first frame: previous shot's last frame or source image
+                    if prev_last_frame and Path(prev_last_frame).exists():
+                        first_frame_path = prev_last_frame
+                        image_filename = await copy_to_comfyui_input(first_frame_path)
+                    else:
+                        source_path = shot["source_image_path"]
+                        image_filename = await copy_to_comfyui_input(source_path)
+                        first_frame_path = str(BASE_PATH / source_path) if not Path(source_path).is_absolute() else source_path
 
-                workflow_data, sampler_node_id, prefix = build_framepack_workflow(
-                    prompt_text=prompt_text,
-                    image_path=image_filename,
-                    total_seconds=shot_seconds,
-                    steps=shot_steps,
-                    use_f1=shot_use_f1,
-                    seed=shot_seed,
-                    gpu_memory_preservation=6.0,
-                )
+                    prompt_text = shot["motion_prompt"] or shot["generation_prompt"] or ""
+                    shot_steps = shot["steps"] or 25
+                    shot_seconds = float(shot["duration_seconds"] or 3)
+                    shot_use_f1 = shot["use_f1"] if shot["use_f1"] is not None else False
 
-                comfyui_prompt_id = _submit_comfyui_workflow(workflow_data["prompt"])
+                    # Vary seed on retry to get different results
+                    import random
+                    shot_seed = shot["seed"] if attempt == 0 else random.randint(0, 2**63 - 1)
 
-                await conn.execute(
-                    "UPDATE shots SET comfyui_prompt_id = $2, first_frame_path = $3 WHERE id = $1",
-                    shot_id, comfyui_prompt_id, first_frame_path,
-                )
+                    # Bump steps on later attempts for higher quality
+                    retry_steps = shot_steps + (attempt * 5)
 
-                # Poll for completion
-                result = await poll_comfyui_completion(comfyui_prompt_id)
+                    workflow_data, sampler_node_id, prefix = build_framepack_workflow(
+                        prompt_text=prompt_text,
+                        image_path=image_filename,
+                        total_seconds=shot_seconds,
+                        steps=retry_steps,
+                        use_f1=shot_use_f1,
+                        seed=shot_seed,
+                        gpu_memory_preservation=6.0,
+                    )
 
-                if result["status"] == "completed" and result["output_files"]:
-                    video_filename = result["output_files"][0]
-                    video_path = str(COMFYUI_OUTPUT_DIR / video_filename)
+                    comfyui_prompt_id = _submit_comfyui_workflow(workflow_data["prompt"])
 
-                    # Extract last frame for chaining
-                    last_frame = await extract_last_frame(video_path)
-                    prev_last_frame = last_frame
+                    await conn.execute(
+                        "UPDATE shots SET comfyui_prompt_id = $2, first_frame_path = $3 WHERE id = $1",
+                        shot_id, comfyui_prompt_id, first_frame_path,
+                    )
 
+                    # Poll for completion — one at a time
+                    result = await poll_comfyui_completion(comfyui_prompt_id)
                     gen_time = _time.time() - shot_start
 
-                    # Quality gate: check last frame quality before accepting
-                    shot_quality = await _quality_gate_check(last_frame)
-                    quality_passed = shot_quality is None or shot_quality >= 0.4
-
-                    if quality_passed:
-                        completed_count += 1
-                        completed_videos.append(video_path)
-                        shot_status = "completed"
-                    else:
-                        shot_status = "quality_failed"
+                    if result["status"] != "completed" or not result["output_files"]:
                         logger.warning(
-                            f"Shot {shot_id} failed quality gate "
-                            f"(score={shot_quality:.2f}), skipping"
+                            f"Shot {shot_id} attempt {attempt+1}: ComfyUI {result['status']}"
                         )
+                        continue  # retry
+
+                    video_filename = result["output_files"][0]
+                    video_path = str(COMFYUI_OUTPUT_DIR / video_filename)
+                    last_frame = await extract_last_frame(video_path)
+
+                    # Quality gate check
+                    shot_quality = await _quality_gate_check(last_frame)
+
+                    # None means vision check unavailable — auto-pass
+                    if shot_quality is None:
+                        shot_quality = 0.7  # assume decent
+
+                    logger.info(
+                        f"Shot {shot_id} attempt {attempt+1}/{_MAX_RETRIES}: "
+                        f"quality={shot_quality:.2f}, gate={gate['threshold']} ({gate['label']})"
+                    )
+
+                    # Track best attempt even if below threshold
+                    if shot_quality > best_quality:
+                        best_quality = shot_quality
+                        best_video = video_path
+                        best_last_frame = last_frame
+
+                    if shot_quality >= gate["threshold"]:
+                        # Passed this gate level
+                        shot_accepted = True
                         await log_decision(
                             decision_type="shot_quality_gate",
                             input_context={
                                 "shot_id": str(shot_id),
                                 "scene_id": scene_id,
                                 "quality_score": shot_quality,
+                                "attempt": attempt + 1,
+                                "gate": gate["label"],
                                 "video": video_filename,
                             },
-                            decision_made="rejected",
+                            decision_made="accepted",
+                            confidence_score=shot_quality,
+                            reasoning=f"Quality {shot_quality:.0%} passed {gate['label']} gate ({gate['threshold']:.0%}) on attempt {attempt+1}",
+                        )
+                        break
+                    else:
+                        # Below threshold — log and retry with looser gate
+                        await log_decision(
+                            decision_type="shot_quality_gate",
+                            input_context={
+                                "shot_id": str(shot_id),
+                                "scene_id": scene_id,
+                                "quality_score": shot_quality,
+                                "attempt": attempt + 1,
+                                "gate": gate["label"],
+                                "video": video_filename,
+                            },
+                            decision_made="retry" if attempt < _MAX_RETRIES - 1 else "accepted_best",
                             confidence_score=round(1.0 - shot_quality, 2),
-                            reasoning=f"Shot quality {shot_quality:.0%} below 40% gate",
+                            reasoning=f"Quality {shot_quality:.0%} below {gate['label']} gate ({gate['threshold']:.0%}), attempt {attempt+1}/{_MAX_RETRIES}",
                         )
 
-                    await conn.execute("""
-                        UPDATE shots SET status = $2, output_video_path = $3,
-                               last_frame_path = $4, generation_time_seconds = $5,
-                               quality_score = $6
-                        WHERE id = $1
-                    """, shot_id, shot_status, video_path, last_frame,
-                        gen_time, shot_quality)
-                else:
-                    await conn.execute(
-                        "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
-                        shot_id, f"ComfyUI {result['status']}",
-                    )
+                except Exception as e:
+                    logger.error(f"Shot {shot_id} attempt {attempt+1} failed: {e}")
+                    if attempt == _MAX_RETRIES - 1:
+                        await conn.execute(
+                            "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
+                            shot_id, str(e)[:500],
+                        )
 
-            except Exception as e:
-                logger.error(f"Shot {shot_id} generation failed: {e}")
+            # Use best result even if no attempt fully passed
+            if best_video:
+                completed_count += 1
+                completed_videos.append(best_video)
+                prev_last_frame = best_last_frame
+                shot_status = "completed" if shot_accepted else "accepted_best"
+                await conn.execute("""
+                    UPDATE shots SET status = $2, output_video_path = $3,
+                           last_frame_path = $4, generation_time_seconds = $5,
+                           quality_score = $6
+                    WHERE id = $1
+                """, shot_id, shot_status, best_video, best_last_frame,
+                    gen_time, best_quality)
+            else:
                 await conn.execute(
-                    "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
-                    shot_id, str(e)[:500],
+                    "UPDATE shots SET status = 'failed', error_message = 'All attempts failed' WHERE id = $1",
+                    shot_id,
                 )
 
             await conn.execute(
@@ -526,11 +771,18 @@ async def generate_scene(scene_id: str):
                 scene_id, completed_count,
             )
 
-        # Assemble final video
+        # Assemble final video with crossfade transitions
         if completed_videos:
             scene_video_path = str(SCENE_OUTPUT_DIR / f"scene_{scene_id}.mp4")
             try:
-                await concat_videos(completed_videos, scene_video_path)
+                # Read transition settings from completed shots
+                transitions = []
+                for shot in shots[1:]:  # transitions between pairs, so skip first
+                    transitions.append({
+                        "type": shot.get("transition_type", "dissolve") or "dissolve",
+                        "duration": float(shot.get("transition_duration", 0.3) or 0.3),
+                    })
+                await concat_videos(completed_videos, scene_video_path, transitions=transitions)
 
                 # Apply audio (dialogue + music) — non-fatal wrapper
                 await apply_scene_audio(conn, scene_id, scene_video_path)

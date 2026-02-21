@@ -1,11 +1,11 @@
-# Anime Studio v3.2
+# Anime Studio v3.3
 
 End-to-end anime production pipeline: project management, character design, dataset approval, LoRA training, image/video generation, scene assembly, episode composition, and Jellyfin publishing.
 
 **Stack**: FastAPI (Python) + Vue 3 (TypeScript) + PostgreSQL + ComfyUI + Qdrant + Ollama
 **Port**: 8401 (systemd: `tower-anime-studio.service`)
 **URL**: `http://192.168.50.135/anime-studio/`
-**API**: 101+ endpoints under `/api/lora/*`
+**API**: 109 endpoints under `/api/lora/*`
 **Entry**: `src/app.py` (modular router mounts)
 
 ## Tabs
@@ -34,10 +34,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system diagrams and data flow.
 | `packages/core/` | DB pool, auth middleware, config, GPU status, models, events, learning, replenishment |
 | `packages/story/` | Story & world settings, project CRUD (15 routes) |
 | `packages/visual_pipeline/` | Vision review, classification, ComfyUI workflows (5 routes) |
-| `packages/scene_generation/` | Scene builder, FramePack video, assembly, motion presets, story-to-scenes AI (19 routes) |
+| `packages/scene_generation/` | Scene builder, FramePack/LTX-Video, progressive-gate generation, crossfade assembly, music gen, motion presets, story-to-scenes AI (21 routes) |
 | `packages/episode_assembly/` | Episode CRUD, multi-scene assembly, Jellyfin publishing (10 routes) |
 | `packages/lora_training/` | Training, ingestion, regeneration, feedback (32 routes) |
-| `packages/audio_composition/` | Audio analysis, silence detection (4 routes) |
+| `packages/audio_composition/` | Voice ingestion/transcription, ACE-Step music generation, music cache (8 routes) |
 | `packages/echo_integration/` | Echo Brain chat, prompt enhancement (4 routes) |
 | `src/components/` | Vue 3 tab components with sub-component directories |
 | `src/api/` | TypeScript API client split by domain (base, story, training, visual, scenes, episodes, echo) |
@@ -94,13 +94,14 @@ If references exist + IP-Adapter models are installed, reference conditioning is
 The Scene Builder (tab 7) enables multi-shot video scene composition:
 
 1. **Define** scenes with metadata (location, time, weather, mood)
-2. **Add shots** with source images, motion prompts (with preset library), shot types, camera angles, and per-shot dialogue
-3. **Generate** all shots sequentially via FramePack I2V
+2. **Add shots** with source images, motion prompts (with preset library), shot types, camera angles, per-shot dialogue, and transition settings (dissolve/fade/wipe)
+3. **Generate** shots via progressive quality gates — each shot is generated, quality-checked by vision AI, and retried up to 3x with loosening thresholds (0.6→0.45→0.3) and more steps per retry
 4. **Chain** continuity: each shot's last frame becomes the next shot's first frame
-5. **Assemble** completed shots into a single scene video via ffmpeg concat
-6. **Audio mixing**: dialogue WAVs + background music (Apple Music) mixed into final scene video
+5. **Assemble** completed shots with crossfade transitions (ffmpeg xfade filter, 0.3s dissolve overlap)
+6. **Music**: auto-generates AI music from scene mood via ACE-Step (3.5B model, AMD GPU), or uses assigned Apple Music tracks
+7. **Audio mixing**: dialogue WAVs (100%) + music (30% with fade) mixed into final scene video
 
-Generation runs as a background async task. The monitor view polls status every 5 seconds. Failed shots can be individually retried.
+Generation runs as a background async task with one-at-a-time ComfyUI queueing (no queue flooding). The monitor view polls status every 5 seconds.
 
 ### Motion Presets
 6 shot types with curated motion prompts: `establishing`, `wide`, `medium`, `close-up`, `extreme_close-up`, `action`. Presets appear as clickable chips in the shot editor; selecting one populates the motion prompt textarea.
@@ -174,20 +175,22 @@ Character design prompt + style template + per-character negatives -> ComfyUI ch
 ### FramePack Video (I2V)
 Source image + motion prompt -> FramePack model -> sampling (sections) -> VAE decode tiled -> MP4
 
-### Scene Generation
+### Scene Generation (Progressive Gates)
 ```
 For each shot (ordered):
   1. First frame = previous shot's last frame (or source image for shot 1)
   2. Copy to ComfyUI/input/
-  3. Build FramePack workflow
+  3. Build FramePack workflow (one at a time — no queue flooding)
   4. Submit to ComfyUI, poll until complete
-  5. Extract last frame with ffmpeg
-  6. Continue to next shot
+  5. Extract last frame, quality-check via Ollama vision (score 0-1)
+  6. If score < threshold: RETRY with new seed + more steps (up to 3 attempts)
+     Gate 1: threshold=0.6, Gate 2: 0.45, Gate 3: 0.3
+  7. Accept best result, chain last frame to next shot
 After all shots:
-  7. ffmpeg concat shot videos -> scene video
-  8. Build dialogue audio (TTS per shot, concat)
-  9. Download music preview (if assigned)
-  10. Mix: video + dialogue (100%) + music (30%) -> final scene video
+  8. ffmpeg xfade crossfade between shots (dissolve/fade/wipe, 0.3s overlap)
+  9. Build dialogue audio (TTS per shot, concat)
+  10. Get music: ACE-Step generated > Apple Music preview > auto-generate from mood
+  11. Mix: video + dialogue (100%) + music (30%) -> final scene video
 ```
 
 ### Episode Assembly
@@ -227,9 +230,11 @@ FastAPI, asyncpg, uvicorn, hvac (Vault), Pillow, yt-dlp
 Vue 3, TypeScript, Vite, Pinia, vue-router, Tailwind CSS
 
 ### External Services
-- **ComfyUI** (port 8188) - Image/video generation engine (NVIDIA RTX 3060)
+- **ComfyUI** (port 8188) - Image/video generation engine (NVIDIA RTX 3060, 12GB)
+- **ACE-Step** (port 8440) - AI music generation, 3.5B model (AMD RX 9070 XT, 16GB, ROCm 7.2)
 - **Qdrant** (port 6333) - Vector database for Echo Brain
 - **Echo Brain** (port 8309) - Memory/context API (AMD RX 9070 XT)
-- **Ollama** (port 11434) - Gemma3 vision model for auto-triage
+- **Ollama** (port 11434) - Gemma3 vision model for auto-triage and quality gates
 - **PostgreSQL** - Database backend
 - **Vault** - Database credential management
+- **Jellyfin** (port 8096) - Media server for published episodes

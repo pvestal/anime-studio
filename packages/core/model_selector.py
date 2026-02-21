@@ -26,7 +26,8 @@ QUALITY_FLOOR = 0.65
 DRIFT_ALERT_THRESHOLD = 0.55
 
 
-async def recommend_params(character_slug: str, project_name: str = None) -> dict[str, Any]:
+async def recommend_params(character_slug: str, project_name: str = None,
+                          checkpoint_model: str = None) -> dict[str, Any]:
     """Recommend optimal generation parameters for a character.
 
     Combines project-level SSOT with learned patterns. Returns a dict with:
@@ -34,26 +35,47 @@ async def recommend_params(character_slug: str, project_name: str = None) -> dic
     - confidence level (low/medium/high based on sample count)
     - learned_negatives (additional negative prompt terms from rejection history)
 
+    When checkpoint_model is provided, filters history to that checkpoint only
+    to prevent cross-model contamination when switching checkpoints.
+
     The caller decides whether to apply these — SSOT stays authoritative.
     """
     try:
         pool = await get_pool()
         async with pool.acquire() as conn:
             # 1. Get successful generation stats for this character
-            param_row = await conn.fetchrow("""
-                SELECT
-                    COUNT(*) as sample_count,
-                    AVG(quality_score) as avg_quality,
-                    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY cfg_scale) as median_cfg,
-                    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY steps) as median_steps,
-                    MODE() WITHIN GROUP (ORDER BY sampler) as best_sampler,
-                    MODE() WITHIN GROUP (ORDER BY scheduler) as best_scheduler
-                FROM generation_history
-                WHERE character_slug = $1
-                  AND quality_score >= $2
-                  AND quality_score IS NOT NULL
-                  AND cfg_scale IS NOT NULL
-            """, character_slug, QUALITY_FLOOR)
+            # Filter by checkpoint_model when provided to prevent cross-model contamination
+            if checkpoint_model:
+                param_row = await conn.fetchrow("""
+                    SELECT
+                        COUNT(*) as sample_count,
+                        AVG(quality_score) as avg_quality,
+                        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY cfg_scale) as median_cfg,
+                        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY steps) as median_steps,
+                        MODE() WITHIN GROUP (ORDER BY sampler) as best_sampler,
+                        MODE() WITHIN GROUP (ORDER BY scheduler) as best_scheduler
+                    FROM generation_history
+                    WHERE character_slug = $1
+                      AND quality_score >= $2
+                      AND quality_score IS NOT NULL
+                      AND cfg_scale IS NOT NULL
+                      AND checkpoint_model = $3
+                """, character_slug, QUALITY_FLOOR, checkpoint_model)
+            else:
+                param_row = await conn.fetchrow("""
+                    SELECT
+                        COUNT(*) as sample_count,
+                        AVG(quality_score) as avg_quality,
+                        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY cfg_scale) as median_cfg,
+                        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY steps) as median_steps,
+                        MODE() WITHIN GROUP (ORDER BY sampler) as best_sampler,
+                        MODE() WITHIN GROUP (ORDER BY scheduler) as best_scheduler
+                    FROM generation_history
+                    WHERE character_slug = $1
+                      AND quality_score >= $2
+                      AND quality_score IS NOT NULL
+                      AND cfg_scale IS NOT NULL
+                """, character_slug, QUALITY_FLOOR)
 
             if not param_row or param_row["sample_count"] < MIN_CONFIDENCE_SAMPLES:
                 # Not enough data — return learned negatives only
@@ -67,7 +89,7 @@ async def recommend_params(character_slug: str, project_name: str = None) -> dic
             sample_count = param_row["sample_count"]
             confidence = "low" if sample_count < 10 else ("medium" if sample_count < 25 else "high")
 
-            # 2. Best checkpoint for this project
+            # 2. Best checkpoint for this project (unfiltered — compare all models)
             checkpoint_rec = None
             if project_name:
                 ckpt_row = await conn.fetchrow("""
@@ -88,6 +110,8 @@ async def recommend_params(character_slug: str, project_name: str = None) -> dic
                         "avg_quality": round(float(ckpt_row["avg_q"]), 3),
                         "sample_count": ckpt_row["n"],
                     }
+                    if checkpoint_model and ckpt_row["checkpoint_model"] != checkpoint_model:
+                        checkpoint_rec["note"] = f"Current model ({checkpoint_model}) differs from best ({ckpt_row['checkpoint_model']})"
 
             # 3. Learned negative prompt additions from rejection patterns
             negatives = await _get_learned_negatives(conn, character_slug)
