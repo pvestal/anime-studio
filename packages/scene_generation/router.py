@@ -131,6 +131,56 @@ async def get_motion_presets(shot_type: str | None = None):
     return {"presets": MOTION_PRESETS}
 
 
+@router.get("/scenes/{scene_id}/shot-recommendations")
+async def get_shot_recommendations(scene_id: str, top_n: int = 5):
+    """Get smart image recommendations for each shot in a scene."""
+    from .image_recommender import recommend_for_scene
+
+    sid = uuid.UUID(scene_id)
+    conn = await connect_direct()
+    try:
+        scene = await conn.fetchrow(
+            "SELECT project_id FROM scenes WHERE id = $1", sid)
+        if not scene:
+            raise HTTPException(status_code=404, detail="Scene not found")
+        shots = await conn.fetch(
+            "SELECT id, shot_number, shot_type, camera_angle, "
+            "characters_present, source_image_path "
+            "FROM shots WHERE scene_id = $1 ORDER BY shot_number", sid)
+        shot_list = [{
+            "id": str(sh["id"]),
+            "shot_number": sh["shot_number"],
+            "shot_type": sh["shot_type"],
+            "camera_angle": sh["camera_angle"],
+            "characters_present": sh["characters_present"] or [],
+            "source_image_path": sh["source_image_path"],
+        } for sh in shots]
+
+        # Gather approved images
+        char_map = await get_char_project_map()
+        approved: dict[str, list[str]] = {}
+        for slug, info in char_map.items():
+            approval_file = BASE_PATH / slug / "approval_status.json"
+            images_dir = BASE_PATH / slug / "images"
+            if not images_dir.exists():
+                continue
+            if approval_file.exists():
+                with open(approval_file) as f:
+                    statuses = json.load(f)
+                imgs = [
+                    name for name, st in statuses.items()
+                    if (st == "approved" or (isinstance(st, dict) and st.get("status") == "approved"))
+                    and (images_dir / name).exists()
+                ]
+                if imgs:
+                    approved[slug] = sorted(imgs)
+
+        recommendations = recommend_for_scene(BASE_PATH, shot_list, approved, top_n)
+        return {"scene_id": scene_id, "shots": recommendations}
+    finally:
+        await conn.close()
+
+
 @router.get("/scenes/{scene_id}")
 async def get_scene(scene_id: str):
     """Get scene detail with all shots."""
@@ -651,8 +701,14 @@ async def serve_shot_video(scene_id: str, shot_id: str):
     return FileResponse(path, media_type="video/mp4", filename=f"shot_{shot_id}.mp4")
 
 @router.get("/scenes/{scene_id}/approved-images")
-async def get_approved_images_for_scene(scene_id: str, project_id: int = 0):
-    """Get approved images for characters in a project (for shot source image picker)."""
+async def get_approved_images_for_scene(
+    scene_id: str, project_id: int = 0, include_metadata: bool = False,
+):
+    """Get approved images for characters in a project (for shot source image picker).
+
+    When include_metadata=true, each image entry includes pose, quality_score,
+    and vision_summary from the .meta.json sidecar file.
+    """
     char_map = await get_char_project_map()
     results = {}
     for slug, info in char_map.items():
@@ -670,6 +726,36 @@ async def get_approved_images_for_scene(scene_id: str, project_id: int = 0):
                 if st == "approved" or (isinstance(st, dict) and st.get("status") == "approved"):
                     if (images_dir / name).exists():
                         approved.append(name)
-        if approved:
-            results[slug] = {"character_name": info.get("name", slug), "images": sorted(approved)}
+        if not approved:
+            continue
+        approved.sort()
+
+        if include_metadata:
+            from .image_recommender import batch_read_metadata
+            meta_map = batch_read_metadata(BASE_PATH, slug, approved)
+            enriched = []
+            for name in approved:
+                meta = meta_map.get(name, {})
+                vr = meta.get("vision_review", {})
+                vision_parts = []
+                if isinstance(vr, dict):
+                    if vr.get("solo") is not None:
+                        vision_parts.append("solo" if vr["solo"] else "multi")
+                    if vr.get("completeness"):
+                        vision_parts.append(vr["completeness"])
+                enriched.append({
+                    "name": name,
+                    "pose": meta.get("pose"),
+                    "quality_score": meta.get("quality_score"),
+                    "vision_summary": ", ".join(vision_parts) if vision_parts else None,
+                })
+            results[slug] = {
+                "character_name": info.get("name", slug),
+                "images": enriched,
+            }
+        else:
+            results[slug] = {
+                "character_name": info.get("name", slug),
+                "images": approved,
+            }
     return {"characters": results}

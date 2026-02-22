@@ -39,6 +39,15 @@ ECHO_BRAIN_CONSULTED = "echo_brain.consulted"
 SHOT_GENERATED = "shot.generated"
 SHOT_REJECTED = "shot.rejected"
 
+# Production orchestrator events
+TRAINING_STARTED = "training.started"
+TRAINING_COMPLETE = "training.complete"
+SCENE_PLANNING_COMPLETE = "scene_planning.complete"
+SCENE_READY = "scene.ready"
+EPISODE_ASSEMBLED = "episode.assembled"
+EPISODE_PUBLISHED = "episode.published"
+PIPELINE_PHASE_ADVANCED = "pipeline.phase_advanced"
+
 # Voice pipeline events
 VOICE_SEGMENT_APPROVED = "voice.segment.approved"
 VOICE_SEGMENT_REJECTED = "voice.segment.rejected"
@@ -109,3 +118,18 @@ class EventBus:
 
 # Module-level singleton
 event_bus = EventBus()
+
+
+def register_graph_sync_handlers():
+    """Register graph sync handlers on the EventBus. Called once at startup."""
+    from .graph_sync import (
+        on_image_approved,
+        on_image_rejected,
+        on_generation_submitted,
+        on_regeneration_queued,
+    )
+    event_bus.subscribe(IMAGE_APPROVED, on_image_approved)
+    event_bus.subscribe(IMAGE_REJECTED, on_image_rejected)
+    event_bus.subscribe(GENERATION_SUBMITTED, on_generation_submitted)
+    event_bus.subscribe(REGENERATION_QUEUED, on_regeneration_queued)
+    logger.info("EventBus: graph sync handlers registered")

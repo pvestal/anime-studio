@@ -10,72 +10,81 @@ import type {
   ApprovedImagesResponse,
   AppleMusicTrack,
   AppleMusicPlaylist,
+  SceneRecommendationsResponse,
 } from '@/types'
 import { createRequest } from './base'
 
-const request = createRequest('/api')
-const SCENES_BASE = '/api'
+const request = createRequest('/api/scenes')
+const SCENES_BASE = '/api/scenes'
 const MUSIC_API = '/api/music'
 
 export const scenesApi = {
   async listScenes(projectId: number): Promise<{ scenes: BuilderScene[] }> {
-    return request(`/scenes?project_id=${projectId}`)
+    return request(`?project_id=${projectId}`)
   },
 
   async createScene(data: SceneCreateRequest): Promise<{ id: string; scene_number: number }> {
-    return request('/scenes', { method: 'POST', body: JSON.stringify(data) })
+    return request('', { method: 'POST', body: JSON.stringify(data) })
   },
 
   async getScene(sceneId: string): Promise<BuilderScene> {
-    return request(`/scenes/${sceneId}`)
+    return request(`/${sceneId}`)
   },
 
   async updateScene(sceneId: string, data: Partial<SceneCreateRequest>): Promise<{ message: string }> {
-    return request(`/scenes/${sceneId}`, { method: 'PATCH', body: JSON.stringify(data) })
+    return request(`/${sceneId}`, { method: 'PATCH', body: JSON.stringify(data) })
   },
 
   async deleteScene(sceneId: string): Promise<{ message: string }> {
-    return request(`/scenes/${sceneId}`, { method: 'DELETE' })
+    return request(`/${sceneId}`, { method: 'DELETE' })
   },
 
   async createShot(sceneId: string, data: ShotCreateRequest): Promise<{ id: string; shot_number: number }> {
-    return request(`/scenes/${sceneId}/shots`, { method: 'POST', body: JSON.stringify(data) })
+    return request(`/${sceneId}/shots`, { method: 'POST', body: JSON.stringify(data) })
   },
 
   async updateShot(sceneId: string, shotId: string, data: Partial<ShotCreateRequest>): Promise<{ message: string }> {
-    return request(`/scenes/${sceneId}/shots/${shotId}`, { method: 'PATCH', body: JSON.stringify(data) })
+    return request(`/${sceneId}/shots/${shotId}`, { method: 'PATCH', body: JSON.stringify(data) })
   },
 
   async deleteShot(sceneId: string, shotId: string): Promise<{ message: string }> {
-    return request(`/scenes/${sceneId}/shots/${shotId}`, { method: 'DELETE' })
+    return request(`/${sceneId}/shots/${shotId}`, { method: 'DELETE' })
   },
 
   async generateScene(sceneId: string): Promise<{ message: string; total_shots: number; estimated_minutes: number }> {
-    return request(`/scenes/${sceneId}/generate`, { method: 'POST' })
+    return request(`/${sceneId}/generate`, { method: 'POST' })
   },
 
   async getSceneStatus(sceneId: string): Promise<SceneGenerationStatus> {
-    return request(`/scenes/${sceneId}/status`)
+    return request(`/${sceneId}/status`)
   },
 
   async regenerateShot(sceneId: string, shotId: string): Promise<{ message: string; comfyui_prompt_id: string }> {
-    return request(`/scenes/${sceneId}/shots/${shotId}/regenerate`, { method: 'POST' })
+    return request(`/${sceneId}/shots/${shotId}/regenerate`, { method: 'POST' })
   },
 
   async assembleScene(sceneId: string): Promise<{ message: string; video_path: string; duration_seconds: number; shots_included: number }> {
-    return request(`/scenes/${sceneId}/assemble`, { method: 'POST' })
+    return request(`/${sceneId}/assemble`, { method: 'POST' })
   },
 
   sceneVideoUrl(sceneId: string): string {
-    return `${SCENES_BASE}/scenes/${sceneId}/video`
+    return `${SCENES_BASE}/${sceneId}/video`
   },
 
   shotVideoUrl(sceneId: string, shotId: string): string {
-    return `${SCENES_BASE}/scenes/${sceneId}/shots/${shotId}/video`
+    return `${SCENES_BASE}/${sceneId}/shots/${shotId}/video`
   },
 
   async getApprovedImagesForScene(sceneId: string, projectId: number): Promise<ApprovedImagesResponse> {
-    return request(`/scenes/${sceneId}/approved-images?project_id=${projectId}`)
+    return request(`/${sceneId}/approved-images?project_id=${projectId}`)
+  },
+
+  async getApprovedImagesWithMetadata(sceneId: string, projectId: number): Promise<ApprovedImagesResponse> {
+    return request(`/${sceneId}/approved-images?project_id=${projectId}&include_metadata=true`)
+  },
+
+  async getShotRecommendations(sceneId: string, topN: number = 5): Promise<SceneRecommendationsResponse> {
+    return request(`/${sceneId}/shot-recommendations?top_n=${topN}`)
   },
 
   // --- Story to Scenes ---
@@ -91,14 +100,14 @@ export const scenesApi = {
     }>
     count: number
   }> {
-    return request(`/scenes/generate-from-story?project_id=${projectId}`, { method: 'POST' })
+    return request(`/generate-from-story?project_id=${projectId}`, { method: 'POST' })
   },
 
   // --- Motion Presets ---
 
   async getMotionPresets(shotType?: string): Promise<{ presets: string[] | Record<string, string[]>; shot_type?: string }> {
     const q = shotType ? `?shot_type=${encodeURIComponent(shotType)}` : ''
-    return request(`/scenes/motion-presets${q}`)
+    return request(`/motion-presets${q}`)
   },
 
   // --- Scene Audio ---
@@ -107,11 +116,11 @@ export const scenesApi = {
     track_id: string; preview_url: string; track_name: string; track_artist: string;
     fade_in?: number; fade_out?: number; start_offset?: number;
   }): Promise<{ message: string }> {
-    return request(`/scenes/${sceneId}/audio`, { method: 'POST', body: JSON.stringify(data) })
+    return request(`/${sceneId}/audio`, { method: 'POST', body: JSON.stringify(data) })
   },
 
   async removeSceneAudio(sceneId: string): Promise<{ message: string }> {
-    return request(`/scenes/${sceneId}/audio`, { method: 'DELETE' })
+    return request(`/${sceneId}/audio`, { method: 'DELETE' })
   },
 
   // --- Apple Music (via Echo Brain /api/music) ---

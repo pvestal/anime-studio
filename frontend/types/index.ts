@@ -47,6 +47,9 @@ export interface TrainingJob {
   epochs: number
   learning_rate: number
   resolution: number
+  lora_rank?: number
+  model_type?: string
+  prediction_type?: string
   checkpoint?: string
   output_path?: string
   created_at: string
@@ -69,6 +72,7 @@ export interface TrainingJob {
 export interface LoraFile {
   filename: string
   slug: string
+  architecture: string
   path: string
   size_mb: number
   created_at: string
@@ -285,6 +289,12 @@ export interface Project {
 export interface CheckpointFile {
   filename: string
   size_mb: number
+  style_label?: string
+  architecture?: string
+  prompt_format?: string
+  default_cfg?: number
+  default_steps?: number
+  default_sampler?: string
 }
 
 export interface ProjectCreate {
@@ -596,8 +606,38 @@ export interface SceneGenerationStatus {
 export interface ApprovedImagesResponse {
   characters: Record<string, {
     character_name: string
-    images: string[]
+    images: string[] | ImageWithMetadata[]
   }>
+}
+
+export interface ImageWithMetadata {
+  name: string
+  pose: string | null
+  quality_score: number | null
+  vision_summary: string | null
+}
+
+export interface ShotRecommendation {
+  image_name: string
+  slug: string
+  score: number
+  pose: string | null
+  quality_score: number
+  reason: string
+}
+
+export interface ShotRecommendations {
+  shot_id: string
+  shot_number: number
+  shot_type: string
+  camera_angle: string | null
+  current_source: string | null
+  recommendations: ShotRecommendation[]
+}
+
+export interface SceneRecommendationsResponse {
+  scene_id: string
+  shots: ShotRecommendations[]
 }
 
 // --- Episode Assembly ---
@@ -906,4 +946,61 @@ export interface SceneDialogueResult {
   combined_path: string | null
   total_duration_seconds: number
   lines: VoiceSynthesisResult[]
+}
+
+// --- Gap Analysis (Production Readiness) ---
+
+export interface GapAnalysisCharacter {
+  slug: string
+  name: string
+  approved_count: number
+  has_lora: boolean
+  pose_coverage: number
+  pose_total: number
+  pose_distribution: Record<string, number>
+  pose_skew: number
+  images_without_pose: number
+  avg_quality: number | null
+  poses_missing: string[]
+}
+
+export interface GapAnalysisScene {
+  id: string
+  title: string
+  mood: string | null
+  target_duration_seconds: number
+  characters: Array<{ slug: string; name: string; has_lora: boolean }>
+  shots_defined: number
+  shots_completed: number
+  shots_needed: number
+  production_ready: boolean
+}
+
+export interface GapActionItem {
+  type: 'train_lora' | 'rebalance_pose' | 'add_shots'
+  priority: number
+  target: string
+  slug?: string
+  reason: string
+}
+
+export interface GapAnalysisSummary {
+  total_characters: number
+  with_lora: number
+  without_lora: number
+  avg_pose_coverage: number
+  pose_total: number
+  scenes_total: number
+  scenes_ready: number
+  total_approved_images: number
+  production_readiness_pct: number
+}
+
+export interface GapAnalysisResponse {
+  project_name: string | null
+  characters: GapAnalysisCharacter[]
+  scenes: GapAnalysisScene[]
+  summary: GapAnalysisSummary
+  actions: GapActionItem[]
+  pose_labels: string[]
 }

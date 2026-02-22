@@ -77,12 +77,21 @@ def record_rejection(character_slug: str, image_name: str, feedback: str, edited
     dataset_path = BASE_PATH / character_slug
     feedback_json = dataset_path / "feedback.json"
 
-    data = {"rejections": [], "rejection_count": 0, "negative_additions": []}
+    data = {"rejections": [], "rejection_count": 0, "negative_additions": [], "categories": []}
     if feedback_json.exists():
         try:
-            data = json.loads(feedback_json.read_text())
+            loaded = json.loads(feedback_json.read_text())
+            if isinstance(loaded, dict):
+                data.update(loaded)
         except (json.JSONDecodeError, IOError):
             pass
+    # Ensure required keys exist (bulk reject may have written partial structure)
+    if not isinstance(data.get("rejections"), list):
+        data["rejections"] = []
+    if not isinstance(data.get("negative_additions"), list):
+        data["negative_additions"] = []
+    if not isinstance(data.get("categories"), list):
+        data["categories"] = []
 
     entry = {
         "image": image_name,

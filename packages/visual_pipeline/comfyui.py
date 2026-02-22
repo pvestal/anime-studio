@@ -39,6 +39,8 @@ def build_comfyui_workflow(
     generation_type: str = "image",
     seed: int | None = None,
     character_slug: str = "output",
+    project_name: str | None = None,
+    pose: str | None = None,
 ) -> dict:
     """Build a ComfyUI workflow dict for image or video generation."""
     import random as _random
@@ -89,9 +91,13 @@ def build_comfyui_workflow(
         },
     }
 
+    import re as _re
     import time as _time
     ts = int(_time.time())
-    prefix = f"lora_{character_slug}_{ts}"
+    # Structured prefix: project_character_action_timestamp
+    proj = _re.sub(r'[^a-z0-9]', '', (project_name or 'gen').lower())[:20]
+    action = _re.sub(r'[^a-z0-9]', '', (pose or 'img').split(',')[0].lower())[:15]
+    prefix = f"{proj}_{character_slug}_{action}_{ts}"
 
     # Inject LoraLoader if an architecture-matched LoRA exists for this character
     lora_path = _find_lora(character_slug, checkpoint_model)
@@ -171,6 +177,22 @@ def build_comfyui_workflow(
             # Rewire KSampler to use IP-Adapter output model
             workflow["3"]["inputs"]["model"] = ["23", 0]
             logger.info(f"IP-Adapter injected: ref={ref_img.name} for {character_slug}")
+
+    # Inject RescaleCFG node for v-prediction models (prevents oversaturation)
+    rescale_cfg = profile.get("rescale_cfg")
+    if rescale_cfg:
+        # Current model source for KSampler
+        current_model = workflow["3"]["inputs"]["model"]
+        workflow["30"] = {
+            "inputs": {
+                "multiplier": rescale_cfg,
+                "model": current_model,
+            },
+            "class_type": "RescaleCFG",
+        }
+        # Rewire KSampler to use RescaleCFG output
+        workflow["3"]["inputs"]["model"] = ["30", 0]
+        logger.info(f"RescaleCFG injected: multiplier={rescale_cfg}")
 
     if generation_type == "video":
         workflow["9"] = {

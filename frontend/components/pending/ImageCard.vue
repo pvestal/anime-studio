@@ -20,7 +20,8 @@
       :alt="image.name"
       loading="lazy"
       @error="onImageError($event)"
-      @click.stop="$emit('open-detail', image)"
+      @click.stop="$emit('preview', image)"
+      @dblclick.stop="$emit('open-detail', image)"
       style="cursor: zoom-in;"
     />
 
@@ -127,6 +128,7 @@ const props = defineProps<{
 defineEmits<{
   (e: 'toggle-expand', image: PendingImage): void
   (e: 'toggle-selection', image: PendingImage): void
+  (e: 'preview', image: PendingImage): void
   (e: 'open-detail', image: PendingImage): void
   (e: 'approve', image: PendingImage): void
   (e: 'reject', image: PendingImage): void

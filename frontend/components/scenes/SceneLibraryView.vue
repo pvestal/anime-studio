@@ -39,6 +39,19 @@
         <div v-if="scene.description" style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px; max-height: 40px; overflow: hidden;">
           {{ scene.description }}
         </div>
+        <!-- Training readiness -->
+        <div v-if="gapBySceneId?.[scene.id]" style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap;">
+          <span
+            :class="gapBySceneId[scene.id].production_ready ? 'readiness-ready' : 'readiness-not-ready'"
+            style="font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px; text-transform: uppercase;"
+          >{{ gapBySceneId[scene.id].production_ready ? 'Ready' : 'Not Ready' }}</span>
+          <span
+            v-for="ch in gapBySceneId[scene.id].characters"
+            :key="ch.slug"
+            :class="ch.has_lora ? 'char-pill-ready' : 'char-pill-unready'"
+            style="font-size: 10px; padding: 1px 6px; border-radius: 10px;"
+          >{{ ch.name }}</span>
+        </div>
         <div style="display: flex; gap: 12px; font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
           <span v-if="scene.location">{{ scene.location }}</span>
           <span>{{ scene.total_shots }} shot{{ scene.total_shots !== 1 ? 's' : '' }}</span>
@@ -68,13 +81,14 @@
 </template>
 
 <script setup lang="ts">
-import type { BuilderScene } from '@/types'
+import type { BuilderScene, GapAnalysisScene } from '@/types'
 
 defineProps<{
   scenes: BuilderScene[]
   loading: boolean
   hasProject: boolean
   generatingFromStory?: boolean
+  gapBySceneId?: Record<string, GapAnalysisScene>
 }>()
 
 defineEmits<{
@@ -117,6 +131,23 @@ function statusBadgeClass(status: string): string {
 }
 .badge-failed {
   background: rgba(160, 80, 80, 0.2);
+  color: var(--status-error);
+}
+.readiness-ready {
+  background: rgba(80, 160, 80, 0.2);
+  color: var(--status-success);
+}
+.readiness-not-ready {
+  background: rgba(160, 80, 80, 0.2);
+  color: var(--status-error);
+}
+.char-pill-ready {
+  background: rgba(80, 160, 80, 0.15);
+  color: var(--status-success);
+}
+.char-pill-unready {
+  background: transparent;
+  outline: 1px solid var(--status-error);
   color: var(--status-error);
 }
 </style>

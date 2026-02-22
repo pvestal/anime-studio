@@ -74,6 +74,7 @@
           :action-disabled="actionDisabled || !!processingImages?.has(image.id)"
           @toggle-expand="$emit('toggle-expand', $event)"
           @toggle-selection="$emit('toggle-selection', $event)"
+          @preview="$emit('preview', $event)"
           @open-detail="$emit('open-detail', $event)"
           @approve="$emit('approve', $event)"
           @reject="$emit('reject', $event)"
@@ -137,6 +138,7 @@ defineEmits<{
   (e: 'approve-group', charName: string, images: PendingImage[]): void
   (e: 'toggle-expand', image: PendingImage): void
   (e: 'toggle-selection', image: PendingImage): void
+  (e: 'preview', image: PendingImage): void
   (e: 'open-detail', image: PendingImage): void
   (e: 'approve', image: PendingImage): void
   (e: 'reject', image: PendingImage): void

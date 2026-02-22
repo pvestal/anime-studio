@@ -358,8 +358,8 @@ const selectedProject = ref('')
 const selectedModel = ref('')
 const allImages = ref<LibraryImage[]>([])
 const characterList = ref<CharacterEntry[]>([])
-const projectList = ref<string[]>([])
-const modelList = ref<string[]>([])
+const allProjects = ref<string[]>([])
+const allModels = ref<string[]>([])
 const detailImage = ref<LibraryImage | null>(null)
 const detailMeta = ref<ImageMetadata | null>(null)
 const seedCopied = ref(false)
@@ -372,6 +372,19 @@ const quickGenerating = ref('')
 const rejecting = ref(false)
 
 const totalApproved = computed(() => characterList.value.reduce((s, c) => s + c.approved, 0))
+
+// Context-aware filter lists — model pills only show models relevant to selected project and vice versa
+const projectList = computed(() => {
+  if (!selectedModel.value) return allProjects.value
+  const relevant = new Set(characterList.value.filter(c => c.checkpoint_model === selectedModel.value).map(c => c.project_name))
+  return allProjects.value.filter(p => relevant.has(p))
+})
+
+const modelList = computed(() => {
+  if (!selectedProject.value) return allModels.value
+  const relevant = new Set(characterList.value.filter(c => c.project_name === selectedProject.value).map(c => c.checkpoint_model))
+  return allModels.value.filter(m => relevant.has(m))
+})
 
 const filteredCharacterList = computed(() => {
   let list = characterList.value
@@ -404,8 +417,19 @@ function modelShortName(model: string): string {
   return model.replace('.safetensors', '').replace(/_/g, ' ')
 }
 
-// Reset character filter when project/model filter changes
-watch([selectedProject, selectedModel], () => {
+// Reset downstream filters when upstream filter changes
+watch(selectedProject, () => {
+  // Clear model if it's no longer relevant to the selected project
+  if (selectedModel.value && !modelList.value.includes(selectedModel.value)) {
+    selectedModel.value = ''
+  }
+  selectedSlug.value = ''
+})
+watch(selectedModel, () => {
+  // Clear project if it's no longer relevant to the selected model
+  if (selectedProject.value && !projectList.value.includes(selectedProject.value)) {
+    selectedProject.value = ''
+  }
   selectedSlug.value = ''
 })
 
@@ -418,8 +442,8 @@ async function refresh() {
   try {
     const data = await api.getLibrary()
     characterList.value = data.characters
-    projectList.value = data.projects || []
-    modelList.value = data.models || []
+    allProjects.value = data.projects || []
+    allModels.value = data.models || []
     allImages.value = data.images.map(img => ({
       slug: img.slug,
       characterName: img.characterName,

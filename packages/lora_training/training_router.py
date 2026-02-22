@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import os
 import random
 import re
@@ -17,7 +18,8 @@ from pydantic import BaseModel
 
 from packages.core.config import BASE_PATH, COMFYUI_URL, COMFYUI_INPUT_DIR, _SCRIPT_DIR, _PROJECT_DIR, normalize_sampler
 from packages.core.comfyui import build_ipadapter_workflow
-from packages.core.db import get_char_project_map
+from packages.core.db import get_char_project_map, get_pool
+from packages.core.generation import POSE_VARIATIONS
 from packages.core.gpu_router import ensure_gpu_ready
 from packages.core.models import TrainingRequest
 from .feedback import (
@@ -133,11 +135,18 @@ async def generate_variant(character_slug: str, image_name: str, body: VariantRe
 # Regeneration endpoint
 # ===================================================================
 
+class RegenerateBody(BaseModel):
+    prompt_override: Optional[str] = None
+    custom_poses: Optional[list[str]] = None
+
+
 @training_router.post("/regenerate/{character_slug}")
 async def regenerate_character(character_slug: str, count: int = 1,
                                seed: Optional[int] = None,
                                prompt_override: Optional[str] = None,
-                               style_override: Optional[str] = None):
+                               style_override: Optional[str] = None,
+                               checkpoint_override: Optional[str] = None,
+                               body: Optional[RegenerateBody] = None):
     """Manually trigger image regeneration for a character."""
     import asyncio
     from packages.core.generation import generate_batch
@@ -146,14 +155,20 @@ async def regenerate_character(character_slug: str, count: int = 1,
     if not dataset_path.exists():
         (dataset_path / "images").mkdir(parents=True, exist_ok=True)
 
+    # Body fields override query params
+    effective_prompt_override = (body.prompt_override if body else None) or prompt_override
+    effective_custom_poses = (body.custom_poses if body else None)
+
     # Launch as background task (non-blocking, same as old subprocess)
     asyncio.create_task(
         generate_batch(
             character_slug=character_slug,
             count=count,
             seed=seed,
-            prompt_override=prompt_override,
+            prompt_override=effective_prompt_override,
             style_override=style_override,
+            checkpoint_override=checkpoint_override,
+            custom_poses=effective_custom_poses,
         )
     )
     msg = f"Regeneration started for {character_slug} ({count} images)"
@@ -161,8 +176,144 @@ async def regenerate_character(character_slug: str, count: int = 1,
         msg += f" with seed={seed}"
     if style_override:
         msg += f" with style={style_override}"
+    if checkpoint_override:
+        msg += f" with checkpoint={checkpoint_override}"
     logger.info(msg)
     return {"message": msg}
+
+
+# ===================================================================
+# Multi-checkpoint comparison — serialized generation
+# ===================================================================
+
+class CompareRequest(BaseModel):
+    checkpoints: list[str]
+    characters: list[str] | None = None  # None = all characters in project
+    project_name: str | None = None
+    count_per_checkpoint: int = 5
+
+# Track active comparison task for status reporting
+_compare_task: dict | None = None
+
+
+@training_router.post("/regenerate-compare")
+async def regenerate_compare(req: CompareRequest):
+    """Serialized multi-checkpoint comparison.
+
+    Generates count_per_checkpoint images for EACH checkpoint × character combo,
+    fully serialized so ComfyUI processes one batch at a time.
+    The global _comfyui_slot semaphore in generation.py provides the actual
+    gate, but we also serialize at this level so progress tracking is clean.
+    """
+    import asyncio
+    from packages.core.generation import generate_batch
+    from packages.core.db import log_model_change
+
+    global _compare_task
+
+    if not req.checkpoints:
+        raise HTTPException(400, "checkpoints list is required")
+
+    # Resolve character list
+    if req.characters:
+        char_slugs = req.characters
+    elif req.project_name:
+        char_map = await get_char_project_map()
+        char_slugs = [
+            slug for slug, info in char_map.items()
+            if info.get("project_name") == req.project_name
+        ]
+        if not char_slugs:
+            raise HTTPException(404, f"No characters found for project '{req.project_name}'")
+    else:
+        raise HTTPException(400, "Provide characters list or project_name")
+
+    total_jobs = len(req.checkpoints) * len(char_slugs)
+    total_images = total_jobs * req.count_per_checkpoint
+
+    # Build work queue
+    work = []
+    for ckpt in req.checkpoints:
+        for slug in char_slugs:
+            work.append((ckpt, slug))
+
+    _compare_task = {
+        "status": "running",
+        "total_combos": total_jobs,
+        "completed_combos": 0,
+        "total_images": total_images,
+        "completed_images": 0,
+        "failed_images": 0,
+        "current_checkpoint": None,
+        "current_character": None,
+        "checkpoints": req.checkpoints,
+        "characters": char_slugs,
+        "count_per_checkpoint": req.count_per_checkpoint,
+        "started_at": datetime.utcnow().isoformat(),
+    }
+
+    async def _run_compare():
+        global _compare_task
+        # Audit log the comparison start
+        for ckpt in req.checkpoints:
+            await log_model_change(
+                action="compare_start",
+                checkpoint_model=ckpt,
+                project_name=req.project_name,
+                reason=f"Multi-checkpoint comparison: {len(char_slugs)} characters × {req.count_per_checkpoint} images",
+                metadata={"characters": char_slugs, "count_per_checkpoint": req.count_per_checkpoint},
+            )
+        for ckpt, slug in work:
+            _compare_task["current_checkpoint"] = ckpt
+            _compare_task["current_character"] = slug
+
+            dataset_path = BASE_PATH / slug
+            if not dataset_path.exists():
+                (dataset_path / "images").mkdir(parents=True, exist_ok=True)
+
+            try:
+                results = await generate_batch(
+                    character_slug=slug,
+                    count=req.count_per_checkpoint,
+                    checkpoint_override=ckpt,
+                )
+                ok = sum(1 for r in results if r.get("status") == "completed")
+                fail = sum(1 for r in results if r.get("status") != "completed")
+                _compare_task["completed_images"] += ok
+                _compare_task["failed_images"] += fail
+            except Exception as e:
+                logger.error(f"regenerate-compare: {slug} x {ckpt} failed: {e}")
+                _compare_task["failed_images"] += req.count_per_checkpoint
+
+            _compare_task["completed_combos"] += 1
+            logger.info(
+                f"regenerate-compare: [{_compare_task['completed_combos']}/{total_jobs}] "
+                f"{slug} x {ckpt} done"
+            )
+
+        _compare_task["status"] = "completed"
+        _compare_task["finished_at"] = datetime.utcnow().isoformat()
+        logger.info(
+            f"regenerate-compare: FINISHED — {_compare_task['completed_images']} images, "
+            f"{_compare_task['failed_images']} failures"
+        )
+
+    asyncio.create_task(_run_compare())
+
+    return {
+        "message": f"Comparison started: {len(req.checkpoints)} checkpoints × {len(char_slugs)} characters × {req.count_per_checkpoint} images = {total_images} total",
+        "checkpoints": req.checkpoints,
+        "characters": char_slugs,
+        "total_images": total_images,
+    }
+
+
+@training_router.get("/regenerate-compare/status")
+async def compare_status():
+    """Check progress of the active multi-checkpoint comparison."""
+    if _compare_task is None:
+        return {"status": "idle", "message": "No comparison running"}
+    return _compare_task
 
 
 # ===================================================================
@@ -213,11 +364,12 @@ async def start_training(training: TrainingRequest):
     if not gpu_ready:
         raise HTTPException(status_code=503, detail=f"GPU not available: {gpu_msg}")
 
-    # Auto-detect architecture from model profile
+    # Auto-detect architecture and prediction type from model profile
     from packages.core.model_profiles import get_model_profile
     _profile = get_model_profile(checkpoint_name)
     is_sdxl = _profile["architecture"] == "sdxl"
     model_type = _profile["architecture"]
+    prediction_type = _profile.get("prediction_type", "epsilon")
 
     # Set architecture-appropriate defaults
     if is_sdxl:
@@ -243,6 +395,7 @@ async def start_training(training: TrainingRequest):
         "resolution": resolution,
         "lora_rank": lora_rank,
         "model_type": model_type,
+        "prediction_type": prediction_type,
         "checkpoint": checkpoint_name,
         "output_path": str(output_path),
         "created_at": datetime.now().isoformat(),
@@ -292,6 +445,7 @@ async def start_training(training: TrainingRequest):
         f"--resolution={resolution}",
         f"--lora-rank={lora_rank}",
         f"--model-type={model_type}",
+        f"--prediction-type={prediction_type}",
     ]
 
     log_fh = open(log_file, "w")
@@ -320,6 +474,7 @@ async def start_training(training: TrainingRequest):
         "approved_images": approved_count,
         "checkpoint": checkpoint_name,
         "model_type": model_type,
+        "prediction_type": prediction_type,
         "lora_rank": lora_rank,
         "resolution": resolution,
         "output": str(output_path),
@@ -338,7 +493,7 @@ async def get_training_job(job_id: str):
     raise HTTPException(status_code=404, detail="Job not found")
 
 
-@training_router.get("/training/jobs/{job_id}/log")
+@training_router.get("/jobs/{job_id}/log")
 async def get_training_log(job_id: str, tail: int = 50):
     """Tail the log file for a training job."""
     log_file = _PROJECT_DIR / "logs" / f"{job_id}.log"
@@ -515,6 +670,433 @@ async def delete_trained_lora(slug: str):
     size_mb = round(lora_path.stat().st_size / (1024 * 1024), 1)
     lora_path.unlink()
     return {"message": f"Deleted {lora_path.name} ({size_mb} MB)", "filename": lora_path.name}
+
+
+# ===================================================================
+# Gap Analysis — production readiness assessment
+# ===================================================================
+
+@training_router.get("/gap-analysis")
+async def gap_analysis(project_name: str | None = None):
+    """Analyze training data coverage gaps for production readiness.
+
+    Returns per-character pose distributions, LoRA status, scene appearances,
+    and prioritized action items to reach production readiness.
+    """
+    char_map = await get_char_project_map()
+
+    # Filter to project if specified
+    if project_name:
+        char_map = {
+            slug: info for slug, info in char_map.items()
+            if info.get("project_name") == project_name
+        }
+    if not char_map:
+        raise HTTPException(404, f"No characters found{f' for project {project_name!r}' if project_name else ''}")
+
+    # Resolve project_id for scene queries
+    project_id = None
+    if project_name:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT id FROM projects WHERE name = $1", project_name)
+            if row:
+                project_id = row["id"]
+
+    # Build LoRA lookup from disk
+    lora_dir = Path("/opt/ComfyUI/models/loras")
+    lora_slugs: set[str] = set()
+    if lora_dir.exists():
+        for f in lora_dir.glob("*_lora.safetensors"):
+            is_xl = f.stem.endswith("_xl_lora")
+            slug = f.stem.replace("_xl_lora", "") if is_xl else f.stem.replace("_lora", "")
+            lora_slugs.add(slug)
+
+    # Per-character analysis
+    characters_out = []
+    total_approved = 0
+    total_with_lora = 0
+    all_pose_coverages = []
+
+    for slug, info in sorted(char_map.items()):
+        dataset_path = BASE_PATH / slug
+        images_dir = dataset_path / "images"
+        approval_file = dataset_path / "approval_status.json"
+
+        # Load approval statuses
+        approval_status = {}
+        if approval_file.exists():
+            try:
+                approval_status = json.loads(approval_file.read_text())
+            except (json.JSONDecodeError, IOError):
+                pass
+
+        approved_images = [name for name, st in approval_status.items() if st == "approved"]
+        approved_count = len(approved_images)
+        total_approved += approved_count
+
+        # Pose distribution from .meta.json files
+        pose_counts: dict[str, int] = {p: 0 for p in POSE_VARIATIONS}
+        no_pose_count = 0
+        quality_scores = []
+
+        for img_name in approved_images:
+            meta_path = images_dir / f"{Path(img_name).stem}.meta.json"
+            if not meta_path.exists():
+                no_pose_count += 1
+                continue
+            try:
+                meta = json.loads(meta_path.read_text())
+            except (json.JSONDecodeError, IOError):
+                no_pose_count += 1
+                continue
+
+            pose = meta.get("pose", "")
+            if pose and pose in pose_counts:
+                pose_counts[pose] += 1
+            elif pose:
+                # Fuzzy match: check if pose text is a substring of any known pose
+                matched = False
+                for known_pose in POSE_VARIATIONS:
+                    if pose.lower() in known_pose.lower() or known_pose.lower() in pose.lower():
+                        pose_counts[known_pose] += 1
+                        matched = True
+                        break
+                if not matched:
+                    no_pose_count += 1
+            else:
+                no_pose_count += 1
+
+            qs = meta.get("quality_score")
+            if qs is not None:
+                quality_scores.append(qs)
+
+        # Pose coverage metrics
+        poses_with_images = [p for p, c in pose_counts.items() if c > 0]
+        pose_values = [c for c in pose_counts.values() if c > 0]
+        pose_coverage = len(poses_with_images)
+
+        # Coefficient of variation (std/mean) — higher = more imbalanced
+        pose_skew = 0.0
+        if pose_values and len(pose_values) > 1:
+            mean_val = sum(pose_values) / len(pose_values)
+            if mean_val > 0:
+                variance = sum((v - mean_val) ** 2 for v in pose_values) / len(pose_values)
+                pose_skew = round(math.sqrt(variance) / mean_val, 3)
+
+        has_lora = slug in lora_slugs
+        if has_lora:
+            total_with_lora += 1
+
+        avg_quality = round(sum(quality_scores) / len(quality_scores), 3) if quality_scores else None
+        all_pose_coverages.append(pose_coverage)
+
+        characters_out.append({
+            "slug": slug,
+            "name": info.get("name", slug),
+            "approved_count": approved_count,
+            "has_lora": has_lora,
+            "pose_coverage": pose_coverage,
+            "pose_total": len(POSE_VARIATIONS),
+            "pose_distribution": pose_counts,
+            "pose_skew": pose_skew,
+            "images_without_pose": no_pose_count,
+            "avg_quality": avg_quality,
+            "poses_missing": [p for p in POSE_VARIATIONS if pose_counts[p] == 0],
+        })
+
+    # Scene analysis
+    scenes_out = []
+    scenes_ready = 0
+    if project_id is not None:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            scene_rows = await conn.fetch(
+                "SELECT id, title, description, mood, target_duration_seconds FROM scenes WHERE project_id = $1 ORDER BY created_at",
+                project_id,
+            )
+            if scene_rows:
+                scene_ids = [r["id"] for r in scene_rows]
+                shot_rows = await conn.fetch(
+                    "SELECT scene_id, status FROM shots WHERE scene_id = ANY($1::uuid[])",
+                    scene_ids,
+                )
+
+                shots_by_scene: dict[str, list] = {}
+                for sr in shot_rows:
+                    sid = str(sr["scene_id"])
+                    shots_by_scene.setdefault(sid, []).append(sr["status"])
+
+                for scene in scene_rows:
+                    sid = str(scene["id"])
+                    desc = (scene["description"] or "").lower()
+                    title = (scene["title"] or "").lower()
+                    search_text = f"{title} {desc}"
+
+                    # Match characters by name or slug
+                    scene_chars = []
+                    for slug, info in char_map.items():
+                        char_name = info.get("name", "").lower()
+                        if char_name and (char_name in search_text or slug in search_text):
+                            scene_chars.append({
+                                "slug": slug,
+                                "name": info.get("name", slug),
+                                "has_lora": slug in lora_slugs,
+                            })
+
+                    target_dur = scene.get("target_duration_seconds") or 6
+                    shots_needed = math.ceil(target_dur / 3)
+                    scene_shots = shots_by_scene.get(sid, [])
+                    shots_defined = len(scene_shots)
+                    shots_completed = sum(1 for s in scene_shots if s == "completed")
+
+                    all_chars_have_lora = all(c["has_lora"] for c in scene_chars) if scene_chars else False
+                    is_ready = all_chars_have_lora and shots_defined >= shots_needed
+
+                    if is_ready:
+                        scenes_ready += 1
+
+                    scenes_out.append({
+                        "id": sid,
+                        "title": scene["title"],
+                        "mood": scene["mood"],
+                        "target_duration_seconds": target_dur,
+                        "characters": scene_chars,
+                        "shots_defined": shots_defined,
+                        "shots_completed": shots_completed,
+                        "shots_needed": shots_needed,
+                        "production_ready": is_ready,
+                    })
+
+    # Prioritized action items
+    total_chars = len(characters_out)
+    actions = []
+
+    # 1. Train missing LoRAs (highest priority)
+    for c in characters_out:
+        if not c["has_lora"] and c["approved_count"] >= 10:
+            actions.append({
+                "type": "train_lora",
+                "priority": 1,
+                "target": c["name"],
+                "slug": c["slug"],
+                "reason": f"{c['approved_count']} approved images, no LoRA trained",
+            })
+
+    # 2. Rebalance poses (medium priority)
+    for c in characters_out:
+        if c["pose_skew"] > 1.0 and c["approved_count"] >= 10:
+            top_missing = c["poses_missing"][:3]
+            actions.append({
+                "type": "rebalance_pose",
+                "priority": 2,
+                "target": c["name"],
+                "slug": c["slug"],
+                "reason": f"Pose skew {c['pose_skew']:.2f}, missing: {', '.join(p.split(',')[0] for p in top_missing)}",
+            })
+
+    # 3. Add shots to scenes (lower priority)
+    for s in scenes_out:
+        if s["shots_defined"] < s["shots_needed"]:
+            actions.append({
+                "type": "add_shots",
+                "priority": 3,
+                "target": s["title"],
+                "reason": f"{s['shots_defined']}/{s['shots_needed']} shots defined",
+            })
+
+    actions.sort(key=lambda a: a["priority"])
+
+    avg_pose_coverage = round(sum(all_pose_coverages) / len(all_pose_coverages), 1) if all_pose_coverages else 0
+    readiness_pct = 0
+    if total_chars > 0:
+        lora_score = total_with_lora / total_chars * 50  # 50% weight
+        pose_score = (avg_pose_coverage / len(POSE_VARIATIONS)) * 30  # 30% weight
+        scene_score = (scenes_ready / len(scenes_out) * 20) if scenes_out else 0  # 20% weight
+        readiness_pct = round(lora_score + pose_score + scene_score, 1)
+
+    return {
+        "project_name": project_name,
+        "characters": characters_out,
+        "scenes": scenes_out,
+        "summary": {
+            "total_characters": total_chars,
+            "with_lora": total_with_lora,
+            "without_lora": total_chars - total_with_lora,
+            "avg_pose_coverage": avg_pose_coverage,
+            "pose_total": len(POSE_VARIATIONS),
+            "scenes_total": len(scenes_out),
+            "scenes_ready": scenes_ready,
+            "total_approved_images": total_approved,
+            "production_readiness_pct": readiness_pct,
+        },
+        "actions": actions[:10],
+        "pose_labels": POSE_VARIATIONS,
+    }
+
+
+# ===================================================================
+# Scene-driven training image generation
+# ===================================================================
+
+
+class SceneTrainingRequest(BaseModel):
+    project_name: str
+    images_per_scene: int = 3
+    characters: list[str] | None = None  # filter to specific slugs; None = all
+
+
+@training_router.post("/generate-for-scenes")
+async def generate_training_for_scenes(req: SceneTrainingRequest):
+    """Generate training images with prompts derived from scene descriptions.
+
+    For each scene, extracts character requirements from the description,
+    builds a scene-matched prompt override, and calls generate_batch() so
+    the resulting images train the LoRA on poses/situations the character
+    actually needs for production.
+
+    Non-blocking — kicks off generation in background and returns immediately.
+    """
+    import asyncio
+    from packages.core.generation import generate_batch
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        proj = await conn.fetchrow("SELECT id, name FROM projects WHERE name = $1", req.project_name)
+        if not proj:
+            raise HTTPException(404, f"Project {req.project_name!r} not found")
+
+        scenes = await conn.fetch(
+            "SELECT id, title, description, mood, location, time_of_day "
+            "FROM scenes WHERE project_id = $1 ORDER BY created_at",
+            proj["id"],
+        )
+        if not scenes:
+            raise HTTPException(404, f"No scenes found for project {req.project_name!r}")
+
+        chars = await conn.fetch(
+            "SELECT c.name, REGEXP_REPLACE(LOWER(REPLACE(c.name, ' ', '_')), '[^a-z0-9_-]', '', 'g') as slug, "
+            "c.design_prompt "
+            "FROM characters c WHERE c.project_id = $1",
+            proj["id"],
+        )
+
+    char_by_name: dict[str, dict] = {}
+    for c in chars:
+        char_by_name[c["name"].lower()] = {"slug": c["slug"], "name": c["name"], "design_prompt": c["design_prompt"] or ""}
+
+    # Build per-character scene pose list
+    # These are passed as custom_poses so translate_prompt() still runs
+    # (preserves character identity, appearance_data, model-aware tags)
+    char_poses: dict[str, list[str]] = {}  # slug -> [pose_string, ...]
+
+    for scene in scenes:
+        desc = scene["description"] or ""
+        title = scene["title"] or ""
+        mood = scene["mood"] or ""
+        location = scene["location"] or ""
+        time_of_day = scene["time_of_day"] or ""
+
+        # Find which characters this scene mentions
+        scene_text = f"{title} {desc}".lower()
+        matched_chars = []
+        for name_lower, cinfo in char_by_name.items():
+            # Match on first name or full name
+            first_name = name_lower.split()[0]
+            if first_name in scene_text or name_lower in scene_text:
+                matched_chars.append(cinfo)
+
+        if not matched_chars:
+            continue
+
+        for cinfo in matched_chars:
+            slug = cinfo["slug"]
+            if req.characters and slug not in req.characters:
+                continue
+
+            # Build scene context as pose string
+            scene_ctx_parts = []
+            if location:
+                scene_ctx_parts.append(location)
+            if mood:
+                scene_ctx_parts.append(f"{mood} mood")
+            if time_of_day:
+                scene_ctx_parts.append(time_of_day)
+            scene_ctx = ", ".join(scene_ctx_parts)
+
+            # Extract pose hints from description — sentences mentioning this character
+            pose_hints = _extract_pose_hints(desc, cinfo["name"])
+
+            # Build N pose strings per scene for this character
+            for i in range(req.images_per_scene):
+                hint = pose_hints[i % len(pose_hints)] if pose_hints else ""
+                pose = ", ".join(filter(None, [hint, scene_ctx]))
+                char_poses.setdefault(slug, []).append(pose)
+
+    if not char_poses:
+        raise HTTPException(400, "No characters matched any scene descriptions")
+
+    # Kick off generation in background
+    total = sum(len(p) for p in char_poses.values())
+
+    async def _run():
+        for slug, poses in char_poses.items():
+            try:
+                await generate_batch(
+                    character_slug=slug,
+                    count=len(poses),
+                    custom_poses=poses,
+                )
+            except Exception as e:
+                logger.error(f"generate-for-scenes: {slug} failed: {e}")
+
+    asyncio.create_task(_run())
+
+    summary = {slug: len(poses) for slug, poses in char_poses.items()}
+    logger.info(f"generate-for-scenes: queued {total} images for {len(char_poses)} characters")
+    return {
+        "message": f"Queued {total} scene-matched training images for {len(char_poses)} characters",
+        "total_images": total,
+        "per_character": summary,
+        "scenes_analyzed": len(scenes),
+    }
+
+
+def _extract_pose_hints(description: str, char_name: str) -> list[str]:
+    """Extract pose/action phrases from a scene description for a character.
+
+    Splits on sentence boundaries and looks for action verbs and pose descriptors
+    near the character's name.
+    """
+    if not description:
+        return []
+
+    # Split into clauses (sentences, comma-separated phrases)
+    import re
+    clauses = re.split(r'[.!;]\s*', description)
+
+    first_name = char_name.split()[0].lower()
+    name_lower = char_name.lower()
+    hints = []
+
+    for clause in clauses:
+        clause_lower = clause.lower().strip()
+        if not clause_lower:
+            continue
+        # If clause mentions this character, extract it as a pose hint
+        if first_name in clause_lower or name_lower in clause_lower:
+            # Clean: remove the character name itself to get the action/pose
+            cleaned = clause.strip()
+            if cleaned and len(cleaned) > 10:
+                hints.append(cleaned)
+
+    # If no name-specific clauses, use the whole description chunked
+    if not hints:
+        # Use comma-separated chunks as generic pose hints
+        chunks = [c.strip() for c in description.split(",") if len(c.strip()) > 10]
+        hints = chunks[:5] if chunks else [description[:200]]
+
+    return hints
 
 
 # ===================================================================

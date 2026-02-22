@@ -15,6 +15,7 @@ import type {
   TextExtraction,
   LoraFile,
   IdentifyResult,
+  GapAnalysisResponse,
 } from '@/types'
 import { createRequest, ApiError } from './base'
 
@@ -361,5 +362,26 @@ export const trainingApi = {
 
   async getIngestProgress(): Promise<Record<string, unknown>> {
     return request('/ingest/progress')
+  },
+
+  // --- Gap Analysis (Production Readiness) ---
+
+  async getGapAnalysis(projectName: string): Promise<GapAnalysisResponse> {
+    return request(`/gap-analysis?project_name=${encodeURIComponent(projectName)}`)
+  },
+
+  // --- Scene-driven training generation ---
+
+  async generateForScenes(projectName: string, imagesPerScene: number = 3, characters?: string[]): Promise<{
+    message: string; total_images: number; per_character: Record<string, number>; scenes_analyzed: number
+  }> {
+    return request('/generate-for-scenes', {
+      method: 'POST',
+      body: JSON.stringify({
+        project_name: projectName,
+        images_per_scene: imagesPerScene,
+        ...(characters ? { characters } : {}),
+      }),
+    })
   },
 }

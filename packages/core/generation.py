@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from packages.core.config import BASE_PATH, COMFYUI_OUTPUT_DIR, normalize_sampler
-from packages.core.db import get_char_project_map
+from packages.core.db import get_char_project_map, log_model_change
 from packages.core.events import event_bus, GENERATION_SUBMITTED
 from packages.core.audit import log_generation
 from packages.core.model_selector import recommend_params
@@ -36,6 +36,12 @@ from packages.visual_pipeline.comfyui import (
 )
 
 logger = logging.getLogger(__name__)
+
+# --- Concurrency control ---
+# Only allow 2 ComfyUI jobs in-flight at once (1 rendering + 1 queued).
+# This prevents queue flooding and poll timeouts when multiple generate_batch
+# calls run concurrently (e.g. multi-checkpoint comparison).
+_comfyui_slot = asyncio.Semaphore(2)
 
 # --- Constants moved from src/generate_training_images.py ---
 
@@ -134,12 +140,16 @@ async def generate_batch(
     include_learned_negatives: bool = True,
     fire_events: bool = True,
     style_override: str | None = None,
+    checkpoint_override: str | None = None,
+    custom_poses: list[str] | None = None,
 ) -> list[dict]:
     """Generate N images using the full visual pipeline, poll, copy to dataset, register.
 
     This is the single shared generation function that all callers use.
     When style_override is provided, overrides checkpoint/cfg/steps/sampler/resolution
     from the named generation_styles row (e.g. "pony_nsfw_xl").
+    When checkpoint_override is provided, swaps just the checkpoint model (keeps
+    all other params from the project style).
     Returns a list of result dicts, one per submitted job.
     """
     # 1. Get DB info
@@ -148,15 +158,29 @@ async def generate_batch(
     if not db_info:
         raise ValueError(f"Character '{character_slug}' not found in DB")
 
-    # Apply style override if requested
+    # style_override is deprecated — use checkpoint_override instead.
+    # Named styles clobber project-tuned params (resolution, sampler, negatives).
     if style_override:
-        style = await _get_style_override(style_override)
-        if style:
-            logger.info(f"generate_batch: applying style_override '{style_override}'")
-            for key in ("checkpoint_model", "cfg_scale", "steps", "sampler", "scheduler",
-                        "width", "height", "positive_prompt_template", "negative_prompt_template"):
-                if style.get(key) is not None:
-                    db_info[key] = style[key]
+        logger.warning(
+            f"generate_batch: style_override='{style_override}' is DEPRECATED — "
+            f"use checkpoint_override instead. Ignoring."
+        )
+
+    # Direct checkpoint swap — use profile defaults instead of DB project params
+    # (DB params are tuned for the project's default checkpoint, not the override)
+    using_override = bool(checkpoint_override)
+    if checkpoint_override:
+        original_checkpoint = db_info.get("checkpoint_model")
+        db_info["checkpoint_model"] = checkpoint_override
+        logger.info(f"generate_batch: checkpoint_override -> {checkpoint_override}")
+        await log_model_change(
+            action="override",
+            checkpoint_model=checkpoint_override,
+            previous_model=original_checkpoint,
+            project_name=db_info.get("project_name"),
+            reason=f"generate_batch checkpoint_override for {character_slug}",
+            metadata={"character_slug": character_slug, "count": count},
+        )
 
     checkpoint = db_info.get("checkpoint_model")
     if not checkpoint:
@@ -174,16 +198,28 @@ async def generate_batch(
     logger.info(f"generate_batch: using profile '{profile['style_label']}' for {checkpoint}")
 
     # 3. Build negative prompt: profile defaults > DB template, + learned + feedback + character
-    base_negative = (
-        db_info.get("negative_prompt_template")
-        or profile["quality_negative"]
-    )
+    # When checkpoint_override is used, always use profile negatives (DB negatives may use
+    # wrong tags e.g. score_1 for PonyXL won't work on NoobAI)
+    if using_override:
+        base_negative = profile["quality_negative"]
+    else:
+        base_negative = (
+            db_info.get("negative_prompt_template")
+            or profile["quality_negative"]
+        )
 
     # Get recommendations and apply if confidence >= medium
-    use_cfg = db_info.get("cfg_scale")
-    use_steps = db_info.get("steps")
-    use_sampler = db_info.get("sampler")
-    use_scheduler = db_info.get("scheduler")
+    # When checkpoint_override is active, start from profile defaults not DB values
+    if using_override:
+        use_cfg = None
+        use_steps = None
+        use_sampler = None
+        use_scheduler = None
+    else:
+        use_cfg = db_info.get("cfg_scale")
+        use_steps = db_info.get("steps")
+        use_sampler = db_info.get("sampler")
+        use_scheduler = db_info.get("scheduler")
 
     if include_learned_negatives:
         try:
@@ -226,10 +262,15 @@ async def generate_batch(
     # Sampler normalization — cascade: recommend_params > DB > profile defaults
     use_cfg = use_cfg or profile.get("default_cfg") or 7.0
     use_steps = use_steps or profile.get("default_steps") or 25
+    use_sampler = use_sampler or profile.get("default_sampler")
+    use_scheduler = use_scheduler or profile.get("default_scheduler")
     norm_sampler, norm_scheduler = normalize_sampler(use_sampler, use_scheduler)
 
     # Prepare pose pool
-    if pose_variation:
+    if custom_poses:
+        # Caller-supplied poses (e.g. scene-derived) — use them in order, cycling if needed
+        poses = [custom_poses[i % len(custom_poses)] for i in range(count)]
+    elif pose_variation:
         if count <= len(POSE_VARIATIONS):
             poses = random.sample(POSE_VARIATIONS, count)
         else:
@@ -240,8 +281,10 @@ async def generate_batch(
     else:
         poses = [""] * count
 
-    # 3. Submit all jobs to ComfyUI
-    submitted = []
+    # 3. Submit, poll, and copy ONE job at a time under the concurrency semaphore.
+    # This prevents ComfyUI queue flooding when multiple generate_batch calls
+    # run concurrently (e.g. multi-checkpoint comparison).
+    results = []
     for i in range(count):
         pose = poses[i] if i < len(poses) else random.choice(POSE_VARIATIONS)
 
@@ -272,66 +315,61 @@ async def generate_batch(
             generation_type="image",
             seed=use_seed,
             character_slug=character_slug,
-        )
-
-        try:
-            prompt_id = submit_comfyui_workflow(workflow)
-        except Exception as e:
-            logger.error(f"generate_batch: ComfyUI submission failed for {character_slug}: {e}")
-            continue
-
-        actual_seed = workflow["3"]["inputs"]["seed"]
-
-        # Audit log
-        gen_id = await log_generation(
-            character_slug=character_slug,
             project_name=project_name,
-            comfyui_prompt_id=prompt_id,
-            generation_type="image",
-            checkpoint_model=checkpoint,
-            prompt=full_prompt,
-            negative_prompt=base_negative,
-            seed=actual_seed,
-            cfg_scale=use_cfg,
-            steps=use_steps,
-            sampler=norm_sampler,
-            scheduler=norm_scheduler,
-            width=db_info.get("width"),
-            height=db_info.get("height"),
+            pose=pose,
         )
 
-        if fire_events:
-            await event_bus.emit(GENERATION_SUBMITTED, {
-                "character_slug": character_slug,
-                "prompt_id": prompt_id,
-                "generation_history_id": gen_id,
-                "project_name": project_name,
-            })
+        # Acquire semaphore slot before submitting — limits ComfyUI queue depth
+        async with _comfyui_slot:
+            try:
+                prompt_id = submit_comfyui_workflow(workflow)
+            except Exception as e:
+                logger.error(f"generate_batch: ComfyUI submission failed for {character_slug}: {e}")
+                continue
 
-        submitted.append({
-            "prompt_id": prompt_id,
-            "seed": actual_seed,
-            "pose": pose,
-            "gen_id": gen_id,
-            "full_prompt": full_prompt,
-            "negative_prompt": base_negative,
-        })
+            actual_seed = workflow["3"]["inputs"]["seed"]
 
-        logger.info(
-            f"generate_batch: submitted {character_slug} [{i+1}/{count}] "
-            f"prompt_id={prompt_id} seed={actual_seed}"
-        )
+            # Audit log
+            gen_id = await log_generation(
+                character_slug=character_slug,
+                project_name=project_name,
+                comfyui_prompt_id=prompt_id,
+                generation_type="image",
+                checkpoint_model=checkpoint,
+                prompt=full_prompt,
+                negative_prompt=base_negative,
+                seed=actual_seed,
+                cfg_scale=use_cfg,
+                steps=use_steps,
+                sampler=norm_sampler,
+                scheduler=norm_scheduler,
+                width=db_info.get("width"),
+                height=db_info.get("height"),
+            )
 
-    if not submitted:
-        return []
+            if fire_events:
+                await event_bus.emit(GENERATION_SUBMITTED, {
+                    "character_slug": character_slug,
+                    "prompt_id": prompt_id,
+                    "generation_history_id": gen_id,
+                    "project_name": project_name,
+                })
 
-    # 4. Poll and copy each submitted job
-    results = []
-    for job in submitted:
-        filenames = await _poll_until_complete(job["prompt_id"])
+            logger.info(
+                f"generate_batch: submitted {character_slug} [{i+1}/{count}] "
+                f"prompt_id={prompt_id} seed={actual_seed}"
+            )
+
+            # Poll until this specific job completes before releasing the slot
+            filenames = await _poll_until_complete(prompt_id)
+
+        # --- Slot released, process results outside semaphore ---
         if not filenames:
-            logger.warning(f"generate_batch: timeout waiting for {job['prompt_id']}")
-            results.append({**job, "status": "timeout", "images": []})
+            logger.warning(f"generate_batch: timeout waiting for {prompt_id}")
+            results.append({
+                "prompt_id": prompt_id, "seed": actual_seed, "pose": pose,
+                "gen_id": gen_id, "status": "timeout", "images": [],
+            })
             continue
 
         copied_images = _copy_to_dataset(
@@ -339,9 +377,9 @@ async def generate_batch(
             filenames=filenames,
             design_prompt=design_prompt,
             job_params={
-                "seed": job["seed"],
-                "full_prompt": job["full_prompt"],
-                "negative_prompt": job["negative_prompt"],
+                "seed": actual_seed,
+                "full_prompt": full_prompt,
+                "negative_prompt": base_negative,
                 "checkpoint_model": checkpoint,
                 "model_profile": profile["style_label"],
                 "cfg_scale": use_cfg,
@@ -350,25 +388,24 @@ async def generate_batch(
                 "scheduler": norm_scheduler,
                 "width": db_info.get("width"),
                 "height": db_info.get("height"),
-                "comfyui_prompt_id": job["prompt_id"],
-                "generation_history_id": job["gen_id"],
+                "comfyui_prompt_id": prompt_id,
+                "generation_history_id": gen_id,
             },
             project_name=project_name,
             character_name=db_info.get("name"),
-            pose=job["pose"],
+            pose=pose,
         )
 
         for img_name in copied_images:
             register_pending_image(character_slug, img_name)
 
         results.append({
-            **job,
-            "status": "completed",
-            "images": copied_images,
+            "prompt_id": prompt_id, "seed": actual_seed, "pose": pose,
+            "gen_id": gen_id, "status": "completed", "images": copied_images,
         })
 
         logger.info(
-            f"generate_batch: completed {character_slug} prompt_id={job['prompt_id']} "
+            f"generate_batch: completed {character_slug} prompt_id={prompt_id} "
             f"-> {len(copied_images)} image(s)"
         )
 
@@ -421,8 +458,10 @@ def _copy_to_dataset(
 
         shutil.copy2(src, dest)
 
-        # Write caption
-        dest.with_suffix(".txt").write_text(design_prompt)
+        # Write caption — use full_prompt (includes pose, quality, solo suffix)
+        # so LoRA training learns pose/action conditioning, not just identity
+        caption = job_params.get("full_prompt") or design_prompt
+        dest.with_suffix(".txt").write_text(caption)
 
         # Write metadata sidecar
         meta = {
@@ -438,7 +477,6 @@ def _copy_to_dataset(
 
         copied.append(unique_name)
 
-        # Clean up ComfyUI output after copying
-        src.unlink(missing_ok=True)
+        # Keep images in ComfyUI output so they show in the UI
 
     return copied

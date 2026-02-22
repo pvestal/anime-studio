@@ -54,6 +54,19 @@
         {{ shots.length }} shots, est. {{ estimateMinutes(shots) }} min gen time
       </div>
 
+      <!-- Training readiness warning -->
+      <div v-if="unreadyCharacters.length > 0" style="border-left: 3px solid var(--status-warning); background: rgba(160, 128, 80, 0.1); padding: 8px 10px; margin-top: 10px; border-radius: 0 4px 4px 0;">
+        <div style="font-size: 11px; font-weight: 500; color: var(--status-warning); margin-bottom: 4px;">Characters without LoRA</div>
+        <div v-for="c in unreadyCharacters" :key="c.slug" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 2px;">
+          {{ c.name }} — {{ c.reason }}
+        </div>
+        <button
+          class="btn"
+          style="font-size: 11px; padding: 2px 8px; margin-top: 6px;"
+          @click="emit('go-to-training')"
+        >Go to Training tab</button>
+      </div>
+
       <!-- Story Arc dropdown (optional tag) -->
       <div v-if="storyArcs.length > 0" class="field-group" style="margin-top: 10px;">
         <label class="field-label">Story Arc</label>
@@ -63,13 +76,19 @@
         </select>
       </div>
 
-      <div style="display: flex; gap: 8px; margin-top: 12px;">
+      <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
         <button class="btn btn-primary" @click="emit('save')" :disabled="saving">Save</button>
         <button
           class="btn btn-success"
           :disabled="shots.length === 0 || generating"
           @click="emit('confirm-generate')"
         >Generate</button>
+        <button
+          class="btn"
+          :disabled="shots.length === 0 || allShotsHaveImages"
+          @click="emit('auto-assign')"
+          title="Auto-assign best source images to all unassigned shots"
+        >Auto-assign Images</button>
         <button class="btn" @click="emit('back')">Back</button>
       </div>
 
@@ -138,11 +157,24 @@
               {{ shot.status || 'pending' }}
             </span>
           </div>
-          <div style="font-size: 11px; color: var(--text-muted);">
-            {{ shot.shot_type }}/{{ shot.camera_angle }} {{ shot.duration_seconds }}s
-          </div>
-          <div v-if="shot.motion_prompt" style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; max-height: 30px; overflow: hidden;">
-            {{ shot.motion_prompt }}
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <img
+              v-if="shot.source_image_path"
+              :src="sourceImageUrl(shot.source_image_path)"
+              style="width: 48px; height: 48px; object-fit: cover; border-radius: 3px; flex-shrink: 0;"
+              @error="($event.target as HTMLImageElement).style.display = 'none'"
+            />
+            <div v-else style="width: 48px; height: 48px; border-radius: 3px; background: var(--bg-tertiary); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 10px; color: var(--status-warning);">
+              no img
+            </div>
+            <div>
+              <div style="font-size: 11px; color: var(--text-muted);">
+                {{ shot.shot_type }}/{{ shot.camera_angle }} {{ shot.duration_seconds }}s
+              </div>
+              <div v-if="shot.motion_prompt" style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; max-height: 30px; overflow: hidden;">
+                {{ shot.motion_prompt }}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -168,7 +200,7 @@
 
 <script setup lang="ts">
 import { reactive, ref, computed, watch } from 'vue'
-import type { BuilderScene, BuilderShot, SceneAudio } from '@/types'
+import type { BuilderScene, BuilderShot, SceneAudio, GapAnalysisCharacter } from '@/types'
 import { useProjectStore } from '@/stores/project'
 import ShotDetailsPanel from './ShotDetailsPanel.vue'
 import EchoAssistButton from '../EchoAssistButton.vue'
@@ -186,6 +218,7 @@ const props = defineProps<{
   shotVideoSrc: string
   sourceImageUrl: (path: string) => string
   characters: { slug: string; name: string }[]
+  gapCharacters?: Record<string, GapAnalysisCharacter>
 }>()
 
 const emit = defineEmits<{
@@ -196,10 +229,37 @@ const emit = defineEmits<{
   'add-shot': []
   'remove-shot': [idx: number]
   'browse-image': []
+  'auto-assign': []
   'update-shot-field': [idx: number, field: string, value: unknown]
   'update-scene': [scene: Partial<BuilderScene>]
   'audio-changed': [audio: SceneAudio | null]
+  'go-to-training': []
 }>()
+
+const allShotsHaveImages = computed(() =>
+  props.shots.length > 0 && props.shots.every(s => !!s.source_image_path)
+)
+
+const unreadyCharacters = computed((): Array<{ slug: string; name: string; reason: string }> => {
+  if (!props.gapCharacters) return []
+  const slugsSeen = new Set<string>()
+  const result: Array<{ slug: string; name: string; reason: string }> = []
+  for (const shot of props.shots) {
+    const chars = (shot.characters_present as string[]) || []
+    for (const slug of chars) {
+      if (slugsSeen.has(slug)) continue
+      slugsSeen.add(slug)
+      const gc = props.gapCharacters[slug]
+      if (gc && !gc.has_lora) {
+        const reason = gc.approved_count < 10
+          ? `${gc.approved_count} images (need 10+)`
+          : 'LoRA not yet trained'
+        result.push({ slug, name: gc.name, reason })
+      }
+    }
+  }
+  return result
+})
 
 const timeOptions = ['dawn', 'morning', 'midday', 'afternoon', 'sunset', 'evening', 'night']
 const weatherOptions = ['clear', 'cloudy', 'rain', 'snow', 'fog', 'storm']

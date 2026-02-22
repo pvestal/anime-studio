@@ -19,19 +19,33 @@ export class ApiError extends Error {
  */
 export function createRequest(base: string) {
   return async function<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const response = await fetch(`${base}${endpoint}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-      ...options,
-    })
+    const controller = new AbortController()
+    const timeoutMs = 15000
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new ApiError(response.status, errorText)
+    try {
+      const response = await fetch(`${base}${endpoint}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+        ...options,
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new ApiError(response.status, errorText)
+      }
+
+      return response.json()
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw new ApiError(408, `Request timed out after ${timeoutMs / 1000}s — server may be busy`)
+      }
+      throw err
+    } finally {
+      clearTimeout(timer)
     }
-
-    return response.json()
   }
 }

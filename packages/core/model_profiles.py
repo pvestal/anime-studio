@@ -26,6 +26,102 @@ logger = logging.getLogger(__name__)
 # Order matters: first match wins. Put specific names before generic ones.
 
 MODEL_PROFILES: dict[str, dict] = {
+    "NoobAI-XL-Vpred": {
+        "architecture": "sdxl",
+        "prompt_format": "booru_tags",
+        "quality_prefix": "masterpiece, best quality, very awa, newest, absurdres, highres",
+        "quality_negative": (
+            "worst quality, low quality, bad anatomy, bad hands, "
+            "ai-generated, watermark, text, signature, blurry"
+        ),
+        "strip_style_tags": [
+            "Arcane painterly style",
+            "neon-noir atmosphere",
+            "neon-noir lighting",
+            "gritty neon-noir atmosphere",
+            "dramatic shadows",
+            "dramatic chiaroscuro",
+            "dramatic chiaroscuro lighting",
+            "dramatic lighting",
+            "bold shadows",
+            "dark cyberpunk alley setting",
+            "cyberpunk alley",
+            "dark alley background",
+            "neon-lit background",
+            "cyberpunk city background",
+            "muted gritty tones",
+        ],
+        "solo_suffix": "solo",
+        "background_suffix": "simple background, white background",
+        "ip_adapter_model": None,
+        "vision_style_hint": "anime-style illustration",
+        "style_label": "NoobAI XL (vpred)",
+        "default_cfg": 4.5,
+        "default_steps": 30,
+        "default_sampler": "euler",
+        "default_scheduler": "sgm_uniform",
+        "prediction_type": "v_prediction",
+        "rescale_cfg": 0.7,
+    },
+    "NoobAI-XL": {
+        "architecture": "sdxl",
+        "prompt_format": "booru_tags",
+        "quality_prefix": "masterpiece, best quality, very awa, newest, absurdres, highres",
+        "quality_negative": (
+            "worst quality, low quality, bad anatomy, bad hands, "
+            "ai-generated, watermark, text, signature, blurry"
+        ),
+        "strip_style_tags": [
+            "Arcane painterly style",
+            "neon-noir atmosphere",
+            "neon-noir lighting",
+            "gritty neon-noir atmosphere",
+            "dramatic shadows",
+            "dramatic chiaroscuro",
+            "dramatic chiaroscuro lighting",
+            "dramatic lighting",
+            "bold shadows",
+            "dark cyberpunk alley setting",
+            "cyberpunk alley",
+            "dark alley background",
+            "neon-lit background",
+            "cyberpunk city background",
+            "muted gritty tones",
+        ],
+        "solo_suffix": "solo",
+        "background_suffix": "simple background, white background",
+        "ip_adapter_model": None,
+        "vision_style_hint": "anime-style illustration",
+        "style_label": "NoobAI XL (eps)",
+        "default_cfg": 5.5,
+        "default_steps": 28,
+        "default_sampler": "euler_ancestral",
+        "default_scheduler": "normal",
+    },
+    "Counterfeit": {
+        "architecture": "sd15",
+        "prompt_format": "prose",
+        "quality_prefix": (
+            "masterpiece, best quality, highly detailed, sharp focus, "
+            "dark atmosphere, dramatic lighting, hard shadows, cinematic"
+        ),
+        "quality_negative": (
+            "worst quality, low quality, blurry, deformed, disfigured, "
+            "bad anatomy, extra limbs, watermark, text, signature, "
+            "3d, photorealistic, soft lighting, pastel colors, chibi, "
+            "rounded features, cute style"
+        ),
+        "strip_style_tags": [],
+        "solo_suffix": "solo, 1person, single character",
+        "background_suffix": "dark background, simple background",
+        "ip_adapter_model": "ip-adapter-plus_sd15.safetensors",
+        "vision_style_hint": "dark anime illustration with sharp lines, dramatic lighting, and noir atmosphere",
+        "style_label": "dark anime (Counterfeit V3)",
+        "default_cfg": 7.5,
+        "default_steps": 30,
+        "default_sampler": "euler_ancestral",
+        "default_scheduler": "normal",
+    },
     "ponyDiffusion": {
         "architecture": "sdxl",
         "prompt_format": "booru_tags",

@@ -9,9 +9,16 @@
         <select v-model="editStyle.checkpoint_model" class="field-input" style="width: 100%;">
           <option value="">Select checkpoint...</option>
           <option v-for="c in checkpoints" :key="c.filename" :value="c.filename">
-            {{ c.filename }} ({{ c.size_mb }} MB)
+            {{ c.style_label || c.filename }} — {{ c.architecture || '?' }} / {{ c.prompt_format || '?' }} ({{ c.size_mb }} MB)
           </option>
         </select>
+        <div v-if="selectedProfile" class="checkpoint-info">
+          <span class="chip">{{ selectedProfile.architecture }}</span>
+          <span class="chip">{{ selectedProfile.prompt_format }}</span>
+          <span v-if="selectedProfile.default_cfg" class="chip-muted">CFG {{ selectedProfile.default_cfg }}</span>
+          <span v-if="selectedProfile.default_steps" class="chip-muted">{{ selectedProfile.default_steps }} steps</span>
+          <span v-if="selectedProfile.default_sampler" class="chip-muted">{{ selectedProfile.default_sampler }}</span>
+        </div>
         <span
           v-if="editStyle.checkpoint_model && !checkpointExists(editStyle.checkpoint_model)"
           style="font-size: 11px; color: var(--status-error);"
@@ -212,6 +219,11 @@ function checkpointExists(filename: string): boolean {
   return props.checkpoints.some(c => c.filename === filename)
 }
 
+const selectedProfile = computed(() => {
+  if (!editStyle.checkpoint_model) return null
+  return props.checkpoints.find(c => c.filename === editStyle.checkpoint_model) || null
+})
+
 const reason = ref('')
 
 function handleSave() {
@@ -372,5 +384,28 @@ watch(() => props.projectId, (id) => {
 .history-use-btn:hover {
   background: var(--accent-primary);
   color: #fff;
+}
+.checkpoint-info {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--accent-primary);
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.chip-muted {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  border: 1px solid var(--border-primary);
 }
 </style>

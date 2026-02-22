@@ -423,11 +423,13 @@ async def approve_image(approval: ApprovalRequest):
 
     regenerated = False
     if not approval.approved:
-        try:
-            queue_regeneration(safe_name)
-            regenerated = True
-        except Exception as e:
-            logger.warning(f"Regeneration queue failed for {safe_name}: {e}")
+        import packages.core.replenishment as replenishment
+        if replenishment._enabled:
+            try:
+                queue_regeneration(safe_name)
+                regenerated = True
+            except Exception as e:
+                logger.warning(f"Regeneration queue failed for {safe_name}: {e}")
 
     return {
         "message": f"Image {approval.image_name} {'approved' if approval.approved else 'rejected'}",
@@ -589,16 +591,35 @@ async def bulk_reject(req: BulkRejectRequest):
                 json.dump(statuses, f, indent=2)
 
             feedback_file = dataset_path / "feedback.json"
-            feedback = {}
+            feedback = {"rejections": [], "rejection_count": 0, "negative_additions": [], "categories": []}
             if feedback_file.exists():
-                with open(feedback_file) as f:
-                    feedback = json.load(f)
+                try:
+                    loaded = json.load(open(feedback_file))
+                    if isinstance(loaded, dict):
+                        feedback.update(loaded)
+                except (json.JSONDecodeError, IOError):
+                    pass
+            # Ensure required keys
+            if not isinstance(feedback.get("rejections"), list):
+                feedback["rejections"] = []
+            if not isinstance(feedback.get("categories"), list):
+                feedback["categories"] = []
             category = "not_solo" if req.criteria == "solo_false" else "bad_quality"
-            existing = feedback.get("categories", [])
-            if category not in existing:
-                existing.append(category)
-            feedback["categories"] = existing
-            feedback["rejection_count"] = feedback.get("rejection_count", 0) + len(matches)
+            if category not in feedback["categories"]:
+                feedback["categories"].append(category)
+            # Record individual rejections for the feedback loop
+            for img_name in matches:
+                feedback["rejections"].append({
+                    "image": img_name,
+                    "feedback": f"batch_{req.criteria}",
+                    "categories": [category],
+                    "timestamp": datetime.now().isoformat(),
+                })
+            feedback["rejection_count"] = len(feedback["rejections"])
+            # Keep only last 50 rejections
+            if len(feedback["rejections"]) > 50:
+                feedback["rejections"] = feedback["rejections"][-50:]
+                feedback["rejection_count"] = len(feedback["rejections"])
             with open(feedback_file, "w") as f:
                 json.dump(feedback, f, indent=2)
 

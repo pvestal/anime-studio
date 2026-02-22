@@ -15,6 +15,13 @@
         </select>
       </div>
       <button v-if="selectedProjectId" class="btn btn-primary" @click="openNewScene">+ New Scene</button>
+      <button
+        v-if="selectedProjectId && scenes.length > 0"
+        class="btn"
+        :disabled="generatingTraining"
+        @click="generateTrainingFromScenes"
+        title="Generate LoRA training images with poses matching your scene descriptions"
+      >{{ generatingTraining ? 'Generating...' : 'Train for Scenes' }}</button>
     </div>
 
     <!-- Sub-view toggle (Scenes / Episodes) -->
@@ -38,6 +45,7 @@
       :loading="loading"
       :has-project="!!selectedProjectId"
       :generating-from-story="generatingFromStory"
+      :gap-by-scene-id="gapBySceneId"
       @edit="openEditor"
       @monitor="openMonitor"
       @play="playSceneVideo"
@@ -65,6 +73,7 @@
       :shot-video-src="currentShotVideoSrc"
       :source-image-url="sourceImageUrl"
       :characters="projectCharacters"
+      :gap-characters="gapByCharSlug"
       @save="saveScene"
       @confirm-generate="confirmGenerate"
       @back="backToLibrary"
@@ -72,9 +81,11 @@
       @add-shot="addShot"
       @remove-shot="removeShot"
       @browse-image="openImagePicker"
+      @auto-assign="autoAssignAll"
       @update-shot-field="updateShotField"
       @update-scene="onUpdateScene"
       @audio-changed="onAudioChanged"
+      @go-to-training="goToTraining"
     />
 
     <!-- VIEW 3: Generation Monitor -->
@@ -96,6 +107,8 @@
       :approved-images="approvedImages"
       :image-url="imageUrl"
       :characters-present="currentShotCharacters"
+      :recommendations="currentShotRecommendations"
+      :current-shot-type="currentShotType"
       @close="showImagePicker = false"
       @select="selectImage"
     />
@@ -121,6 +134,15 @@
         <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
           Estimated time: ~{{ estimateMinutes(editShots) }} minutes
         </div>
+        <div v-if="generationUnreadyChars.length > 0" style="border-left: 3px solid var(--status-warning); background: rgba(160, 128, 80, 0.1); padding: 10px 12px; margin-bottom: 16px; border-radius: 0 4px 4px 0;">
+          <div style="font-size: 12px; font-weight: 500; color: var(--status-warning); margin-bottom: 6px;">Characters without LoRA</div>
+          <div v-for="c in generationUnreadyChars" :key="c.slug" style="font-size: 12px; color: var(--text-secondary); margin-bottom: 2px;">
+            {{ c.name }} — {{ c.reason }}
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+            FramePack doesn't use LoRAs directly, but source image quality depends on training data.
+          </div>
+        </div>
         <div style="display: flex; gap: 8px; justify-content: flex-end;">
           <button class="btn" @click="showGenerateConfirm = false">Cancel</button>
           <button class="btn btn-success" @click="startGeneration">Generate</button>
@@ -132,13 +154,17 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
-import type { BuilderScene, BuilderShot, SceneGenerationStatus, SceneAudio } from '@/types'
+import { trainingApi } from '@/api/training'
+import type { BuilderScene, BuilderShot, SceneGenerationStatus, SceneAudio, ShotRecommendation, ShotRecommendations, ImageWithMetadata, GapAnalysisResponse, GapAnalysisScene, GapAnalysisCharacter } from '@/types'
 import SceneLibraryView from './scenes/SceneLibraryView.vue'
 import SceneEditorView from './scenes/SceneEditorView.vue'
 import GenerationMonitorView from './scenes/GenerationMonitorView.vue'
 import ImagePickerModal from './scenes/ImagePickerModal.vue'
 import EpisodeView from './scenes/EpisodeView.vue'
+
+const router = useRouter()
 
 const projects = ref<Array<{ id: number; name: string }>>([])
 const selectedProjectId = ref(0)
@@ -156,16 +182,107 @@ const monitorStatus = ref<SceneGenerationStatus | null>(null)
 let monitorInterval: ReturnType<typeof setInterval> | null = null
 const showImagePicker = ref(false)
 const loadingImages = ref(false)
-const approvedImages = ref<Record<string, { character_name: string; images: string[] }>>({})
+const approvedImages = ref<Record<string, { character_name: string; images: (string | ImageWithMetadata)[] }>>({})
 const showVideoPlayer = ref(false)
 const videoPlayerSrc = ref('')
 const showGenerateConfirm = ref(false)
 const generatingFromStory = ref(false)
+const shotRecommendations = ref<ShotRecommendations[]>([])
+const autoAssigning = ref(false)
+const generatingTraining = ref(false)
+const gapAnalysis = ref<GapAnalysisResponse | null>(null)
+
+const selectedProjectName = computed(() => {
+  const p = projects.value.find(p => p.id === selectedProjectId.value)
+  return p?.name || ''
+})
+
+const gapBySceneId = computed((): Record<string, GapAnalysisScene> => {
+  if (!gapAnalysis.value) return {}
+  const map: Record<string, GapAnalysisScene> = {}
+  for (const s of gapAnalysis.value.scenes) {
+    map[s.id] = s
+  }
+  return map
+})
+
+const gapByCharSlug = computed((): Record<string, GapAnalysisCharacter> => {
+  if (!gapAnalysis.value) return {}
+  const map: Record<string, GapAnalysisCharacter> = {}
+  for (const c of gapAnalysis.value.characters) {
+    map[c.slug] = c
+  }
+  return map
+})
+
+const generationUnreadyChars = computed((): Array<{ slug: string; name: string; reason: string }> => {
+  if (!gapAnalysis.value) return []
+  const slugsSeen = new Set<string>()
+  const result: Array<{ slug: string; name: string; reason: string }> = []
+  for (const shot of editShots.value) {
+    const chars = (shot.characters_present as string[]) || []
+    for (const slug of chars) {
+      if (slugsSeen.has(slug)) continue
+      slugsSeen.add(slug)
+      const gc = gapByCharSlug.value[slug]
+      if (gc && !gc.has_lora) {
+        const reason = gc.approved_count < 10
+          ? `${gc.approved_count} images (need 10+)`
+          : 'LoRA not yet trained'
+        result.push({ slug, name: gc.name, reason })
+      }
+    }
+  }
+  return result
+})
+
+async function loadGapAnalysis() {
+  if (!selectedProjectName.value) return
+  try {
+    gapAnalysis.value = await trainingApi.getGapAnalysis(selectedProjectName.value)
+  } catch (e) {
+    console.error('Gap analysis load failed (non-blocking):', e)
+    gapAnalysis.value = null
+  }
+}
+
+function goToTraining() {
+  router.push('/train')
+}
+
+async function generateTrainingFromScenes() {
+  if (!selectedProjectName.value) return
+  generatingTraining.value = true
+  try {
+    const result = await trainingApi.generateForScenes(selectedProjectName.value, 3)
+    alert(`${result.message}\n\nPer character:\n${Object.entries(result.per_character).map(([k, v]) => `  ${k}: ${v} images`).join('\n')}`)
+    // Refresh gap analysis after generation starts
+    loadGapAnalysis()
+  } catch (e) {
+    console.error('Scene training generation failed:', e)
+    alert(`Failed: ${e}`)
+  } finally {
+    generatingTraining.value = false
+  }
+}
 
 const currentShotCharacters = computed(() => {
   if (selectedShotIdx.value < 0) return []
   const shot = editShots.value[selectedShotIdx.value]
   return (shot?.characters_present as string[]) || []
+})
+
+const currentShotRecommendations = computed((): ShotRecommendation[] => {
+  if (selectedShotIdx.value < 0) return []
+  const shot = editShots.value[selectedShotIdx.value]
+  if (!shot?.id) return []
+  const match = shotRecommendations.value.find(r => r.shot_id === shot.id)
+  return match?.recommendations || []
+})
+
+const currentShotType = computed((): string | undefined => {
+  if (selectedShotIdx.value < 0) return undefined
+  return editShots.value[selectedShotIdx.value]?.shot_type || undefined
 })
 
 const projectCharacters = computed(() => {
@@ -200,9 +317,11 @@ loadProjects()
 watch(selectedProjectId, async (pid) => {
   if (!pid) {
     scenes.value = []
+    gapAnalysis.value = null
     return
   }
   await loadScenes()
+  loadGapAnalysis()
 })
 
 async function loadScenes() {
@@ -251,6 +370,7 @@ async function openEditor(scene: BuilderScene) {
     currentView.value = 'editor'
     // Pre-load approved images for character list (dialogue dropdown)
     loadApprovedImagesBackground()
+    loadRecommendations()
   } catch (e) {
     console.error('Failed to load scene:', e)
   }
@@ -265,6 +385,46 @@ async function loadApprovedImagesBackground() {
     approvedImages.value = data.characters
   } catch (e) {
     console.error('Failed to pre-load approved images:', e)
+  }
+}
+
+async function loadRecommendations() {
+  if (!editSceneId.value) return
+  try {
+    const data = await api.getShotRecommendations(editSceneId.value, 5)
+    shotRecommendations.value = data.shots
+  } catch (e) {
+    console.error('Failed to load recommendations:', e)
+    shotRecommendations.value = []
+  }
+}
+
+async function autoAssignAll() {
+  if (!editSceneId.value) return
+  autoAssigning.value = true
+  try {
+    // Ensure recommendations are loaded
+    if (shotRecommendations.value.length === 0) {
+      await loadRecommendations()
+    }
+    let assigned = 0
+    for (let i = 0; i < editShots.value.length; i++) {
+      const shot = editShots.value[i]
+      if (shot.source_image_path) continue // already assigned
+      const match = shotRecommendations.value.find(r => r.shot_id === shot.id)
+      if (match && match.recommendations.length > 0) {
+        const best = match.recommendations[0]
+        shot.source_image_path = `${best.slug}/images/${best.image_name}`
+        assigned++
+      }
+    }
+    if (assigned > 0) {
+      await saveScene()
+    }
+  } catch (e) {
+    console.error('Auto-assign failed:', e)
+  } finally {
+    autoAssigning.value = false
   }
 }
 
@@ -427,11 +587,19 @@ async function openImagePicker() {
   showImagePicker.value = true
   loadingImages.value = true
   try {
-    const data = await api.getApprovedImagesForScene(
-      editSceneId.value || 'new',
-      selectedProjectId.value,
-    )
+    // Try metadata-enriched images first, fall back to plain
+    const sceneRef = editSceneId.value || 'new'
+    let data
+    try {
+      data = await api.getApprovedImagesWithMetadata(sceneRef, selectedProjectId.value)
+    } catch {
+      data = await api.getApprovedImagesForScene(sceneRef, selectedProjectId.value)
+    }
     approvedImages.value = data.characters
+    // Load recommendations if scene is saved
+    if (editSceneId.value) {
+      loadRecommendations()
+    }
   } catch (e) {
     console.error('Failed to load approved images:', e)
   } finally {

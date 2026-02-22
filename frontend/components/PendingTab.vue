@@ -64,6 +64,7 @@
       :filter-character="approvalStore.filterCharacter"
       :filter-source="filterSource"
       :filter-model="filterModel"
+      :sort-by="sortBy"
       :project-names="approvalStore.projectNames"
       :character-names="approvalStore.characterNames"
       :source-names="sourceNames"
@@ -77,6 +78,7 @@
       @update:filter-character="approvalStore.filterCharacter = $event"
       @update:filter-source="filterSource = $event"
       @update:filter-model="filterModel = $event"
+      @update:sort-by="sortBy = $event"
       @refresh="refresh()"
       @batch-approve="batchApprove"
     />
@@ -237,6 +239,7 @@
       @approve-group="approveGroup"
       @toggle-expand="toggleExpand"
       @toggle-selection="toggleSelection"
+      @preview="previewImage = $event"
       @open-detail="detailImage = $event"
       @approve="openApprovalEditor($event, 'approve')"
       @reject="openApprovalEditor($event, 'reject')"
@@ -245,7 +248,7 @@
       @toggle-char-expand="toggleCharacterExpand"
     />
 
-    <!-- Image detail slide-over panel -->
+    <!-- Image detail slide-over panel (double-click) -->
     <ImageDetailPanel
       :image="detailImage"
       :action-disabled="approvalStore.loading"
@@ -253,6 +256,29 @@
       @approve="onDetailApprove"
       @reassign="(img) => { detailImage = null; openReassign(img) }"
     />
+
+    <!-- Lightbox preview (single click) -->
+    <Teleport to="body">
+      <Transition name="lightbox">
+        <div v-if="previewImage" class="lightbox-overlay" @click="previewImage = null">
+          <img
+            :src="previewImageUrl"
+            :alt="previewImage.name"
+            class="lightbox-img"
+            @click.stop
+          />
+          <div class="lightbox-info" @click.stop>
+            <span class="lightbox-name">{{ previewImage.character_name }} — {{ previewImage.name }}</span>
+            <div class="lightbox-actions">
+              <button class="btn btn-success" style="font-size: 12px; padding: 4px 12px;" @click="doApprove(previewImage!, true); previewImage = null" :disabled="approvalStore.loading">Approve</button>
+              <button class="btn btn-danger" style="font-size: 12px; padding: 4px 12px;" @click="openApprovalEditor(previewImage!, 'reject'); previewImage = null" :disabled="approvalStore.loading">Reject</button>
+              <button class="btn" style="font-size: 12px; padding: 4px 12px;" @click="detailImage = previewImage; previewImage = null">Edit / Details</button>
+            </div>
+          </div>
+          <button class="lightbox-close" @click="previewImage = null">&times;</button>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
@@ -276,6 +302,7 @@ const approvalStore = useApprovalStore()
 const charactersStore = useCharactersStore()
 const filterModel = ref('')
 const filterSource = ref('')
+const sortBy = ref('newest')
 const lastRefreshed = ref<Date | null>(null)
 const lastRefreshedAgo = ref('')
 const selectedImages = ref<Set<string>>(new Set())
@@ -401,6 +428,12 @@ const flashState = reactive<Record<string, 'approve' | 'reject' | null>>({})
 const toasts = ref<{ id: number; message: string; type: 'approve' | 'reject' | 'regen' }[]>([])
 const batchProgress = ref<{ action: string; done: number; total: number } | null>(null)
 const detailImage = ref<PendingImage | null>(null)
+const previewImage = ref<PendingImage | null>(null)
+
+const previewImageUrl = computed(() => {
+  if (!previewImage.value) return ''
+  return api.imageUrl(previewImage.value.character_slug, previewImage.value.name)
+})
 
 // Inline editor state
 const editingImage = ref<PendingImage | null>(null)
@@ -444,7 +477,7 @@ const modelNames = computed(() => {
     .map(([name, count]) => ({ name, count, short: name.replace('.safetensors', '') }))
 })
 
-// Images filtered by source + model (on top of store's project/character filter)
+// Images filtered by source + model (on top of store's project/character filter), then sorted
 const modelFilteredImages = computed(() => {
   let base = approvalStore.filteredImages
   if (filterSource.value) {
@@ -453,7 +486,29 @@ const modelFilteredImages = computed(() => {
   if (filterModel.value) {
     base = base.filter(img => (img.checkpoint_model || 'unknown') === filterModel.value)
   }
-  return base
+  // Apply sort
+  const sorted = [...base]
+  switch (sortBy.value) {
+    case 'newest':
+      sorted.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+      break
+    case 'oldest':
+      sorted.sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime())
+      break
+    case 'character':
+      sorted.sort((a, b) => (a.character_name || '').localeCompare(b.character_name || ''))
+      break
+    case 'quality-high':
+      sorted.sort((a, b) => (b.metadata?.quality_score ?? -1) - (a.metadata?.quality_score ?? -1))
+      break
+    case 'quality-low':
+      sorted.sort((a, b) => (a.metadata?.quality_score ?? 999) - (b.metadata?.quality_score ?? 999))
+      break
+    case 'model':
+      sorted.sort((a, b) => (a.checkpoint_model || '').localeCompare(b.checkpoint_model || ''))
+      break
+  }
+  return sorted
 })
 
 // Per-character expansion state (show all images)
@@ -696,8 +751,10 @@ async function approveGroup(groupName: string, images: PendingImage[]) {
   batchProgress.value = { action: `Approving ${images.length} for ${groupName}...`, done: 0, total: images.length }
   for (const image of images) {
     try { await approvalStore.approveImage(image, true) } catch { /* continue */ }
+    selectedImages.value.delete(image.id)
     batchProgress.value!.done++
   }
+  selectedImages.value = new Set(selectedImages.value)
   batchProgress.value = null
   showToast(`Approved ${images.length} for ${groupName}`, 'approve')
 }
@@ -707,8 +764,10 @@ async function approveAllProject(projectName: string, projectGroup: ProjectGroup
   batchProgress.value = { action: `Approving ${allImages.length} for ${projectName}...`, done: 0, total: allImages.length }
   for (const image of allImages) {
     try { await approvalStore.approveImage(image, true) } catch { /* continue */ }
+    selectedImages.value.delete(image.id)
     batchProgress.value!.done++
   }
+  selectedImages.value = new Set(selectedImages.value)
   batchProgress.value = null
   showToast(`Approved ${allImages.length} for ${projectName}`, 'approve')
 }
@@ -743,4 +802,59 @@ async function batchApprove(approved: boolean) {
 .toast-leave-active { transition: all 300ms ease; }
 .toast-enter-from { opacity: 0; transform: translateX(40px); }
 .toast-leave-to { opacity: 0; transform: translateX(40px); }
+
+/* Lightbox */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+.lightbox-img {
+  max-width: 90vw;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  cursor: default;
+}
+.lightbox-info {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  cursor: default;
+}
+.lightbox-name {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.8);
+}
+.lightbox-actions {
+  display: flex;
+  gap: 8px;
+}
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  font-size: 32px;
+  color: rgba(255, 255, 255, 0.7);
+  background: none;
+  border: none;
+  cursor: pointer;
+  line-height: 1;
+}
+.lightbox-close:hover {
+  color: #fff;
+}
+
+.lightbox-enter-active { transition: opacity 150ms ease; }
+.lightbox-leave-active { transition: opacity 150ms ease; }
+.lightbox-enter-from,
+.lightbox-leave-to { opacity: 0; }
 </style>

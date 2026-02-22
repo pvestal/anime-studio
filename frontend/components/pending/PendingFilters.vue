@@ -27,6 +27,14 @@
             {{ name }} ({{ characterImageCount(name) }})
           </option>
         </select>
+        <select :value="sortBy" @change="$emit('update:sortBy', ($event.target as HTMLSelectElement).value)" style="min-width: 140px;">
+          <option value="newest">Newest First</option>
+          <option value="oldest">Oldest First</option>
+          <option value="character">By Character</option>
+          <option value="quality-high">Quality (High)</option>
+          <option value="quality-low">Quality (Low)</option>
+          <option value="model">By Model</option>
+        </select>
         <button class="btn" @click="$emit('refresh')" :disabled="loading">
           {{ loading ? 'Loading...' : 'Refresh' }}
         </button>
@@ -115,6 +123,7 @@ defineProps<{
   filterCharacter: string
   filterSource: string
   filterModel: string
+  sortBy: string
   projectNames: string[]
   characterNames: string[]
   sourceNames: SourceInfo[]
@@ -131,6 +140,7 @@ defineEmits<{
   (e: 'update:filterCharacter', value: string): void
   (e: 'update:filterSource', value: string): void
   (e: 'update:filterModel', value: string): void
+  (e: 'update:sortBy', value: string): void
   (e: 'refresh'): void
   (e: 'batch-approve', approved: boolean): void
 }>()

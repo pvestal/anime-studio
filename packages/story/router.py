@@ -285,12 +285,26 @@ async def get_projects():
 
 @router.get("/checkpoints")
 async def get_checkpoints():
-    """List available checkpoint model files."""
+    """List available checkpoint model files with model profile info."""
+    from packages.core.model_profiles import get_model_profile
     if not CHECKPOINTS_DIR.exists():
         return {"checkpoints": []}
-    return {"checkpoints": [{"filename": f.name, "size_mb": round(f.stat().st_size / 1048576, 1)}
-                            for f in sorted(CHECKPOINTS_DIR.iterdir())
-                            if f.suffix == ".safetensors" and f.is_file()]}
+    results = []
+    for f in sorted(CHECKPOINTS_DIR.iterdir()):
+        if f.suffix != ".safetensors" or not f.is_file():
+            continue
+        profile = get_model_profile(f.name)
+        results.append({
+            "filename": f.name,
+            "size_mb": round(f.stat().st_size / 1048576, 1),
+            "style_label": profile.get("style_label", ""),
+            "architecture": profile.get("architecture", ""),
+            "prompt_format": profile.get("prompt_format", ""),
+            "default_cfg": profile.get("default_cfg"),
+            "default_steps": profile.get("default_steps"),
+            "default_sampler": profile.get("default_sampler", ""),
+        })
+    return {"checkpoints": results}
 
 
 @router.get("/projects/{project_id}")

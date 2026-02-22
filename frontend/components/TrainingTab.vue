@@ -1,41 +1,79 @@
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+    <!-- Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
       <div>
-        <h2 style="font-size: 18px; font-weight: 500;">Training</h2>
-        <p style="font-size: 12px; color: var(--text-muted);">LoRA training produces ComfyUI-compatible .safetensors files</p>
+        <h2 style="font-size: 18px; font-weight: 500; margin: 0;">LoRA Training</h2>
+        <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 0;">
+          {{ trainingStore.loras.length }} trained &middot;
+          {{ runningCount }} running &middot;
+          {{ readyToTrainCount }} ready
+        </p>
       </div>
-      <div style="display: flex; gap: 8px;">
-        <button class="btn" @click="reconcile" :disabled="trainingStore.loading" style="font-size: 12px;">
-          Reconcile
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <select
+          v-if="projectNames.length > 1"
+          v-model="selectedProject"
+          class="project-select"
+        >
+          <option v-for="p in projectNames" :key="p" :value="p">{{ p }}</option>
+        </select>
+        <button class="btn" @click="trainAllReady" :disabled="readyToTrainCount === 0 || trainingStore.loading" style="font-size: 12px; color: var(--status-success); border-color: var(--status-success);">
+          Train All Ready ({{ readyToTrainCount }})
         </button>
-        <button class="btn" @click="confirmClearFinished" :disabled="trainingStore.loading" style="font-size: 12px;">
-          Clear Finished
-        </button>
-        <button class="btn" @click="refresh" :disabled="trainingStore.loading">
-          Refresh
-        </button>
+        <button class="btn" @click="reconcile" :disabled="trainingStore.loading" style="font-size: 12px;">Reconcile</button>
+        <button class="btn" @click="refresh" :disabled="trainingStore.loading">Refresh</button>
       </div>
     </div>
 
-    <!-- Trained LoRAs chips (always visible at top) -->
-    <div v-if="trainingStore.loras.length > 0" style="margin-bottom: 20px;">
-      <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Trained LoRAs</div>
-      <div style="display: flex; flex-wrap: wrap; gap: 8px;">
-        <div
-          v-for="lora in trainingStore.loras"
-          :key="lora.filename"
-          class="lora-chip"
-        >
-          <span style="font-weight: 500;">{{ lora.slug }}</span>
-          <span style="color: var(--text-muted); font-size: 11px;">{{ lora.size_mb }}MB</span>
-          <button class="chip-delete" @click="confirmDeleteLora(lora)" :disabled="actionLoading === lora.slug">&times;</button>
-        </div>
+    <!-- Summary Stats Bar -->
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="stat-value" style="color: var(--status-success);">{{ trainingStore.loras.length }}</div>
+        <div class="stat-label">Trained LoRAs</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="color: var(--status-warning);">{{ runningCount }}</div>
+        <div class="stat-label">Training</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="color: var(--accent-primary);">{{ readyToTrainCount }}</div>
+        <div class="stat-label">Ready</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">{{ totalApproved }}</div>
+        <div class="stat-label">Approved Images</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="color: var(--status-error);">{{ failedCount }}</div>
+        <div class="stat-label">Failed</div>
       </div>
     </div>
+
+    <!-- Filter Pills -->
+    <div style="display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;">
+      <button
+        v-for="f in filters"
+        :key="f.key"
+        class="pill"
+        :class="{ active: activeFilter === f.key }"
+        @click="activeFilter = activeFilter === f.key ? 'all' : f.key"
+      >
+        {{ f.label }}
+        <span v-if="f.count > 0" class="pill-count">{{ f.count }}</span>
+      </button>
+    </div>
+
+    <!-- Production Readiness -->
+    <ProductionReadiness
+      v-if="selectedProject"
+      :project-name="selectedProject"
+      @train="(slug: string) => startTrainingForChar({ slug, name: slug } as Character)"
+      @generate="(slug: string) => openBatchGenerate(slug)"
+    />
 
     <!-- Loading -->
-    <div v-if="trainingStore.loading" style="text-align: center; padding: 48px;">
+    <div v-if="trainingStore.loading && filteredCharacters.length === 0" style="text-align: center; padding: 48px;">
       <div class="spinner" style="width: 32px; height: 32px; margin: 0 auto 16px;"></div>
       <p style="color: var(--text-muted);">Loading...</p>
     </div>
@@ -46,154 +84,191 @@
       <button class="btn" @click="trainingStore.clearError()" style="margin-top: 8px;">Dismiss</button>
     </div>
 
-    <!-- Two-column layout -->
-    <div v-else class="training-layout">
-
-      <!-- LEFT: Character Training Status -->
-      <div class="training-characters">
-        <div style="font-size: 13px; font-weight: 500; margin-bottom: 12px; color: var(--accent-primary);">Character Training Status</div>
-        <div v-if="charactersStore.characters.length === 0" style="text-align: center; padding: 24px; color: var(--text-muted); font-size: 13px;">
-          No characters loaded. <RouterLink to="/characters" style="color: var(--accent-primary);">Go to Characters</RouterLink>
+    <!-- Character LoRA Grid -->
+    <div v-else class="lora-grid">
+      <div
+        v-for="char in filteredCharacters"
+        :key="char.slug"
+        class="lora-card"
+        :class="cardClass(char)"
+      >
+        <!-- Card Header -->
+        <div class="lora-card-header">
+          <div style="flex: 1; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 15px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ char.name }}</span>
+              <span v-if="charJob(char.slug)?.status === 'running'" class="badge badge-pending" style="font-size: 10px; white-space: nowrap;">
+                Training E{{ charJob(char.slug)?.epoch }}/{{ charJob(char.slug)?.total_epochs }}
+              </span>
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">{{ char.project_name }}</div>
+          </div>
+          <div>
+            <span v-if="charLora(char.slug)" class="status-dot status-trained" title="LoRA trained"></span>
+            <span v-else-if="charStats(char.slug).canTrain" class="status-dot status-ready" title="Ready to train"></span>
+            <span v-else class="status-dot status-insufficient" title="Needs more images"></span>
+          </div>
         </div>
-        <div v-else style="display: flex; flex-direction: column; gap: 10px;">
-          <div
-            v-for="char in sortedCharacters"
-            :key="char.slug"
-            class="card char-training-card"
-            :style="charCardStyle(char)"
+
+        <!-- Running Progress -->
+        <div v-if="charJob(char.slug)?.status === 'running'" style="margin: 10px 0;">
+          <div class="progress-track" style="height: 4px;">
+            <div class="progress-bar" style="background: var(--status-warning); transition: width 0.3s ease;"
+                 :style="{ width: `${((charJob(char.slug)?.epoch || 0) / (charJob(char.slug)?.total_epochs || 20)) * 100}%` }"></div>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+            <span>Loss: {{ charJob(char.slug)?.loss?.toFixed(4) || '...' }}</span>
+            <span>{{ elapsed(charJob(char.slug)?.started_at) }}</span>
+          </div>
+        </div>
+
+        <!-- Config Pills (for trained or running) -->
+        <div v-if="charLora(char.slug) || charJob(char.slug)" class="config-pills">
+          <span class="config-pill arch">{{ charLora(char.slug)?.architecture || charJob(char.slug)?.model_type || 'sd15' }}</span>
+          <span v-if="charJob(char.slug)?.lora_rank" class="config-pill">r{{ charJob(char.slug)?.lora_rank }}</span>
+          <span v-if="charJob(char.slug)?.resolution" class="config-pill">{{ charJob(char.slug)?.resolution }}px</span>
+          <span v-if="charJob(char.slug)?.epochs" class="config-pill">{{ charJob(char.slug)?.epochs }}ep</span>
+          <span v-if="charJob(char.slug)?.learning_rate" class="config-pill">lr{{ charJob(char.slug)?.learning_rate }}</span>
+        </div>
+
+        <!-- LoRA Summary (trained) -->
+        <div v-if="charLora(char.slug)" class="lora-summary">
+          <div class="summary-row">
+            <span class="summary-label">File</span>
+            <span class="summary-value mono">{{ charLora(char.slug)!.filename }}</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">Size</span>
+            <span class="summary-value">{{ charLora(char.slug)!.size_mb }} MB</span>
+          </div>
+          <div v-if="charJob(char.slug)?.best_loss" class="summary-row">
+            <span class="summary-label">Best Loss</span>
+            <span class="summary-value" style="color: var(--status-success);">{{ charJob(char.slug)!.best_loss!.toFixed(4) }}</span>
+          </div>
+          <div v-if="charJob(char.slug)?.total_steps" class="summary-row">
+            <span class="summary-label">Steps</span>
+            <span class="summary-value">{{ charJob(char.slug)!.total_steps }}</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-label">Trained</span>
+            <span class="summary-value">{{ formatDate(charLora(char.slug)!.created_at) }}</span>
+          </div>
+        </div>
+
+        <!-- Image count bar -->
+        <div style="margin-top: 10px;">
+          <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px;">
+            <span style="color: var(--text-muted);">Approved</span>
+            <span style="font-weight: 500;">{{ charStats(char.slug).approved }}</span>
+          </div>
+          <div class="progress-track" style="height: 3px;">
+            <div class="progress-bar" :class="{ ready: charStats(char.slug).canTrain }" :style="{ width: `${Math.min(100, (charStats(char.slug).approved / 100) * 100)}%` }"></div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div style="margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap;">
+          <button
+            v-if="!charLora(char.slug) && charStats(char.slug).canTrain && charJob(char.slug)?.status !== 'running'"
+            class="btn btn-success"
+            style="font-size: 11px; padding: 4px 12px; flex: 1;"
+            @click="startTrainingForChar(char)"
+            :disabled="trainingStore.loading"
           >
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-              <div style="font-size: 14px; font-weight: 500;">{{ char.name }}</div>
-              <span v-if="charLora(char.slug)" class="badge badge-approved" style="font-size: 10px;">LoRA Ready</span>
-              <span v-else-if="charStats(char.slug).canTrain" class="badge badge-pending" style="font-size: 10px;">Ready to Train</span>
-              <span v-else style="font-size: 11px; color: var(--text-muted);">{{ charStats(char.slug).approved }}/10</span>
-            </div>
-            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">{{ char.project_name }}</div>
+            Start Training
+          </button>
+          <button
+            v-if="charLora(char.slug) && charJob(char.slug)?.status !== 'running'"
+            class="btn"
+            style="font-size: 11px; padding: 4px 12px; flex: 1;"
+            @click="startTrainingForChar(char)"
+            :disabled="trainingStore.loading"
+            title="Retrain with latest images"
+          >
+            Retrain
+          </button>
+          <button
+            class="btn btn-generate"
+            style="font-size: 11px; padding: 4px 8px;"
+            @click="openBatchGenerate(char.slug)"
+            :disabled="generatingSlug === char.slug"
+            title="Generate batch of training images"
+          >
+            {{ generatingSlug === char.slug ? 'Queued' : 'Generate' }}
+          </button>
+          <button
+            v-if="charJob(char.slug)?.status === 'running'"
+            class="btn btn-danger"
+            style="font-size: 11px; padding: 4px 8px;"
+            @click="confirmCancel(charJob(char.slug)!)"
+            :disabled="actionLoading === charJob(char.slug)?.job_id"
+          >
+            Cancel
+          </button>
+          <button
+            v-if="charJob(char.slug) && charJob(char.slug)?.status !== 'running'"
+            class="btn"
+            style="font-size: 11px; padding: 4px 8px;"
+            @click="toggleLog(charJob(char.slug)!.job_id)"
+          >
+            {{ expandedLog === charJob(char.slug)?.job_id ? 'Hide' : 'Log' }}
+          </button>
+          <button
+            v-if="charLora(char.slug)"
+            class="btn btn-danger"
+            style="font-size: 11px; padding: 4px 8px;"
+            @click="confirmDeleteLora(charLora(char.slug)!)"
+            :disabled="actionLoading === charLora(char.slug)?.slug"
+          >
+            &times;
+          </button>
+        </div>
 
-            <!-- Progress bar -->
-            <div class="progress-track" style="height: 5px; margin-bottom: 8px;">
-              <div
-                class="progress-bar"
-                :class="{ ready: charStats(char.slug).canTrain }"
-                :style="{ width: `${Math.min(100, (charStats(char.slug).approved / 10) * 100)}%` }"
-              ></div>
-            </div>
-
-            <!-- LoRA info if exists -->
-            <div v-if="charLora(char.slug)" style="font-size: 11px; color: var(--text-secondary);">
-              {{ charLora(char.slug)!.filename }} &middot; {{ charLora(char.slug)!.size_mb }}MB &middot; {{ formatTime(charLora(char.slug)!.created_at) }}
-            </div>
-
-            <!-- Train button if ready but no LoRA -->
+        <!-- Batch generate inline -->
+        <div v-if="batchGenSlug === char.slug" class="batch-gen-panel">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 11px; color: var(--text-muted); white-space: nowrap;">Count:</label>
+            <input
+              v-model.number="batchGenCount"
+              type="number"
+              min="1"
+              max="50"
+              style="width: 60px; padding: 3px 6px; font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px;"
+            />
             <button
-              v-else-if="charStats(char.slug).canTrain"
               class="btn btn-success"
-              style="font-size: 11px; padding: 4px 12px; margin-top: 4px;"
-              @click="startTrainingForChar(char)"
-              :disabled="trainingStore.loading"
+              style="font-size: 11px; padding: 3px 12px;"
+              @click="submitBatchGenerate(char.slug)"
+              :disabled="generatingSlug === char.slug || batchGenCount < 1"
             >
-              Start Training
+              Go
+            </button>
+            <button
+              class="btn"
+              style="font-size: 11px; padding: 3px 8px;"
+              @click="batchGenSlug = null"
+            >
+              Cancel
             </button>
           </div>
-        </div>
-      </div>
-
-      <!-- RIGHT: Job Monitor -->
-      <div class="training-jobs">
-        <div style="font-size: 13px; font-weight: 500; margin-bottom: 12px; color: var(--accent-primary);">Job Monitor</div>
-
-        <!-- Stats mini-bar -->
-        <div v-if="trainingStore.jobs.length > 0" style="display: flex; gap: 12px; margin-bottom: 16px; font-size: 12px;">
-          <span style="color: var(--status-success);">{{ completedCount }} completed</span>
-          <span style="color: var(--status-warning);">{{ runningCount }} running</span>
-          <span v-if="failedCount" style="color: var(--status-error);">{{ failedCount }} failed</span>
-        </div>
-
-        <!-- Empty -->
-        <div v-if="trainingStore.jobs.length === 0" style="text-align: center; padding: 32px; color: var(--text-muted); font-size: 13px;">
-          No training jobs yet. Start training on a character with 10+ approved images.
-        </div>
-
-        <!-- Jobs list (newest first) -->
-        <div v-else style="display: flex; flex-direction: column; gap: 10px;">
-      <div
-        v-for="job in sortedJobs"
-        :key="job.job_id"
-        class="card"
-        :style="jobBorderStyle(job)"
-      >
-        <!-- Header: character name + status badge -->
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <h3 style="font-size: 16px; font-weight: 500;">{{ job.character_name }}</h3>
-            <span class="badge" :class="statusClass(job.status)">{{ job.status }}</span>
-          </div>
-          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-            <button v-if="job.status === 'running' || job.status === 'queued'" class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" @click="confirmCancel(job)" :disabled="actionLoading === job.job_id">Cancel</button>
-            <button v-if="job.status === 'failed' || job.status === 'invalidated'" class="btn" style="font-size: 11px; padding: 3px 8px; color: var(--status-warning);" @click="retryJob(job)" :disabled="actionLoading === job.job_id">Retry</button>
-            <button v-if="job.status === 'completed'" class="btn" style="font-size: 11px; padding: 3px 8px; color: var(--text-muted);" @click="confirmInvalidate(job)" :disabled="actionLoading === job.job_id">Invalidate</button>
-            <button v-if="job.status === 'completed' || job.status === 'failed' || job.status === 'invalidated'" class="btn btn-danger" style="font-size: 11px; padding: 3px 8px;" @click="confirmDelete(job)" :disabled="actionLoading === job.job_id">Delete</button>
-            <button v-if="job.status === 'running' || job.status === 'completed' || job.status === 'failed'" class="btn" style="font-size: 11px; padding: 3px 8px;" @click="toggleLog(job.job_id)">{{ expandedLog === job.job_id ? 'Hide Log' : 'View Log' }}</button>
+          <div v-if="batchGenMessage" style="font-size: 11px; color: var(--status-success); margin-top: 4px;">
+            {{ batchGenMessage }}
           </div>
         </div>
 
-        <!-- Running: epoch progress bar -->
-        <div v-if="job.status === 'running' && job.epoch && job.total_epochs" style="margin-bottom: 12px;">
-          <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
-            <span style="color: var(--text-secondary);">Epoch {{ job.epoch }}/{{ job.total_epochs }}</span>
-            <span v-if="job.loss != null" style="color: var(--text-muted);">Loss: {{ job.loss.toFixed(6) }}</span>
-          </div>
-          <div class="progress-track" style="height: 6px;">
-            <div class="progress-bar" style="background: var(--status-warning);" :style="{ width: `${(job.epoch / job.total_epochs) * 100}%` }"></div>
-          </div>
-        </div>
-
-        <!-- Config grid -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px 16px; font-size: 13px; margin-bottom: 8px;">
-          <div><div style="color: var(--text-muted); font-size: 11px;">Images</div><div style="color: var(--text-primary); font-weight: 500;">{{ job.approved_images }}</div></div>
-          <div><div style="color: var(--text-muted); font-size: 11px;">Epochs</div><div style="color: var(--text-primary); font-weight: 500;">{{ job.epochs }}</div></div>
-          <div><div style="color: var(--text-muted); font-size: 11px;">Learning Rate</div><div style="color: var(--text-primary); font-weight: 500;">{{ job.learning_rate }}</div></div>
-          <div><div style="color: var(--text-muted); font-size: 11px;">Resolution</div><div style="color: var(--text-primary); font-weight: 500;">{{ job.resolution }}</div></div>
-          <div v-if="job.checkpoint"><div style="color: var(--text-muted); font-size: 11px;">Checkpoint</div><div style="color: var(--text-primary); font-weight: 500; font-size: 11px;">{{ job.checkpoint.replace('.safetensors', '') }}</div></div>
-        </div>
-
-        <!-- Completed: results -->
-        <div v-if="job.status === 'completed'" style="background: rgba(80,160,80,0.08); border: 1px solid rgba(80,160,80,0.2); border-radius: 4px; padding: 10px 12px; margin-top: 8px;">
-          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px 16px; font-size: 12px;">
-            <div v-if="job.best_loss != null"><span style="color: var(--text-muted);">Best Loss:</span><span style="color: var(--status-success); font-weight: 500; margin-left: 4px;">{{ job.best_loss.toFixed(6) }}</span></div>
-            <div v-if="job.final_loss != null"><span style="color: var(--text-muted);">Final Loss:</span><span style="color: var(--text-secondary); margin-left: 4px;">{{ job.final_loss.toFixed(6) }}</span></div>
-            <div v-if="job.total_steps"><span style="color: var(--text-muted);">Steps:</span><span style="color: var(--text-secondary); margin-left: 4px;">{{ job.total_steps }}</span></div>
-            <div v-if="job.file_size_mb"><span style="color: var(--text-muted);">File Size:</span><span style="color: var(--text-secondary); margin-left: 4px;">{{ job.file_size_mb }} MB</span></div>
-          </div>
-          <div v-if="job.output_path" style="margin-top: 8px; font-size: 11px; color: var(--text-muted); font-family: monospace; word-break: break-all;">{{ job.output_path }}</div>
-        </div>
-
-        <!-- Failed/Invalidated: error message -->
-        <div v-if="job.status === 'failed' || job.status === 'invalidated'" :style="{ background: job.status === 'invalidated' ? 'rgba(120,120,120,0.08)' : 'rgba(160,80,80,0.08)', border: `1px solid ${job.status === 'invalidated' ? 'rgba(120,120,120,0.2)' : 'rgba(160,80,80,0.2)'}`, borderRadius: '4px', padding: '10px 12px', marginTop: '8px' }">
-          <div v-if="job.error" style="font-size: 12px; font-family: monospace; word-break: break-all;" :style="{ color: job.status === 'invalidated' ? 'var(--text-muted)' : 'var(--status-error)' }">{{ job.error }}</div>
-          <div v-else style="font-size: 12px; color: var(--status-error);">Training failed — check the log for details.</div>
-        </div>
-
-        <!-- Timestamps -->
-        <div style="display: flex; gap: 16px; margin-top: 10px; font-size: 11px; color: var(--text-muted);">
-          <span>Created: {{ formatTime(job.created_at) }}</span>
-          <span v-if="job.started_at">Started: {{ formatTime(job.started_at) }}</span>
-          <span v-if="job.completed_at">Completed: {{ formatTime(job.completed_at) }}</span>
-          <span v-if="job.failed_at">Failed: {{ formatTime(job.failed_at) }}</span>
-          <span v-if="job.status === 'running' && job.started_at" style="color: var(--status-warning);">Running for {{ elapsed(job.started_at) }}</span>
+        <!-- Failed error -->
+        <div v-if="charJob(char.slug)?.status === 'failed'" style="margin-top: 8px; padding: 6px 8px; background: rgba(160,80,80,0.08); border: 1px solid rgba(160,80,80,0.2); border-radius: 4px; font-size: 11px; color: var(--status-error);">
+          {{ charJob(char.slug)?.error || 'Training failed — check log.' }}
         </div>
 
         <!-- Log viewer -->
-        <div v-if="expandedLog === job.job_id" style="margin-top: 12px;">
-          <div v-if="logLoading" style="text-align: center; padding: 16px;"><div class="spinner" style="width: 20px; height: 20px; margin: 0 auto;"></div></div>
-          <pre v-else-if="logLines.length > 0" style="background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 4px; padding: 10px 12px; font-size: 11px; line-height: 1.5; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary);">{{ logLines.join('\n') }}</pre>
-          <p v-else style="font-size: 12px; color: var(--text-muted); padding: 8px;">No log output yet.</p>
+        <div v-if="expandedLog === charJob(char.slug)?.job_id" style="margin-top: 8px;">
+          <div v-if="logLoading" style="text-align: center; padding: 8px;"><div class="spinner" style="width: 16px; height: 16px; margin: 0 auto;"></div></div>
+          <pre v-else-if="logLines.length > 0" class="log-viewer">{{ logLines.join('\n') }}</pre>
+          <p v-else style="font-size: 11px; color: var(--text-muted);">No log output yet.</p>
         </div>
-      </div><!-- end job card -->
-        </div><!-- end jobs list -->
-      </div><!-- end training-jobs -->
-
-    </div><!-- end training-layout -->
+      </div>
+    </div>
 
     <!-- Confirm dialog -->
     <ConfirmDialog
@@ -205,13 +280,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { RouterLink } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useTrainingStore } from '@/stores/training'
 import { useCharactersStore } from '@/stores/characters'
 import type { TrainingJob, LoraFile, Character } from '@/types'
 import ConfirmDialog from './training/ConfirmDialog.vue'
 import type { ConfirmDialogData } from './training/ConfirmDialog.vue'
+import ProductionReadiness from './training/ProductionReadiness.vue'
 
 const trainingStore = useTrainingStore()
 const charactersStore = useCharactersStore()
@@ -219,24 +294,46 @@ const expandedLog = ref<string | null>(null)
 const logLines = ref<string[]>([])
 const logLoading = ref(false)
 const actionLoading = ref<string | null>(null)
+const activeFilter = ref<string>('all')
 const confirmDialogData = ref<ConfirmDialogData | null>(null)
 const pendingAction = ref<((deleteLora: boolean) => Promise<void>) | null>(null)
+const selectedProject = ref<string>('')
+const batchGenSlug = ref<string | null>(null)
+const batchGenCount = ref(10)
+const batchGenMessage = ref<string | null>(null)
+const generatingSlug = ref<string | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
-onMounted(() => {
+const projectNames = computed(() => {
+  const names = new Set<string>()
+  charactersStore.characters.forEach(c => { if (c.project_name) names.add(c.project_name) })
+  return [...names].sort()
+})
+
+onMounted(async () => {
+  trainingStore.fetchTrainingJobs()
   trainingStore.fetchLoras()
-  pollTimer = setInterval(() => {
-    const hasActive = trainingStore.jobs.some(j => j.status === 'running' || j.status === 'queued')
-    if (hasActive) {
-      trainingStore.fetchTrainingJobs()
-      if (expandedLog.value) fetchLog(expandedLog.value)
+  // Set default project after characters load
+  if (!selectedProject.value && projectNames.value.length > 0) {
+    selectedProject.value = projectNames.value[0]
+  }
+  // Watch for characters loading to set default
+  const stop = watch(projectNames, (names) => {
+    if (!selectedProject.value && names.length > 0) {
+      selectedProject.value = names[0]
+      stop()
     }
+  })
+  pollTimer = setInterval(() => {
+    trainingStore.fetchTrainingJobs()
+    trainingStore.fetchLoras()
+    if (expandedLog.value) fetchLog(expandedLog.value)
   }, 5000)
 })
 
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
-// Character training helpers
+// Helpers
 function charStats(slug: string) {
   const s = charactersStore.getCharacterStats(slug)
   return { ...s, canTrain: s.approved >= 10 }
@@ -246,56 +343,126 @@ function charLora(slug: string): LoraFile | undefined {
   return trainingStore.loras.find(l => l.slug === slug)
 }
 
-function charCardStyle(char: Character) {
-  const lora = charLora(char.slug)
-  if (lora) return { borderLeftColor: 'var(--status-success)', borderLeftWidth: '3px' }
-  if (charStats(char.slug).canTrain) return { borderLeftColor: 'var(--accent-primary)', borderLeftWidth: '3px' }
-  return {}
+function charJob(slug: string): TrainingJob | undefined {
+  // Find the most recent job for this character
+  const charSlug = slug
+  const jobs = trainingStore.jobs
+    .filter(j => (j.character_slug || j.character_name) === charSlug)
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  return jobs[0]
 }
 
-const sortedCharacters = computed(() => {
-  return [...charactersStore.characters].sort((a, b) => {
-    const aLora = charLora(a.slug) ? 2 : charStats(a.slug).canTrain ? 1 : 0
-    const bLora = charLora(b.slug) ? 2 : charStats(b.slug).canTrain ? 1 : 0
-    if (aLora !== bLora) return bLora - aLora
-    return charStats(b.slug).approved - charStats(a.slug).approved
+function cardClass(char: Character) {
+  const job = charJob(char.slug)
+  if (job?.status === 'running') return 'card-running'
+  if (job?.status === 'failed') return 'card-failed'
+  if (charLora(char.slug)) return 'card-trained'
+  if (charStats(char.slug).canTrain) return 'card-ready'
+  return 'card-insufficient'
+}
+
+// Computed
+const totalApproved = computed(() =>
+  charactersStore.characters.reduce((sum, c) => sum + charStats(c.slug).approved, 0)
+)
+
+const runningCount = computed(() => trainingStore.jobs.filter(j => j.status === 'running' || j.status === 'queued').length)
+const failedCount = computed(() => trainingStore.jobs.filter(j => j.status === 'failed').length)
+const readyToTrainCount = computed(() =>
+  charactersStore.characters.filter(c =>
+    charStats(c.slug).canTrain && !charLora(c.slug) && charJob(c.slug)?.status !== 'running'
+  ).length
+)
+
+const filters = computed(() => [
+  { key: 'all', label: 'All', count: charactersStore.characters.length },
+  { key: 'trained', label: 'Trained', count: charactersStore.characters.filter(c => charLora(c.slug)).length },
+  { key: 'running', label: 'Training', count: charactersStore.characters.filter(c => charJob(c.slug)?.status === 'running').length },
+  { key: 'ready', label: 'Ready', count: readyToTrainCount.value },
+  { key: 'failed', label: 'Failed', count: charactersStore.characters.filter(c => charJob(c.slug)?.status === 'failed').length },
+  { key: 'insufficient', label: 'Needs Images', count: charactersStore.characters.filter(c => !charStats(c.slug).canTrain).length },
+])
+
+const filteredCharacters = computed(() => {
+  let chars = [...charactersStore.characters]
+  switch (activeFilter.value) {
+    case 'trained': chars = chars.filter(c => charLora(c.slug)); break
+    case 'running': chars = chars.filter(c => charJob(c.slug)?.status === 'running'); break
+    case 'ready': chars = chars.filter(c => charStats(c.slug).canTrain && !charLora(c.slug) && charJob(c.slug)?.status !== 'running'); break
+    case 'failed': chars = chars.filter(c => charJob(c.slug)?.status === 'failed'); break
+    case 'insufficient': chars = chars.filter(c => !charStats(c.slug).canTrain); break
+  }
+  // Sort: running first, then trained, then ready, then rest
+  return chars.sort((a, b) => {
+    const order = (c: Character) => {
+      if (charJob(c.slug)?.status === 'running') return 0
+      if (charLora(c.slug)) return 1
+      if (charStats(c.slug).canTrain) return 2
+      return 3
+    }
+    return order(a) - order(b)
   })
 })
 
+// Actions
 async function startTrainingForChar(char: Character) {
   try {
-    await trainingStore.startTraining({ character_name: char.name })
-    trainingStore.fetchTrainingJobs()
+    await trainingStore.startTraining({ character_name: char.slug || char.name })
   } catch (error) {
     console.error('Failed to start training:', error)
   }
 }
 
-const sortedJobs = computed(() => [...trainingStore.jobs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()))
-const completedCount = computed(() => trainingStore.jobs.filter(j => j.status === 'completed').length)
-const runningCount = computed(() => trainingStore.jobs.filter(j => j.status === 'running' || j.status === 'queued').length)
-const failedCount = computed(() => trainingStore.jobs.filter(j => j.status === 'failed').length)
-
-function statusClass(status: string): string {
-  switch (status) {
-    case 'completed': return 'badge-approved'
-    case 'running': case 'queued': return 'badge-pending'
-    case 'failed': case 'invalidated': return 'badge-rejected'
-    default: return ''
+async function trainAllReady() {
+  const ready = charactersStore.characters.filter(c =>
+    charStats(c.slug).canTrain && !charLora(c.slug) && charJob(c.slug)?.status !== 'running'
+  )
+  for (const char of ready) {
+    try {
+      await trainingStore.startTraining({ character_name: char.slug || char.name })
+    } catch (error) {
+      console.error(`Failed to start training for ${char.name}:`, error)
+    }
   }
 }
 
-function jobBorderStyle(job: TrainingJob) {
-  if (job.status === 'completed') return { borderLeftColor: 'var(--status-success)', borderLeftWidth: '3px' }
-  if (job.status === 'running') return { borderLeftColor: 'var(--status-warning)', borderLeftWidth: '3px' }
-  if (job.status === 'failed') return { borderLeftColor: 'var(--status-error)', borderLeftWidth: '3px' }
-  if (job.status === 'invalidated') return { borderLeftColor: 'var(--text-muted)', borderLeftWidth: '3px' }
-  return {}
+function openBatchGenerate(slug: string) {
+  if (batchGenSlug.value === slug) {
+    batchGenSlug.value = null
+    return
+  }
+  batchGenSlug.value = slug
+  batchGenCount.value = 10
+  batchGenMessage.value = null
 }
 
-function formatTime(iso: string): string { return new Date(iso).toLocaleString() }
+async function submitBatchGenerate(slug: string) {
+  if (batchGenCount.value < 1) return
+  generatingSlug.value = slug
+  batchGenMessage.value = null
+  try {
+    const resp = await fetch(`/api/training/regenerate/${encodeURIComponent(slug)}?count=${batchGenCount.value}`, { method: 'POST' })
+    if (resp.ok) {
+      const data = await resp.json()
+      batchGenMessage.value = data.message || `Queued ${batchGenCount.value} images`
+    } else {
+      const err = await resp.text()
+      batchGenMessage.value = `Error: ${err}`
+    }
+  } catch (e) {
+    batchGenMessage.value = `Failed: ${e}`
+  } finally {
+    setTimeout(() => { generatingSlug.value = null }, 3000)
+  }
+}
 
-function elapsed(iso: string): string {
+function formatDate(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function elapsed(iso?: string): string {
+  if (!iso) return ''
   const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
   if (sec < 60) return `${sec}s`
   const min = Math.floor(sec / 60)
@@ -306,7 +473,7 @@ function elapsed(iso: string): string {
 async function fetchLog(jobId: string) {
   logLoading.value = true
   try {
-    const resp = await fetch(`/api/training/jobs/${encodeURIComponent(jobId)}/log?tail=100`)
+    const resp = await fetch(`/api/training/jobs/${encodeURIComponent(jobId)}/log?tail=60`)
     if (resp.ok) { const data = await resp.json(); logLines.value = data.lines || [] }
     else logLines.value = ['(Log not available)']
   } catch { logLines.value = ['(Failed to fetch log)'] }
@@ -318,7 +485,11 @@ async function toggleLog(jobId: string) {
   else { expandedLog.value = jobId; await fetchLog(jobId) }
 }
 
-function refresh() { trainingStore.fetchTrainingJobs(); trainingStore.fetchLoras(); if (expandedLog.value) fetchLog(expandedLog.value) }
+function refresh() {
+  trainingStore.fetchTrainingJobs()
+  trainingStore.fetchLoras()
+  if (expandedLog.value) fetchLog(expandedLog.value)
+}
 
 function handleConfirmAction(deleteLora: boolean) {
   if (pendingAction.value) pendingAction.value(deleteLora)
@@ -327,36 +498,189 @@ function handleConfirmAction(deleteLora: boolean) {
 }
 
 function confirmCancel(job: TrainingJob) {
-  confirmDialogData.value = { title: 'Cancel Training', message: `Cancel training for "${job.character_name}"? The process will be killed and the job marked as failed.`, confirmLabel: 'Cancel Job' }
+  confirmDialogData.value = { title: 'Cancel Training', message: `Cancel training for "${job.character_name}"?`, confirmLabel: 'Cancel Job' }
   pendingAction.value = async () => { actionLoading.value = job.job_id; try { await trainingStore.cancelJob(job.job_id) } finally { actionLoading.value = null } }
 }
 
-async function retryJob(job: TrainingJob) { actionLoading.value = job.job_id; try { await trainingStore.retryJob(job.job_id) } finally { actionLoading.value = null } }
-
-function confirmInvalidate(job: TrainingJob) {
-  confirmDialogData.value = { title: 'Invalidate Training', message: `Mark training for "${job.character_name}" as invalidated? This indicates the LoRA was trained on bad data.`, confirmLabel: 'Invalidate', showDeleteLora: true }
-  pendingAction.value = async (deleteLora) => { actionLoading.value = job.job_id; try { await trainingStore.invalidateJob(job.job_id, deleteLora) } finally { actionLoading.value = null } }
-}
-
-function confirmDelete(job: TrainingJob) {
-  confirmDialogData.value = { title: 'Delete Job Record', message: `Remove the job record for "${job.character_name}" from the list? This does not delete the LoRA file.`, confirmLabel: 'Delete' }
-  pendingAction.value = async () => { actionLoading.value = job.job_id; try { await trainingStore.deleteJob(job.job_id) } finally { actionLoading.value = null } }
-}
-
 function confirmDeleteLora(lora: LoraFile) {
-  confirmDialogData.value = { title: 'Delete LoRA File', message: `Permanently delete ${lora.filename} (${lora.size_mb} MB) from disk?`, confirmLabel: 'Delete File' }
+  confirmDialogData.value = { title: 'Delete LoRA', message: `Delete ${lora.filename} (${lora.size_mb} MB)?`, confirmLabel: 'Delete' }
   pendingAction.value = async () => { actionLoading.value = lora.slug; try { await trainingStore.deleteLora(lora.slug) } finally { actionLoading.value = null } }
 }
 
 async function reconcile() { actionLoading.value = 'reconcile'; try { await trainingStore.reconcileJobs() } finally { actionLoading.value = null } }
-
-function confirmClearFinished() {
-  confirmDialogData.value = { title: 'Clear Finished Jobs', message: 'Remove all completed, failed, and invalidated jobs older than 7 days from the list?', confirmLabel: 'Clear' }
-  pendingAction.value = async () => { actionLoading.value = 'clear'; try { await trainingStore.clearFinished(7) } finally { actionLoading.value = null } }
-}
 </script>
 
 <style scoped>
+.stats-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.stat-card {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  padding: 12px 16px;
+  text-align: center;
+}
+.stat-value {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+
+/* Filter Pills */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border: 1px solid var(--border-primary);
+  border-radius: 20px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font-primary);
+  transition: all 150ms ease;
+}
+.pill:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+.pill.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #fff;
+}
+.pill-count {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.2);
+}
+.pill:not(.active) .pill-count {
+  background: var(--bg-primary);
+}
+
+/* LoRA Grid */
+.lora-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+}
+.lora-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  padding: 14px 16px;
+  border-left: 3px solid transparent;
+  transition: all 150ms ease;
+}
+.lora-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.card-trained { border-left-color: var(--status-success); }
+.card-running { border-left-color: var(--status-warning); background: rgba(200,160,60,0.03); }
+.card-ready { border-left-color: var(--accent-primary); }
+.card-failed { border-left-color: var(--status-error); background: rgba(160,80,80,0.03); }
+.card-insufficient { opacity: 0.6; }
+
+.lora-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Status dots */
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-trained { background: var(--status-success); box-shadow: 0 0 4px var(--status-success); }
+.status-ready { background: var(--accent-primary); }
+.status-insufficient { background: var(--text-muted); opacity: 0.4; }
+
+/* Config Pills */
+.config-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+.config-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 500;
+  background: rgba(120,120,120,0.1);
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.config-pill.arch {
+  background: rgba(100,140,200,0.15);
+  color: var(--accent-primary);
+  text-transform: uppercase;
+}
+
+/* LoRA Summary */
+.lora-summary {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: rgba(80,160,80,0.05);
+  border: 1px solid rgba(80,160,80,0.15);
+  border-radius: 6px;
+}
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 11px;
+}
+.summary-label {
+  color: var(--text-muted);
+}
+.summary-value {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.summary-value.mono {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+}
+
+/* Log viewer */
+.log-viewer {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 10px;
+  line-height: 1.5;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+/* Buttons */
 .btn-danger {
   color: var(--status-error);
   border-color: var(--status-error);
@@ -371,45 +695,49 @@ function confirmClearFinished() {
 .btn-success:hover {
   background: rgba(80,160,80,0.1);
 }
-.training-layout {
-  display: grid;
-  grid-template-columns: 1fr 1.5fr;
-  gap: 20px;
-  align-items: flex-start;
+.btn-generate {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
 }
-@media (max-width: 1000px) {
-  .training-layout {
+.btn-generate:hover {
+  background: rgba(100,140,200,0.1);
+}
+
+/* Batch generate panel */
+.batch-gen-panel {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(100,140,200,0.06);
+  border: 1px solid rgba(100,140,200,0.2);
+  border-radius: 6px;
+}
+
+/* Project selector */
+.project-select {
+  padding: 5px 10px;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-primary);
+  cursor: pointer;
+}
+.project-select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+@media (max-width: 768px) {
+  .stats-bar {
+    flex-wrap: wrap;
+  }
+  .stat-card {
+    flex: 1 1 calc(33% - 8px);
+    min-width: 80px;
+  }
+  .lora-grid {
     grid-template-columns: 1fr;
   }
-}
-.training-characters,
-.training-jobs {
-  min-width: 0;
-}
-.char-training-card {
-  padding: 12px 14px;
-}
-.lora-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: rgba(80,160,80,0.1);
-  border: 1px solid rgba(80,160,80,0.3);
-  border-radius: 20px;
-  font-size: 12px;
-  color: var(--text-primary);
-}
-.chip-delete {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 14px;
-  padding: 0 2px;
-  line-height: 1;
-}
-.chip-delete:hover {
-  color: var(--status-error);
 }
 </style>

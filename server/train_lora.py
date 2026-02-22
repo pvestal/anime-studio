@@ -111,10 +111,20 @@ def train(args):
         model_type = detect_model_type(args.checkpoint)
     is_sdxl = model_type == "sdxl"
 
+    # Determine prediction type
+    prediction_type = args.prediction_type
+    if prediction_type == "auto":
+        from packages.core.model_profiles import get_model_profile
+        _prof = get_model_profile(Path(args.checkpoint).name)
+        prediction_type = _prof.get("prediction_type", "epsilon")
+    is_vpred = prediction_type == "v_prediction"
+    logger.info(f"Prediction type resolved: {prediction_type}")
+
     update_job_status(
         args.job_id, "running",
         started_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
         model_type=model_type,
+        prediction_type=prediction_type,
     )
     logger.info(f"Job {args.job_id}: Loading {model_type.upper()} checkpoint {args.checkpoint}")
 
@@ -210,7 +220,16 @@ def train(args):
         scheduler = CosineAnnealingLR(optimizer, T_max=total_steps, eta_min=1e-6)
 
         # Noise scheduler for training
-        noise_scheduler = pipe.scheduler
+        if is_vpred:
+            from diffusers import DDPMScheduler
+            noise_scheduler = DDPMScheduler.from_config(
+                pipe.scheduler.config,
+                prediction_type="v_prediction",
+                rescale_betas_zero_snr=True,
+            )
+            logger.info("Using v-prediction noise scheduler with zero-SNR rescaled betas")
+        else:
+            noise_scheduler = pipe.scheduler
         del pipe  # Free pipeline memory
         gc.collect()
         torch.cuda.empty_cache()
@@ -240,23 +259,37 @@ def train(args):
 
                 # Encode text
                 with torch.no_grad():
-                    encoder_output = text_encoder(input_ids)
-                    encoder_hidden_states = encoder_output[0]
-
-                    # SDXL: concatenate hidden states from both text encoders
                     if is_sdxl and text_encoder_2 is not None:
+                        # SDXL: use penultimate hidden states from both encoders
+                        # (standard diffusers SDXL training approach)
                         input_ids_2 = batch["input_ids_2"].to("cuda")
-                        encoder_output_2 = text_encoder_2(input_ids_2)
-                        encoder_hidden_states = torch.cat(
-                            [encoder_hidden_states, encoder_output_2[0]], dim=-1
-                        )
+
+                        enc1_out = text_encoder(input_ids, output_hidden_states=True)
+                        enc1_hidden = enc1_out.hidden_states[-2]
+
+                        enc2_out = text_encoder_2(input_ids_2, output_hidden_states=True)
+                        enc2_hidden = enc2_out.hidden_states[-2]
+
+                        encoder_hidden_states = torch.cat([enc1_hidden, enc2_hidden], dim=-1)
+                        encoder_output_2 = enc2_out  # keep ref for pooled output below
+                    else:
+                        encoder_output = text_encoder(input_ids)
+                        encoder_hidden_states = encoder_output[0]
 
                 # Sample noise and timesteps
                 noise = torch.randn_like(latents)
-                timesteps = torch.randint(
-                    0, noise_scheduler.config.num_train_timesteps,
-                    (latents.shape[0],), device=latents.device,
-                ).long()
+                if is_vpred:
+                    # Logit-normal timestep sampling for v-prediction
+                    # Concentrates training on mid-range timesteps where vpred benefits most
+                    u = torch.normal(mean=0.0, std=1.0, size=(latents.shape[0],), device=latents.device)
+                    u = torch.sigmoid(u)  # logit-normal in [0,1]
+                    timesteps = (u * noise_scheduler.config.num_train_timesteps).long()
+                    timesteps = timesteps.clamp(0, noise_scheduler.config.num_train_timesteps - 1)
+                else:
+                    timesteps = torch.randint(
+                        0, noise_scheduler.config.num_train_timesteps,
+                        (latents.shape[0],), device=latents.device,
+                    ).long()
 
                 # Add noise to latents
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
@@ -268,7 +301,7 @@ def train(args):
                 # SDXL needs added_cond_kwargs with pooled text embeddings + time_ids
                 if is_sdxl and text_encoder_2 is not None:
                     # Pooled output from text_encoder_2 (OpenCLIP-G)
-                    pooled_output = encoder_output_2[1]
+                    pooled_output = encoder_output_2[0]
                     # Time IDs: [orig_h, orig_w, crop_top, crop_left, target_h, target_w]
                     time_ids = torch.tensor(
                         [[args.resolution, args.resolution, 0, 0, args.resolution, args.resolution]],
@@ -287,8 +320,13 @@ def train(args):
                         **unet_kwargs,
                     ).sample
 
-                # MSE loss against target noise
-                loss = torch.nn.functional.mse_loss(noise_pred.float(), noise.float())
+                # MSE loss — target depends on prediction type
+                if is_vpred:
+                    # v-prediction: target is velocity = alpha_t * noise - sigma_t * sample
+                    target = noise_scheduler.get_velocity(latents, noise, timesteps)
+                else:
+                    target = noise
+                loss = torch.nn.functional.mse_loss(noise_pred.float(), target.float())
                 loss = loss / args.grad_accum
                 loss.backward()
 
@@ -391,6 +429,8 @@ def main():
     parser.add_argument("--grad-accum", type=int, default=4, help="Gradient accumulation steps")
     parser.add_argument("--model-type", choices=["auto", "sd15", "sdxl"], default="auto",
                         help="Model architecture (auto-detect from checkpoint if 'auto')")
+    parser.add_argument("--prediction-type", choices=["auto", "epsilon", "v_prediction"], default="auto",
+                        help="Prediction type (auto-detect from model profile if 'auto')")
 
     args = parser.parse_args()
 
@@ -402,6 +442,7 @@ def main():
     logger.info(f"Output: {args.output}")
     logger.info(f"Epochs: {args.epochs}, LR: {args.learning_rate}, Resolution: {args.resolution}")
     logger.info(f"LoRA rank: {args.lora_rank}, Grad accum: {args.grad_accum}")
+    logger.info(f"Prediction type: {args.prediction_type}")
 
     train(args)
 
