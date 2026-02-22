@@ -45,6 +45,7 @@ _enabled = False
 _tick_interval = 60        # seconds between ticks
 _tick_task = None           # asyncio.Task for the background loop
 _training_target = 30      # approved images needed to advance past training_data
+_active_work: dict[str, asyncio.Task] = {}  # tracks running _do_work tasks by "entity_type:entity_id:phase"
 
 # Phase definitions
 CHARACTER_PHASES = ["training_data", "lora_training", "ready"]
@@ -392,6 +393,7 @@ async def _work_scene_planning(project_id: int):
                         INSERT INTO shots (scene_id, shot_number, shot_type,
                                            generation_prompt, motion_prompt, duration_seconds)
                         VALUES ($1, $2, $3, $4, $5, $6)
+                        ON CONFLICT (scene_id, shot_number) DO NOTHING
                     """,
                         scene_id,
                         j + 1,
@@ -794,18 +796,24 @@ async def _evaluate_entry(conn, entry: dict):
 
     if gate_result["passed"]:
         await _advance_phase(conn, entry)
-    elif gate_result.get("action_needed") and status != "active":
-        # Mark active and initiate work
-        await conn.execute("""
-            UPDATE production_pipeline
-            SET status = 'active', started_at = COALESCE(started_at, $1), updated_at = $1
-            WHERE id = $2
-        """, now, entry["id"])
+    elif gate_result.get("action_needed"):
+        work_key = f"{entity_type}:{entity_id}:{phase}"
+        task_running = work_key in _active_work and not _active_work[work_key].done()
 
-        # Fire-and-forget the work (don't block the tick loop)
-        asyncio.create_task(
-            _do_work(entity_type, entity_id, project_id, phase, gate_result)
-        )
+        if status != "active":
+            # Mark active and initiate work
+            await conn.execute("""
+                UPDATE production_pipeline
+                SET status = 'active', started_at = COALESCE(started_at, $1), updated_at = $1
+                WHERE id = $2
+            """, now, entry["id"])
+
+        if not task_running:
+            # (Re-)dispatch work — previous task finished or was never started
+            task = asyncio.create_task(
+                _do_work(entity_type, entity_id, project_id, phase, gate_result)
+            )
+            _active_work[work_key] = task
 
 
 async def _check_gate(conn, entity_type: str, entity_id: str, project_id: int, phase: str) -> dict:

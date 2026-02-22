@@ -261,6 +261,9 @@ async def run_migrations():
             ("generated_at", "TIMESTAMP DEFAULT NOW()"),
             ("reviewed_at", "TIMESTAMP"),
             ("generation_time_ms", "INTEGER"),
+            ("video_engine", "VARCHAR(50)"),
+            ("negative_prompt", "TEXT"),
+            ("seed", "BIGINT"),
         ]:
             await conn.execute(f"""
                 DO $$ BEGIN

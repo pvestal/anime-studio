@@ -3,36 +3,50 @@
 import asyncio
 import json
 import logging
+import os
+import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from packages.core.config import BASE_PATH, COMFYUI_OUTPUT_DIR
-from packages.core.db import connect_direct, get_char_project_map
+from packages.core.db import connect_direct, get_char_project_map, log_model_change
+from packages.core.audit import log_decision, log_generation, update_generation_quality
 from packages.core.models import (
     SceneCreateRequest, ShotCreateRequest, ShotUpdateRequest, SceneUpdateRequest,
-    SceneAudioRequest,
+    SceneAudioRequest, VideoCompareRequest,
 )
 from .builder import (
     SCENE_OUTPUT_DIR, _scene_generation_tasks,
     extract_last_frame, concat_videos, copy_to_comfyui_input,
     poll_comfyui_completion, generate_scene,
     download_preview, overlay_audio, apply_scene_audio,
+    _quality_gate_check,
 )
 from .framepack import (
     build_framepack_workflow, _submit_comfyui_workflow,
     router as framepack_router,
     MOTION_PRESETS,
 )
-from .ltx_video import router as ltx_router
+from .ltx_video import (
+    build_ltx_workflow,
+    _submit_comfyui_workflow as _submit_ltx_workflow,
+    router as ltx_router,
+)
+from .wan_video import (
+    build_wan_t2v_workflow,
+    router as wan_router,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 router.include_router(framepack_router)
 router.include_router(ltx_router)
+router.include_router(wan_router)
 
 # --- Scene Builder: CRUD Endpoints ---
 
@@ -131,6 +145,289 @@ async def get_motion_presets(shot_type: str | None = None):
     return {"presets": MOTION_PRESETS}
 
 
+# --- Video A/B Comparison ---
+
+_video_compare_task: dict = {}  # single comparison at a time
+
+_ENGINE_LABELS = {
+    "framepack": "FramePack (standard)",
+    "framepack_f1": "FramePack F1",
+    "ltx": "LTX-Video 2B",
+    "wan": "Wan 2.1 T2V 1.3B",
+}
+
+
+async def _run_video_compare(request: VideoCompareRequest, image_filename: str):
+    """Background coroutine: run each engine sequentially, score results."""
+    results = []
+    _video_compare_task["status"] = "running"
+    _video_compare_task["total"] = len(request.engines)
+    _video_compare_task["completed"] = 0
+    _video_compare_task["results"] = results
+
+    for i, eng in enumerate(request.engines):
+        engine_name = eng.engine
+        label = _ENGINE_LABELS.get(engine_name, engine_name)
+        _video_compare_task["current_engine"] = label
+        entry = {
+            "engine": engine_name, "label": label,
+            "status": "running", "video_path": None,
+            "quality_score": None, "generation_time": None,
+            "file_size_mb": None, "error": None,
+        }
+        results.append(entry)
+
+        try:
+            t0 = time.time()
+
+            if engine_name in ("framepack", "framepack_f1"):
+                use_f1 = engine_name == "framepack_f1"
+                workflow_data, _, prefix = build_framepack_workflow(
+                    prompt_text=request.prompt,
+                    image_path=image_filename,
+                    total_seconds=request.total_seconds,
+                    steps=eng.steps,
+                    use_f1=use_f1,
+                    seed=eng.seed,
+                    negative_text=request.negative_prompt,
+                    gpu_memory_preservation=eng.gpu_memory_preservation,
+                )
+                prompt_id = _submit_comfyui_workflow(workflow_data["prompt"])
+
+            elif engine_name == "ltx":
+                fps = 24
+                num_frames = max(9, int(request.total_seconds * fps) + 1)
+                workflow, prefix = build_ltx_workflow(
+                    prompt_text=request.prompt,
+                    steps=eng.steps,
+                    seed=eng.seed,
+                    negative_text=request.negative_prompt,
+                    image_path=image_filename,
+                    num_frames=num_frames,
+                    fps=fps,
+                    lora_name=eng.lora_name,
+                    lora_strength=eng.lora_strength,
+                )
+                prompt_id = _submit_ltx_workflow(workflow)
+
+            else:
+                entry["status"] = "error"
+                entry["error"] = f"Unknown engine: {engine_name}"
+                _video_compare_task["completed"] = i + 1
+                continue
+
+            # Log generation to generation_history BEFORE polling
+            gen_id = await log_generation(
+                character_slug=request.character_slug,
+                project_name=request.project_name,
+                comfyui_prompt_id=prompt_id,
+                generation_type="video",
+                checkpoint_model=engine_name,
+                prompt=request.prompt,
+                negative_prompt=request.negative_prompt,
+                seed=eng.seed,
+                steps=eng.steps,
+            )
+            entry["generation_history_id"] = gen_id
+
+            # Poll for completion (reuse existing 30min timeout)
+            poll_result = await poll_comfyui_completion(prompt_id)
+            gen_time = round(time.time() - t0, 1)
+            entry["generation_time"] = gen_time
+
+            if poll_result["status"] == "completed" and poll_result.get("output_files"):
+                video_path = str(COMFYUI_OUTPUT_DIR / poll_result["output_files"][0])
+                entry["video_path"] = video_path
+                entry["status"] = "completed"
+
+                # File size
+                if os.path.exists(video_path):
+                    entry["file_size_mb"] = round(os.path.getsize(video_path) / (1024 * 1024), 2)
+
+                # Extract last frame and score it
+                try:
+                    last_frame = await extract_last_frame(video_path)
+                    if last_frame:
+                        score = await _quality_gate_check(last_frame)
+                        entry["quality_score"] = score
+                except Exception as e:
+                    logger.warning(f"Quality scoring failed for {engine_name}: {e}")
+
+                # Update generation_history with quality + video_engine
+                if gen_id:
+                    await update_generation_quality(
+                        gen_id=gen_id,
+                        quality_score=entry["quality_score"] or 0,
+                        status="completed",
+                        artifact_path=video_path,
+                    )
+                    # Set video_engine column directly (not in update_generation_quality)
+                    try:
+                        from packages.core.db import get_pool
+                        pool = await get_pool()
+                        async with pool.acquire() as conn:
+                            await conn.execute(
+                                "UPDATE generation_history SET video_engine = $2, "
+                                "generation_time_ms = $3 WHERE id = $1",
+                                gen_id, engine_name, int(gen_time * 1000),
+                            )
+                    except Exception as e:
+                        logger.warning(f"Failed to set video_engine on gen {gen_id}: {e}")
+
+            else:
+                entry["status"] = "failed"
+                entry["error"] = f"ComfyUI returned: {poll_result['status']}"
+                if gen_id:
+                    await update_generation_quality(
+                        gen_id=gen_id, quality_score=0, status="failed",
+                    )
+
+        except Exception as e:
+            entry["status"] = "error"
+            entry["error"] = str(e)
+            logger.error(f"Video compare engine {engine_name} failed: {e}")
+
+        _video_compare_task["completed"] = i + 1
+
+    # Rank results by quality_score (highest first), then by generation_time (fastest)
+    scored = [r for r in results if r["quality_score"] is not None]
+    scored.sort(key=lambda r: (-r["quality_score"], r["generation_time"] or 9999))
+    for rank, r in enumerate(scored, 1):
+        r["rank"] = rank
+
+    _video_compare_task["status"] = "completed"
+    _video_compare_task["current_engine"] = None
+    _video_compare_task["finished_at"] = datetime.now().isoformat()
+
+    # Log summary to model_audit_log and autonomy_decisions
+    try:
+        summary = {
+            "engines": [r["engine"] for r in results],
+            "scores": {r["engine"]: r["quality_score"] for r in results},
+            "times": {r["engine"]: r["generation_time"] for r in results},
+            "winner": scored[0]["engine"] if scored else None,
+        }
+        await log_model_change(
+            action="video_compare",
+            checkpoint_model=scored[0]["engine"] if scored else "none",
+            project_name=request.project_name,
+            reason=json.dumps(summary),
+        )
+        await log_decision(
+            decision_type="video_compare",
+            character_slug=request.character_slug,
+            project_name=request.project_name,
+            input_context={"prompt": request.prompt, "engines": [e.engine for e in request.engines]},
+            decision_made=f"Winner: {scored[0]['engine']}" if scored else "No valid results",
+            confidence_score=scored[0]["quality_score"] if scored else 0,
+            reasoning=f"Compared {len(request.engines)} engines, ranked by quality then speed",
+        )
+    except Exception as e:
+        logger.warning(f"Failed to log video compare results: {e}")
+
+
+@router.post("/scenes/video-compare")
+async def start_video_compare(body: VideoCompareRequest):
+    """Start a video engine A/B comparison (background task).
+
+    Runs each engine sequentially against the same source image + prompt,
+    scores quality via vision model, and ranks results.
+    """
+    # Only one comparison at a time
+    if _video_compare_task.get("status") == "running":
+        raise HTTPException(status_code=409, detail="A video comparison is already running")
+
+    if not body.engines or len(body.engines) > 5:
+        raise HTTPException(status_code=400, detail="Provide 1-5 engine configs")
+
+    valid_engines = set(_ENGINE_LABELS.keys())
+    for eng in body.engines:
+        if eng.engine not in valid_engines:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown engine '{eng.engine}'. Valid: {sorted(valid_engines)}",
+            )
+
+    # Verify source image exists
+    src = Path(body.source_image_path)
+    if not src.exists():
+        raise HTTPException(status_code=400, detail=f"Source image not found: {body.source_image_path}")
+
+    # Copy source image to ComfyUI input dir once
+    image_filename = await copy_to_comfyui_input(body.source_image_path)
+
+    # Reset state
+    _video_compare_task.clear()
+    _video_compare_task["status"] = "starting"
+    _video_compare_task["started_at"] = datetime.now().isoformat()
+    _video_compare_task["request"] = {
+        "prompt": body.prompt,
+        "source_image": body.source_image_path,
+        "total_seconds": body.total_seconds,
+        "engines": [e.engine for e in body.engines],
+    }
+
+    # Launch background task
+    asyncio.create_task(_run_video_compare(body, image_filename))
+
+    return {
+        "message": "Video comparison started",
+        "engines": [{"engine": e.engine, "label": _ENGINE_LABELS.get(e.engine, e.engine)} for e in body.engines],
+        "total_engines": len(body.engines),
+        "poll_url": "/api/scenes/video-compare/status",
+    }
+
+
+@router.get("/scenes/video-compare/status")
+async def get_video_compare_status():
+    """Poll video comparison progress."""
+    if not _video_compare_task:
+        return {"status": "idle", "message": "No comparison running or completed"}
+
+    return {
+        "status": _video_compare_task.get("status", "unknown"),
+        "total": _video_compare_task.get("total", 0),
+        "completed": _video_compare_task.get("completed", 0),
+        "current_engine": _video_compare_task.get("current_engine"),
+        "started_at": _video_compare_task.get("started_at"),
+        "finished_at": _video_compare_task.get("finished_at"),
+        "results": [
+            {k: v for k, v in r.items()}
+            for r in _video_compare_task.get("results", [])
+        ],
+    }
+
+
+@router.get("/scenes/video-compare/results")
+async def get_video_compare_results():
+    """Get ranked video comparison results (only available after completion)."""
+    if not _video_compare_task:
+        raise HTTPException(status_code=404, detail="No comparison data available")
+
+    if _video_compare_task.get("status") != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Comparison is {_video_compare_task.get('status', 'unknown')}, not yet completed",
+        )
+
+    results = _video_compare_task.get("results", [])
+    ranked = sorted(
+        [r for r in results if r.get("quality_score") is not None],
+        key=lambda r: (-r["quality_score"], r.get("generation_time") or 9999),
+    )
+    failed = [r for r in results if r.get("quality_score") is None]
+
+    return {
+        "status": "completed",
+        "started_at": _video_compare_task.get("started_at"),
+        "finished_at": _video_compare_task.get("finished_at"),
+        "request": _video_compare_task.get("request"),
+        "ranked": ranked,
+        "failed": failed,
+        "winner": ranked[0] if ranked else None,
+    }
+
+
 @router.get("/scenes/{scene_id}/shot-recommendations")
 async def get_shot_recommendations(scene_id: str, top_n: int = 5):
     """Get smart image recommendations for each shot in a scene."""
@@ -217,6 +514,9 @@ async def get_scene(scene_id: str):
                 "generation_time_seconds": sh["generation_time_seconds"],
                 "dialogue_text": sh.get("dialogue_text"),
                 "dialogue_character_slug": sh.get("dialogue_character_slug"),
+                "video_engine": sh.get("video_engine") or "framepack",
+                "transition_type": sh.get("transition_type") or "dissolve",
+                "transition_duration": float(sh.get("transition_duration") or 0.3),
             })
         return {
             "id": str(scene["id"]), "project_id": scene["project_id"],
@@ -255,7 +555,7 @@ async def update_scene(scene_id: str, body: SceneUpdateRequest):
     conn = await connect_direct()
     try:
         updates, params, idx = [], [], 2  # $1 is scene_id
-        for field in ["title", "description", "location", "time_of_day", "weather", "mood", "target_duration_seconds"]:
+        for field in ["title", "description", "location", "time_of_day", "weather", "mood", "target_duration_seconds", "post_interpolate_fps", "post_upscale_factor"]:
             val = getattr(body, field, None)
             if val is not None:
                 updates.append(f"{field} = ${idx}")
@@ -291,14 +591,16 @@ async def create_shot(scene_id: str, body: ShotCreateRequest):
             INSERT INTO shots (scene_id, shot_number, source_image_path, shot_type,
                                camera_angle, duration_seconds, motion_prompt,
                                characters_present, seed, steps, use_f1, status,
-                               dialogue_text, dialogue_character_slug)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13)
+                               dialogue_text, dialogue_character_slug,
+                               transition_type, transition_duration, video_engine)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', $12, $13, $14, $15, $16)
             RETURNING id
         """, sid, body.shot_number, body.source_image_path, body.shot_type,
             body.camera_angle, body.duration_seconds, body.motion_prompt,
             body.characters_present if body.characters_present else None,
             body.seed, body.steps, body.use_f1,
-            body.dialogue_text, body.dialogue_character_slug)
+            body.dialogue_text, body.dialogue_character_slug,
+            body.transition_type, body.transition_duration, body.video_engine)
         return {"id": str(row["id"]), "shot_number": body.shot_number}
     finally:
         await conn.close()
@@ -317,6 +619,8 @@ async def update_shot(scene_id: str, shot_id: str, body: ShotUpdateRequest):
             ("characters_present", "characters_present"),
             ("seed", "seed"), ("steps", "steps"), ("use_f1", "use_f1"),
             ("dialogue_text", "dialogue_text"), ("dialogue_character_slug", "dialogue_character_slug"),
+            ("transition_type", "transition_type"), ("transition_duration", "transition_duration"),
+            ("video_engine", "video_engine"),
         ]:
             val = getattr(body, field, None)
             if val is not None:

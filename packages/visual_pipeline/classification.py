@@ -377,25 +377,50 @@ CONFIDENCE RULES:
             logger.info(f"Low confidence classification for {image_path.name}, skipping")
             return [], description
 
-        # Build matched list: primary character ONLY for dataset assignment.
-        # Group shots (no clear primary) return empty — they're not useful for LoRA training.
+        # Build matched list: primary + validated "others" for multi-character assignment.
+        # A frame of Mario riding Yoshi → both get the frame.
+        #
+        # GUARD: The vision model hallucinates `others` — it sees the roster and
+        # free-associates characters that aren't in the frame.  Rules:
+        #   - Only trust others when confidence == "high"
+        #   - Max 2 others (3 total).  If the model lists 3+ others it's hallucinating.
+        #   - Group shots (no primary) only accepted with exactly 2 others.
+        _MAX_OTHERS = 2
+        valid_others = [s for s in others if s in valid_slugs]
+
         matched = []
         if primary and primary in valid_slugs:
             matched.append(primary)
-        # If no primary but exactly 1 "other", treat that as the subject
-        elif len(others) == 1 and others[0] in valid_slugs:
-            matched.append(others[0])
+            if confidence == "high" and len(valid_others) <= _MAX_OTHERS:
+                for other_slug in valid_others:
+                    if other_slug not in matched:
+                        matched.append(other_slug)
+        elif len(valid_others) == 1:
+            # No primary but exactly 1 other — treat as the subject
+            matched.append(valid_others[0])
+        elif not primary and len(valid_others) == 2 and confidence == "high":
+            # Group shot with exactly 2 identifiable characters
+            matched.extend(valid_others)
 
-        # Confusable-pair verification: if the primary is in a known confusable
-        # pair, run a focused follow-up to verify.
-        if matched and matched[0] in CONFUSABLE_PAIRS:
-            verified = verify_confusable(image_path, matched[0], img_data)
-            if verified is not None:
-                matched = [verified]
+        # Confusable verification: run per-character, not per-frame
+        verified_matched = []
+        for slug in matched:
+            if slug in CONFUSABLE_PAIRS:
+                verified = verify_confusable(image_path, slug, img_data)
+                if verified is not None:
+                    if verified not in verified_matched:
+                        verified_matched.append(verified)
+                else:
+                    logger.info(f"Confusable verification inconclusive for {slug} in {image_path.name}, dropping")
             else:
-                # Verification inconclusive — don't assign
-                logger.info(f"Confusable verification inconclusive for {image_path.name}, skipping")
-                return [], description
+                if slug not in verified_matched:
+                    verified_matched.append(slug)
+
+        if matched and not verified_matched:
+            logger.info(f"All confusable verifications failed for {image_path.name}, skipping")
+            return [], description
+
+        matched = verified_matched
 
         # Pack extra observations into the description for downstream use
         extras = {}

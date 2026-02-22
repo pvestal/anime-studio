@@ -17,8 +17,8 @@ End-to-end anime production pipeline: project management, character design, data
 | 3 | **Characters** | Character roster, design prompts, YouTube/video/image ingestion |
 | 4 | **Approve** | Human-in-the-loop image approval with Gemma3 auto-triage, species validation, replenishment loop controls |
 | 5 | **Train** | Launch LoRA training jobs, monitor epochs/loss |
-| 6 | **Generate** | Generate images (Stable Diffusion) or videos (FramePack I2V) per character |
-| 7 | **Scenes** | Scene Builder + Episodes: compose multi-shot scenes with motion presets, dialogue, continuity chaining; assemble into episodes; publish to Jellyfin |
+| 6 | **Generate** | Generate images (Stable Diffusion) or videos (FramePack/LTX/Wan I2V/T2V) per character |
+| 7 | **Scenes** | Scene Builder + Episodes: compose multi-shot scenes with per-shot engine selection, motion presets, dialogue, continuity chaining; assemble with crossfade transitions; frame interpolation; upscaling; audio ducking; episode assembly; Jellyfin publish |
 | 8 | **Gallery** | Browse generated outputs |
 | — | **Echo Brain** | AI chat with project context, prompt enhancement |
 
@@ -34,7 +34,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system diagrams and data flow.
 | `packages/core/` | DB pool, auth middleware, config, GPU status, models, events, learning, replenishment, orchestrator, graph |
 | `packages/story/` | Story & world settings, project CRUD (15 routes) |
 | `packages/visual_pipeline/` | Vision review, classification, ComfyUI workflows (5 routes) |
-| `packages/scene_generation/` | Scene builder, FramePack/LTX-Video, progressive-gate generation, crossfade assembly, music gen, motion presets, story-to-scenes AI (21 routes) |
+| `packages/scene_generation/` | Scene builder, FramePack/LTX-Video/Wan T2V, progressive-gate generation, crossfade assembly, audio ducking, frame interpolation, upscaling, music gen, motion presets, story-to-scenes AI (23 routes) |
 | `packages/episode_assembly/` | Episode CRUD, multi-scene assembly, Jellyfin publishing (10 routes) |
 | `packages/lora_training/` | Training, ingestion, regeneration, feedback (32 routes) |
 | `packages/audio_composition/` | Voice ingestion/transcription, ACE-Step music generation, music cache (8 routes) |
@@ -57,8 +57,8 @@ PostgreSQL `anime_production` database. Key tables:
 - `characters` - Character names, design prompts, appearance_data (species, key_colors, key_features, common_errors)
 - `storylines` - Story metadata per project
 - `world_settings` - Art direction, cinematography, color palettes, negative_prompt_guidance
-- `scenes` - Scene metadata, generation status, output paths, dialogue audio
-- `shots` - Individual shots within scenes, FramePack generation state, dialogue text/character
+- `scenes` - Scene metadata, generation status, output paths, dialogue audio, post-processing settings (interpolation fps, upscale factor)
+- `shots` - Individual shots within scenes, per-shot video engine selection (FramePack/LTX/Wan), generation state, dialogue text/character, transition settings
 - `episodes` - Episode metadata, assembly status, Jellyfin publish path
 - `episode_scenes` - Junction table linking scenes to episodes with position ordering
 
@@ -94,12 +94,13 @@ If references exist + IP-Adapter models are installed, reference conditioning is
 The Scene Builder (tab 7) enables multi-shot video scene composition:
 
 1. **Define** scenes with metadata (location, time, weather, mood)
-2. **Add shots** with source images, motion prompts (with preset library), shot types, camera angles, per-shot dialogue, and transition settings (dissolve/fade/wipe)
+2. **Add shots** with source images, motion prompts (with preset library), shot types, camera angles, per-shot dialogue, transition settings, and **video engine selection** (FramePack, FramePack F1, LTX-Video, Wan T2V)
 3. **Generate** shots via progressive quality gates — each shot is generated, quality-checked by vision AI, and retried up to 3x with loosening thresholds (0.6→0.45→0.3) and more steps per retry
 4. **Chain** continuity: each shot's last frame becomes the next shot's first frame
 5. **Assemble** completed shots with crossfade transitions (ffmpeg xfade filter, 0.3s dissolve overlap)
+5b. **Post-process** (optional): frame interpolation (30→60fps via minterpolate), video upscaling (2x via lanczos, capped at 1080p)
 6. **Music**: auto-generates AI music from scene mood via ACE-Step (3.5B model, AMD GPU), or uses assigned Apple Music tracks
-7. **Audio mixing**: dialogue WAVs (100%) + music (30% with fade) mixed into final scene video
+7. **Audio mixing**: dialogue WAVs (100%) + music with **sidechain ducking** (30% volume auto-dips to ~5% during dialogue) mixed into final scene video
 
 Generation runs as a background async task with one-at-a-time ComfyUI queueing (no queue flooding). The monitor view polls status every 5 seconds.
 
@@ -228,12 +229,16 @@ Character design prompt + style template + per-character negatives -> ComfyUI ch
 ### FramePack Video (I2V)
 Source image + motion prompt -> FramePack model -> sampling (sections) -> VAE decode tiled -> MP4
 
+### Wan 2.1 T2V (Text-to-Video)
+Text prompt -> Wan 2.1 1.3B (GGUF Q8_0, UMT5-XXL text encoder) -> uni_pc sampling -> VAE decode -> MP4
+Ideal for environment/establishing shots where no source image exists. ~4-6GB VRAM with GGUF.
+
 ### Scene Generation (Progressive Gates)
 ```
 For each shot (ordered):
   1. First frame = previous shot's last frame (or source image for shot 1)
   2. Copy to ComfyUI/input/
-  3. Build FramePack workflow (one at a time — no queue flooding)
+  3. Build workflow per shot engine (FramePack/LTX/Wan — one at a time, no queue flooding)
   4. Submit to ComfyUI, poll until complete
   5. Extract last frame, quality-check via Ollama vision (score 0-1)
   6. If score < threshold: RETRY with new seed + more steps (up to 3 attempts)
@@ -241,6 +246,8 @@ For each shot (ordered):
   7. Accept best result, chain last frame to next shot
 After all shots:
   8. ffmpeg xfade crossfade between shots (dissolve/fade/wipe, 0.3s overlap)
+  8b. Optional: frame interpolation (30→60fps via minterpolate)
+  8c. Optional: video upscaling (2x via lanczos, max 1080p)
   9. Build dialogue audio (TTS per shot, concat)
   10. Get music: ACE-Step generated > Apple Music preview > auto-generate from mood
   11. Mix: video + dialogue (100%) + music (30%) -> final scene video
@@ -250,7 +257,7 @@ After all shots:
 ```
 For each episode:
   1. Gather scene videos in position order
-  2. ffmpeg concat demuxer -> episode video
+  2. ffmpeg xfade crossfade between scenes (fadeblack default, 0.5s) -> episode video
   3. Extract thumbnail from first frame
   4. Optional: publish to Jellyfin (symlink + library scan)
 ```

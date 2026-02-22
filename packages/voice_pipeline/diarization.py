@@ -133,9 +133,11 @@ async def diarize_project(project_slug: str) -> dict:
         use_auth_token=hf_token,
     )
 
-    # Use GPU if available
+    # Use GPU if available (prefer AMD ROCm, fallback NVIDIA CUDA)
     import torch
-    if torch.cuda.is_available():
+    if hasattr(torch, 'hip') and torch.hip.is_available():
+        pipeline.to(torch.device("cuda"))  # PyTorch ROCm uses "cuda" device string
+    elif torch.cuda.is_available():
         pipeline.to(torch.device("cuda"))
 
     diarization = pipeline(str(full_audio))

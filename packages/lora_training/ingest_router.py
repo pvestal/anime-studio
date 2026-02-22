@@ -92,6 +92,65 @@ async def _classify_image(image_path: Path, **kwargs) -> tuple[list[str], str]:
     return await asyncio.to_thread(_classify_image_sync, image_path, **kwargs)
 
 
+async def _save_frame_to_characters(
+    frame: Path,
+    matched: list[str],
+    *,
+    char_map: dict,
+    source: str,
+    source_url: str | None,
+    frame_number: int,
+    timestamp: str,
+    project_name: str,
+    description: str,
+    prefix: str = "yt",
+) -> tuple[list[str], int]:
+    """Save a frame to ALL matched character datasets (multi-character aware).
+
+    Per-character dedup: the same frame can be new for yoshi but a dupe for mario.
+
+    Returns (saved_slugs, duplicate_count).
+    """
+    saved_slugs: list[str] = []
+    dup_count = 0
+
+    for slug in matched:
+        if await asyncio.to_thread(is_duplicate, frame, slug):
+            dup_count += 1
+            continue
+
+        db_info = char_map.get(slug, {})
+        dataset_images = BASE_PATH / slug / "images"
+        dataset_images.mkdir(parents=True, exist_ok=True)
+
+        dest_name = f"{prefix}_{slug}_{timestamp}_{frame_number:04d}.png"
+        dest = dataset_images / dest_name
+        shutil.copy2(frame, dest)
+
+        meta = {
+            "seed": None,
+            "full_prompt": None,
+            "design_prompt": db_info.get("design_prompt", ""),
+            "checkpoint_model": None,
+            "source": source,
+            "source_url": source_url,
+            "frame_number": frame_number,
+            "project_name": project_name,
+            "character_name": db_info.get("name", slug),
+            "generated_at": datetime.now().isoformat(),
+            "vision_description": description[:300] if description else "",
+            "vision_matched": matched,
+        }
+        dest.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
+        caption = db_info.get("design_prompt") or slug.replace("_", " ")
+        dest.with_suffix(".txt").write_text(caption)
+        register_pending_image(slug, dest_name)
+        register_hash(dest, slug)
+        saved_slugs.append(slug)
+
+    return saved_slugs, dup_count
+
+
 @ingest_router.get("/ingest/progress")
 async def get_ingest_progress():
     """Poll current ingestion progress. Returns empty dict if no active job.
@@ -203,54 +262,46 @@ async def ingest_video(file: UploadFile = File(...), character_slug: str = "",
         copied = 0
         unclassified = 0
         duplicates = 0
+        per_char: dict[str, int] = {}
         for i, frame in enumerate(staged_frames):
             frame_num = i + 1
             matched, description = await _classify_image(frame)
-            if character_slug not in matched:
-                saved = await asyncio.to_thread(
-                    _save_unclassified_frame, frame,
-                    project_name=db_info.get("project_name", ""),
-                    source="video_upload",
-                    source_url=None,
-                    frame_number=frame_num,
-                    description=description,
-                    matched=matched,
-                    timestamp=timestamp,
-                )
-                if saved:
-                    unclassified += 1
-                else:
-                    duplicates += 1
-                continue
+            # Ensure target character is included if vision matched it
+            if not matched or character_slug not in matched:
+                # If target wasn't matched at all, save as unclassified
+                if character_slug not in matched:
+                    saved = await asyncio.to_thread(
+                        _save_unclassified_frame, frame,
+                        project_name=db_info.get("project_name", ""),
+                        source="video_upload",
+                        source_url=None,
+                        frame_number=frame_num,
+                        description=description,
+                        matched=matched,
+                        timestamp=timestamp,
+                    )
+                    if saved:
+                        unclassified += 1
+                    else:
+                        duplicates += 1
+                    continue
 
-            if await asyncio.to_thread(is_duplicate, frame, character_slug):
-                duplicates += 1
-                continue
-
-            dest_name = f"vid_{character_slug}_{timestamp}_{frame_num:04d}.png"
-            dest = dataset_images / dest_name
-            shutil.copy2(frame, dest)
-
-            meta = {
-                "seed": None,
-                "full_prompt": None,
-                "design_prompt": db_info.get("design_prompt", ""),
-                "checkpoint_model": None,
-                "source": "video_upload",
-                "original_filename": file.filename,
-                "frame_number": frame_num,
-                "project_name": db_info.get("project_name", ""),
-                "character_name": db_info.get("name", character_slug),
-                "generated_at": datetime.now().isoformat(),
-                "vision_description": description[:300],
-                "vision_matched": matched,
-            }
-            dest.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
-            caption = db_info.get("design_prompt", f"a frame of {character_slug.replace('_', ' ')}")
-            dest.with_suffix(".txt").write_text(caption)
-            register_pending_image(character_slug, dest_name)
-            register_hash(dest, character_slug)
-            copied += 1
+            saved_slugs, dup_count = await _save_frame_to_characters(
+                frame, matched,
+                char_map=char_map,
+                source="video_upload",
+                source_url=None,
+                frame_number=frame_num,
+                timestamp=timestamp,
+                project_name=db_info.get("project_name", ""),
+                description=description,
+                prefix="vid",
+            )
+            duplicates += dup_count
+            for slug in saved_slugs:
+                per_char[slug] = per_char.get(slug, 0) + 1
+            if character_slug in saved_slugs:
+                copied += 1
 
         return {
             "frames_extracted": len(staged_frames),
@@ -258,6 +309,7 @@ async def ingest_video(file: UploadFile = File(...), character_slug: str = "",
             "frames_unclassified": unclassified,
             "frames_duplicate": duplicates,
             "character": character_slug,
+            "per_character": per_char,
             "status": "pending_approval",
         }
     finally:
@@ -316,33 +368,38 @@ async def scan_comfyui():
                 matched_slug = vision_matched[0]
 
         if matched_slug:
-            if await asyncio.to_thread(is_duplicate, png, matched_slug):
-                duplicates += 1
-                continue
+            # Save to all vision-matched slugs (multi-character), or just the filename-matched slug
+            all_slugs = vision_matched if vision_matched else [matched_slug]
+            for save_slug in all_slugs:
+                if save_slug not in char_map:
+                    continue
+                if await asyncio.to_thread(is_duplicate, png, save_slug):
+                    duplicates += 1
+                    continue
 
-            db_info = char_map[matched_slug]
-            dest_dir = BASE_PATH / matched_slug / "images"
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            dest = dest_dir / png.name
-            if not dest.exists():
-                shutil.copy2(png, dest)
-                meta = {
-                    "seed": None,
-                    "source": "comfyui_scan",
-                    "design_prompt": db_info.get("design_prompt") or "",
-                    "project_name": db_info.get("project_name") or "",
-                    "character_name": db_info.get("name") or matched_slug,
-                    "generated_at": datetime.now().isoformat(),
-                    "vision_description": vision_description[:300] if vision_description else None,
-                    "vision_matched": vision_matched if vision_matched else None,
-                }
-                dest.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
-                caption = db_info.get("design_prompt") or matched_slug.replace("_", " ")
-                dest.with_suffix(".txt").write_text(caption)
-                register_pending_image(matched_slug, png.name)
-                register_hash(dest, matched_slug)
-                new_images += 1
-                matched_chars[matched_slug] = matched_chars.get(matched_slug, 0) + 1
+                db_info = char_map[save_slug]
+                dest_dir = BASE_PATH / save_slug / "images"
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest = dest_dir / png.name
+                if not dest.exists():
+                    shutil.copy2(png, dest)
+                    meta = {
+                        "seed": None,
+                        "source": "comfyui_scan",
+                        "design_prompt": db_info.get("design_prompt") or "",
+                        "project_name": db_info.get("project_name") or "",
+                        "character_name": db_info.get("name") or save_slug,
+                        "generated_at": datetime.now().isoformat(),
+                        "vision_description": vision_description[:300] if vision_description else None,
+                        "vision_matched": vision_matched if vision_matched else None,
+                    }
+                    dest.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
+                    caption = db_info.get("design_prompt") or save_slug.replace("_", " ")
+                    dest.with_suffix(".txt").write_text(caption)
+                    register_pending_image(save_slug, png.name)
+                    register_hash(dest, save_slug)
+                    new_images += 1
+                    matched_chars[save_slug] = matched_chars.get(save_slug, 0) + 1
         else:
             unmatched.append(png.name)
 
@@ -389,6 +446,7 @@ async def ingest_youtube(req: YouTubeIngestRequest):
         copied = 0
         unclassified = 0
         duplicates = 0
+        per_char: dict[str, int] = {}
         for i, frame in enumerate(staged_frames):
             _ingest_progress["youtube"] = {
                 "status": "classifying",
@@ -414,34 +472,22 @@ async def ingest_youtube(req: YouTubeIngestRequest):
                     duplicates += 1
                 continue
 
-            if await asyncio.to_thread(is_duplicate, frame, req.character_slug):
-                duplicates += 1
-                continue
-
-            dest_name = f"yt_{req.character_slug}_{timestamp}_{i + 1:04d}.png"
-            dest = dataset_images / dest_name
-            shutil.copy2(frame, dest)
-
-            meta = {
-                "seed": None,
-                "full_prompt": None,
-                "design_prompt": db_info.get("design_prompt", ""),
-                "checkpoint_model": None,
-                "source": "youtube",
-                "source_url": req.url,
-                "frame_number": i + 1,
-                "project_name": db_info.get("project_name", ""),
-                "character_name": db_info.get("name", req.character_slug),
-                "generated_at": datetime.now().isoformat(),
-                "vision_description": description[:300],
-                "vision_matched": matched,
-            }
-            dest.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
-            caption = db_info.get("design_prompt", f"a frame of {req.character_slug.replace('_', ' ')}")
-            dest.with_suffix(".txt").write_text(caption)
-            register_pending_image(req.character_slug, dest_name)
-            register_hash(dest, req.character_slug)
-            copied += 1
+            saved_slugs, dup_count = await _save_frame_to_characters(
+                frame, matched,
+                char_map=char_map,
+                source="youtube",
+                source_url=req.url,
+                frame_number=i + 1,
+                timestamp=timestamp,
+                project_name=db_info.get("project_name", ""),
+                description=description,
+                prefix="yt",
+            )
+            duplicates += dup_count
+            for slug in saved_slugs:
+                per_char[slug] = per_char.get(slug, 0) + 1
+            if req.character_slug in saved_slugs:
+                copied += 1
 
         return {
             "frames_extracted": len(staged_frames),
@@ -449,6 +495,7 @@ async def ingest_youtube(req: YouTubeIngestRequest):
             "frames_unclassified": unclassified,
             "frames_duplicate": duplicates,
             "character": req.character_slug,
+            "per_character": per_char,
             "status": "pending_approval",
         }
     except RuntimeError as e:
@@ -511,39 +558,20 @@ async def ingest_youtube_project(req: YouTubeProjectIngestRequest):
                     duplicates += 1
                 continue
 
-            primary_slug = matched[0]
-            if await asyncio.to_thread(is_duplicate, frame, primary_slug):
-                duplicates += 1
-                continue
-
-            db_info = char_map.get(primary_slug, {})
-            dataset_images = BASE_PATH / primary_slug / "images"
-            dataset_images.mkdir(parents=True, exist_ok=True)
-
-            dest_name = f"yt_{primary_slug}_{timestamp}_{i + 1:04d}.png"
-            dest = dataset_images / dest_name
-            shutil.copy2(frame, dest)
-
-            meta = {
-                "seed": None,
-                "full_prompt": None,
-                "design_prompt": db_info.get("design_prompt", ""),
-                "checkpoint_model": None,
-                "source": "youtube_project",
-                "source_url": req.url,
-                "frame_number": i + 1,
-                "project_name": req.project_name,
-                "character_name": db_info.get("name", primary_slug),
-                "generated_at": datetime.now().isoformat(),
-                "vision_description": description[:300],
-                "vision_matched": matched,
-            }
-            dest.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
-            caption = db_info.get("design_prompt") or primary_slug.replace("_", " ")
-            dest.with_suffix(".txt").write_text(caption)
-            register_pending_image(primary_slug, dest_name)
-            register_hash(dest, primary_slug)
-            per_char[primary_slug] = per_char.get(primary_slug, 0) + 1
+            saved_slugs, dup_count = await _save_frame_to_characters(
+                frame, matched,
+                char_map=char_map,
+                source="youtube_project",
+                source_url=req.url,
+                frame_number=i + 1,
+                timestamp=timestamp,
+                project_name=req.project_name,
+                description=description,
+                prefix="yt",
+            )
+            duplicates += dup_count
+            for slug in saved_slugs:
+                per_char[slug] = per_char.get(slug, 0) + 1
 
         return {
             "frames_extracted": len(staged_frames),
@@ -623,39 +651,20 @@ async def ingest_local_video(req: LocalVideoIngestRequest):
                     duplicates += 1
                 continue
 
-            primary_slug = matched[0]
-            if await asyncio.to_thread(is_duplicate, frame, primary_slug):
-                duplicates += 1
-                continue
-
-            db_info = char_map.get(primary_slug, {})
-            dataset_images = BASE_PATH / primary_slug / "images"
-            dataset_images.mkdir(parents=True, exist_ok=True)
-
-            dest_name = f"vid_{primary_slug}_{timestamp}_{i + 1:04d}.png"
-            dest = dataset_images / dest_name
-            shutil.copy2(frame, dest)
-
-            meta = {
-                "seed": None,
-                "full_prompt": None,
-                "design_prompt": db_info.get("design_prompt", ""),
-                "checkpoint_model": None,
-                "source": "local_video",
-                "source_url": req.path,
-                "frame_number": i + 1,
-                "project_name": req.project_name,
-                "character_name": db_info.get("name", primary_slug),
-                "generated_at": datetime.now().isoformat(),
-                "vision_description": description[:300],
-                "vision_matched": matched,
-            }
-            dest.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
-            caption = db_info.get("design_prompt") or primary_slug.replace("_", " ")
-            dest.with_suffix(".txt").write_text(caption)
-            register_pending_image(primary_slug, dest_name)
-            register_hash(dest, primary_slug)
-            per_char[primary_slug] = per_char.get(primary_slug, 0) + 1
+            saved_slugs, dup_count = await _save_frame_to_characters(
+                frame, matched,
+                char_map=char_map,
+                source="local_video",
+                source_url=req.path,
+                frame_number=i + 1,
+                timestamp=timestamp,
+                project_name=req.project_name,
+                description=description,
+                prefix="vid",
+            )
+            duplicates += dup_count
+            for slug in saved_slugs:
+                per_char[slug] = per_char.get(slug, 0) + 1
 
         return {
             "frames_extracted": len(staged_frames),
@@ -828,39 +837,20 @@ async def _extract_movie_task(
                     duplicates += 1
                 continue
 
-            primary_slug = matched[0]
-            if await asyncio.to_thread(is_duplicate, frame, primary_slug):
-                duplicates += 1
-                continue
-
-            db_info = char_map.get(primary_slug, {})
-            dataset_images = BASE_PATH / primary_slug / "images"
-            dataset_images.mkdir(parents=True, exist_ok=True)
-
-            dest_name = f"movie_{primary_slug}_{timestamp}_{i + 1:04d}.png"
-            dest = dataset_images / dest_name
-            shutil.copy2(frame, dest)
-
-            meta = {
-                "seed": None,
-                "full_prompt": None,
-                "design_prompt": db_info.get("design_prompt", ""),
-                "checkpoint_model": None,
-                "source": "movie_upload",
-                "source_url": str(video_path),
-                "frame_number": i + 1,
-                "project_name": req.project_name,
-                "character_name": db_info.get("name", primary_slug),
-                "generated_at": datetime.now().isoformat(),
-                "vision_description": description[:300],
-                "vision_matched": matched,
-            }
-            dest.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
-            caption = db_info.get("design_prompt") or primary_slug.replace("_", " ")
-            dest.with_suffix(".txt").write_text(caption)
-            register_pending_image(primary_slug, dest_name)
-            register_hash(dest, primary_slug)
-            per_char[primary_slug] = per_char.get(primary_slug, 0) + 1
+            saved_slugs, dup_count = await _save_frame_to_characters(
+                frame, matched,
+                char_map=char_map,
+                source="movie_upload",
+                source_url=str(video_path),
+                frame_number=i + 1,
+                timestamp=timestamp,
+                project_name=req.project_name,
+                description=description,
+                prefix="movie",
+            )
+            duplicates += dup_count
+            for slug in saved_slugs:
+                per_char[slug] = per_char.get(slug, 0) + 1
 
         _ingest_progress["movie"] = {
             "active": False,

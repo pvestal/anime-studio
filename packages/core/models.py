@@ -212,6 +212,7 @@ class ShotCreateRequest(BaseModel):
     dialogue_character_slug: Optional[str] = None
     transition_type: str = "dissolve"  # dissolve, fade, fadeblack, wipeleft, slideup, etc.
     transition_duration: float = 0.3  # seconds of crossfade overlap
+    video_engine: str = "framepack"  # framepack, framepack_f1, ltx
 
 
 class ShotUpdateRequest(BaseModel):
@@ -229,6 +230,7 @@ class ShotUpdateRequest(BaseModel):
     dialogue_character_slug: Optional[str] = None
     transition_type: Optional[str] = None
     transition_duration: Optional[float] = None
+    video_engine: Optional[str] = None
 
 
 class SceneUpdateRequest(BaseModel):
@@ -239,6 +241,8 @@ class SceneUpdateRequest(BaseModel):
     weather: Optional[str] = None
     mood: Optional[str] = None
     target_duration_seconds: Optional[int] = None
+    post_interpolate_fps: Optional[int] = None  # e.g. 60 for 30→60fps doubling
+    post_upscale_factor: Optional[int] = None  # e.g. 2 for 2x resolution (544x704 → 1088x1408)
 
 
 class SceneAudioRequest(BaseModel):
@@ -331,3 +335,24 @@ class MusicGenerateRequest(BaseModel):
     key: Optional[str] = None
     seed: Optional[int] = None
     caption: Optional[str] = None  # free-form override
+
+
+# --- Video A/B Comparison Models ---
+
+class VideoEngineConfig(BaseModel):
+    engine: str  # "framepack", "framepack_f1", "ltx"
+    steps: int = 25
+    seed: Optional[int] = None
+    gpu_memory_preservation: float = 6.0  # FramePack only
+    lora_name: Optional[str] = None  # LTX only
+    lora_strength: float = 0.8  # LTX only
+
+
+class VideoCompareRequest(BaseModel):
+    source_image_path: str
+    prompt: str
+    negative_prompt: str = "low quality, blurry, distorted, watermark"
+    total_seconds: float = 2.0
+    character_slug: Optional[str] = None
+    project_name: Optional[str] = None
+    engines: List[VideoEngineConfig]

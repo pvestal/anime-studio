@@ -15,7 +15,7 @@ graph TB
             CORE[core/<br/>DB, auth, config, GPU,<br/>model profiles]
             STORY[story/<br/>15 routes]
             VIS[visual_pipeline/<br/>5 routes]
-            SCENE[scene_generation/<br/>21 routes]
+            SCENE[scene_generation/<br/>23 routes]
             EPISODE[episode_assembly/<br/>10 routes]
             TRAIN[lora_training/<br/>32 routes]
             AUDIO[audio_composition/<br/>8 routes]
@@ -92,16 +92,17 @@ packages/
     vision.py         # Image quality assessment, species verification, perceptual hash
     comfyui.py        # Workflow building, submission, progress tracking
 
-  scene_generation/   # 21 routes
-    router.py         # Scene/shot CRUD, generate, assemble, video serve, motion presets, story-to-scenes, music
-    builder.py        # Progressive-gate generation, crossfade assembly, continuity chaining, audio mixing
+  scene_generation/   # 23 routes
+    router.py         # Scene/shot CRUD, generate, assemble, video serve, motion presets, story-to-scenes, music, Wan endpoints
+    builder.py        # Progressive-gate generation, crossfade assembly, continuity chaining, audio ducking, frame interpolation, video upscaling
     framepack.py      # FramePack workflow building, I2V pipeline, motion presets
     ltx_video.py      # LTX-Video 2B workflow building, native LoRA support
+    wan_video.py      # Wan 2.1 T2V workflow, GGUF support, environment/establishing shots
     story_to_scenes.py # AI scene breakdown from storyline (Ollama gemma3:12b)
 
   episode_assembly/   # 10 routes
     router.py         # Episode CRUD, scene linking, assemble, video serve, publish
-    builder.py        # ffmpeg concat for multi-scene episodes, thumbnail extraction
+    builder.py        # ffmpeg xfade crossfade for multi-scene episodes, thumbnail extraction
     publish.py        # Jellyfin directory structure, symlinks, library scan
 
   lora_training/      # 32 routes
@@ -182,6 +183,8 @@ erDiagram
         int completed_shots
         string generated_music_path
         string generated_music_task_id
+        int post_interpolate_fps "NULL or target fps"
+        int post_upscale_factor "NULL or 2x"
     }
 
     shots {
@@ -206,6 +209,7 @@ erDiagram
         string dialogue_character_slug
         string transition_type
         float transition_duration
+        string video_engine "framepack|framepack_f1|ltx|wan"
     }
 
     episodes {
@@ -431,7 +435,7 @@ graph TD
 |---------|--------|--------|-----------|
 | story | `/projects`, `/storyline`, `/world-settings`, `/generation-styles` | 15 | router.py |
 | visual_pipeline | `/approval/vision-review` | 5 | router.py, classification.py, vision.py, comfyui.py |
-| scene_generation | `/scenes`, `/scenes/motion-presets`, `/scenes/generate-from-story`, `/scenes/{id}/generate-music`, `/scenes/{id}/attach-music` | 21 | router.py, builder.py, framepack.py, ltx_video.py, story_to_scenes.py |
+| scene_generation | `/scenes`, `/scenes/motion-presets`, `/scenes/generate-from-story`, `/scenes/{id}/generate-music`, `/scenes/{id}/attach-music`, `/generate/wan`, `/generate/wan/models` | 23 | router.py, builder.py, framepack.py, ltx_video.py, wan_video.py, story_to_scenes.py |
 | episode_assembly | `/episodes`, `/episodes/{id}/scenes`, `/episodes/{id}/assemble`, `/episodes/{id}/publish` | 10 | router.py, builder.py, publish.py |
 | lora_training | `/dataset`, `/approval`, `/training`, `/gallery`, `/ingest`, `/feedback` | 32 | router.py, training_router.py, ingest_router.py, feedback.py |
 | audio_composition | `/audio`, `/audio/ingest/voice`, `/audio/voice/*`, `/audio/generate-music`, `/audio/music/*` | 8 | router.py |
@@ -439,13 +443,13 @@ graph TD
 | core (orchestrator) | `/orchestrator/status`, `/orchestrator/toggle`, `/orchestrator/initialize`, `/orchestrator/pipeline/{id}`, `/orchestrator/summary/{id}`, `/orchestrator/tick`, `/orchestrator/override`, `/orchestrator/training-target` | 8 | orchestrator.py, orchestrator_router.py |
 | core (graph) | `/graph/sync`, `/graph/stats`, `/graph/lineage/*`, `/graph/co-occurrence/*`, `/graph/drift/*`, `/graph/ranking/*`, `/graph/health`, `/graph/feedback/*`, `/graph/cross-project/*` | 11 | graph_sync.py, graph_queries.py, graph_router.py |
 | app.py | `/health`, `/gpu/status`, `/events/stats`, `/learning/*`, `/recommend/*`, `/drift`, `/quality/*`, `/correction/*`, `/replenishment/*` | 14 | — |
-| **Total** | | **146+** | |
+| **Total** | | **148+** | |
 
 ## Hardware
 
 | GPU | Service | Purpose |
 |-----|---------|---------|
-| NVIDIA RTX 3060 12GB | ComfyUI | Image/video generation (FramePack, LTX-Video) |
+| NVIDIA RTX 3060 12GB | ComfyUI | Image/video generation (FramePack, FramePack F1, LTX-Video, Wan 2.1 T2V) |
 | AMD RX 9070 XT 16GB | Ollama, Echo Brain, ACE-Step | Vision review (Gemma3, Vulkan), embedding generation, AI music generation (ROCm 7.2) |
 
 ## Ingestion → Production Pipeline (End-to-End)
@@ -564,10 +568,10 @@ graph LR
         MUSIC_SRC --> MUSIC_FILE[Music file<br/>WAV/M4A]
     end
 
-    subgraph "Mix (ffmpeg amix)"
+    subgraph "Mix (ffmpeg sidechaincompress + amix)"
         VIDEO[Scene video<br/>with crossfade transitions] --> MIX[ffmpeg 3-input mix]
         CONCAT_D --> |100% volume| MIX
-        MUSIC_FILE --> |30% volume<br/>fade in/out| MIX
+        MUSIC_FILE --> |30% volume, auto-ducked<br/>fade in/out| MIX
         MIX --> FINAL[Final scene MP4<br/>with audio]
     end
 ```
@@ -635,10 +639,14 @@ graph LR
 - **FramePack + LoRA incompatibility**: FramePack uses HunyuanVideo architecture, NOT Stable Diffusion — SD-based character LoRAs cannot be injected into video generation
 - **Progressive quality gates**: Shot generation retries up to 3x with loosening thresholds (0.6→0.45→0.3), +5 steps per retry, new seed each attempt, keeps best result
 - **Crossfade transitions**: Shots joined via ffmpeg `xfade` filter (dissolve/fade/fadeblack/wipeleft, 0.3s default overlap) — requires re-encoding but produces seamless results. Falls back to hard-cut if xfade fails
+- **Audio ducking**: ffmpeg sidechaincompress replaces flat amix — music volume (30%) automatically dips to ~5% when dialogue present, threshold=0.02, ratio=6:1, attack=200ms, release=1000ms
+- **Frame interpolation**: Optional per-scene post-processing via ffmpeg minterpolate (MCI/AOBMC/bidirectional). `scenes.post_interpolate_fps` column controls target fps (NULL=disabled, 60=30→60fps doubling)
+- **Video upscaling**: Optional per-scene upscale via ffmpeg lanczos filter. `scenes.post_upscale_factor` column (NULL=disabled, 2=2x resolution). Capped at 1920x1080
+- **Multi-engine video**: Per-shot `video_engine` column selects generation engine — FramePack (I2V, highest quality), FramePack F1 (faster I2V), LTX-Video (I2V+T2V, LoRA support), Wan 2.1 T2V (environment shots, no source image needed, GGUF for low VRAM)
 - **ACE-Step music generation**: AI music (3.5B model) on AMD RX 9070 XT via ROCm 7.2 nightly. ~20s for 30s of 48kHz stereo WAV. Scene assembly auto-generates from mood if no track assigned
 - **Model-aware generation**: `model_profiles.py` maps checkpoint filenames to structured profiles (architecture, prompt_format, quality tags, style stripping, vision hints). `translate_prompt()` adapts design_prompts at generation time — booru tag models get score_9 prefixes and style tag stripping, prose models keep prompts as-is. DB design_prompts never modified. Param cascade: `recommend_params()` (medium+ confidence) > DB `generation_styles` > model profile defaults
 - **Dual GPU architecture**: NVIDIA RTX 3060 for ComfyUI (image/video gen), AMD RX 9070 XT for Ollama (Vulkan) + ACE-Step (music gen, ROCm) + Echo Brain (embeddings). No GPU conflicts, parallel execution
-- **Episode assembly**: ffmpeg concat demuxer (no re-encoding) for fast multi-scene joins
+- **Episode assembly**: ffmpeg xfade crossfade between scenes (fadeblack default, 0.5s overlap) with fallback to hard-cut concat
 - **Jellyfin publishing**: Symlinks (not copies) to avoid doubling disk usage; S01E01 naming convention
 - **Audio mixing**: Non-fatal — if TTS or music download fails, scene video is kept without audio
 - **Story-to-scenes AI**: Uses Ollama gemma3:12b for scene breakdowns; structured JSON output with retry parsing

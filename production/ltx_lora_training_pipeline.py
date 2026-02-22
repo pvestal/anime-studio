@@ -261,7 +261,7 @@ Day 1-2: Data Collection & Preparation
   - Dance sequences (10-20 clips)
   - Intimate scenes (10-20 clips)
 □ Extract frames (8 fps = 192 frames from 24fps video)
-□ Auto-caption with BLIP/LLAVA
+□ Auto-caption with BLIP/Gemma vision
 □ Manual caption refinement for accuracy
 
 Day 3-4: Initial Training Runs

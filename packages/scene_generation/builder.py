@@ -14,6 +14,8 @@ from packages.core.db import connect_direct
 from packages.core.audit import log_decision
 
 from .framepack import build_framepack_workflow, _submit_comfyui_workflow
+from .ltx_video import build_ltx_workflow, _submit_comfyui_workflow as _submit_ltx_workflow
+from .wan_video import build_wan_t2v_workflow, _submit_comfyui_workflow as _submit_wan_workflow
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +229,134 @@ async def _concat_videos_hardcut(video_paths: list, output_path: str) -> str:
     return output_path
 
 
+async def interpolate_video(
+    input_path: str,
+    output_path: str,
+    target_fps: int = 60,
+    method: str = "mci",
+) -> str:
+    """Frame-interpolate a video to a higher framerate using ffmpeg minterpolate.
+
+    Args:
+        input_path: Source video path.
+        output_path: Destination video path.
+        target_fps: Target frame rate (e.g. 60 for 30→60fps doubling).
+        method: Interpolation method — "mci" (motion compensated, best quality),
+                "dup" (duplicate frames), "blend" (frame blending).
+
+    Returns:
+        Path to interpolated video.
+    """
+    # minterpolate with ME method: epzs (fast) or esa (slower, better)
+    filter_str = (
+        f"minterpolate=fps={target_fps}:mi_mode={method}:"
+        f"mc_mode=aobmc:me_mode=bidir:vsbmc=1"
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", input_path,
+        "-vf", filter_str,
+        "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "copy",
+        output_path,
+    ]
+
+    logger.info(f"Frame interpolation: {input_path} → {target_fps}fps ({method})")
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        logger.warning(f"Frame interpolation failed (non-fatal): {stderr.decode()[-200:]}")
+        return input_path  # Return original if interpolation fails
+
+    logger.info(f"Frame interpolation complete: {output_path}")
+    return output_path
+
+
+async def upscale_video(
+    input_path: str,
+    output_path: str,
+    scale_factor: int = 2,
+    model: str = "RealESRGAN_x4plus_anime_6B.pth",
+) -> str:
+    """Upscale a video frame-by-frame using ffmpeg + RealESRGAN via ComfyUI.
+
+    Since ComfyUI-based upscaling would require a complex workflow per frame,
+    this uses ffmpeg to extract frames, submits a batch upscale workflow,
+    then reassembles. For simplicity, uses ffmpeg's built-in scale filter
+    with lanczos interpolation as a reliable baseline. For production quality,
+    consider installing ComfyUI-SeedVR2_VideoUpscaler for temporal-aware upscaling.
+
+    Args:
+        input_path: Source video path.
+        output_path: Destination video path.
+        scale_factor: Upscale multiplier (2 = double resolution).
+        model: Upscale model name (unused in current ffmpeg implementation;
+               reserved for future ComfyUI-based upscaling).
+
+    Returns:
+        Path to upscaled video.
+    """
+    # Get current resolution
+    proc = await asyncio.create_subprocess_exec(
+        "ffprobe", "-v", "quiet", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "csv=p=0", input_path,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    try:
+        w, h = stdout.decode().strip().split(",")
+        new_w = int(w) * scale_factor
+        new_h = int(h) * scale_factor
+    except (ValueError, AttributeError):
+        logger.warning(f"Could not probe video dimensions, skipping upscale")
+        return input_path
+
+    # Cap at 1920x1080 to avoid unreasonable file sizes
+    if new_w > 1920:
+        ratio = 1920 / new_w
+        new_w = 1920
+        new_h = int(int(h) * scale_factor * ratio)
+    if new_h > 1080:
+        ratio = 1080 / new_h
+        new_h = 1080
+        new_w = int(new_w * ratio)
+
+    # Ensure even dimensions
+    new_w = new_w - (new_w % 2)
+    new_h = new_h - (new_h % 2)
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", input_path,
+        "-vf", f"scale={new_w}:{new_h}:flags=lanczos",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "copy",
+        output_path,
+    ]
+
+    logger.info(f"Video upscale: {w}x{h} → {new_w}x{new_h} ({scale_factor}x)")
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        logger.warning(f"Video upscale failed (non-fatal): {stderr.decode()[-200:]}")
+        return input_path
+
+    logger.info(f"Video upscale complete: {output_path}")
+    return output_path
+
+
 async def download_preview(url: str, scene_id: str) -> str:
     """Download a 30-sec Apple Music preview to the audio cache. Returns local path."""
     cache_path = AUDIO_CACHE_DIR / f"preview_{scene_id}.m4a"
@@ -321,7 +451,8 @@ async def mix_scene_audio(
         return video_path
 
     if dialogue_path and music_path:
-        # Both: 3-input ffmpeg with amix
+        # Both: 3-input ffmpeg with sidechaincompress for audio ducking.
+        # Music automatically dips when dialogue is present and returns after.
         probe = await asyncio.create_subprocess_exec(
             "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
             "-of", "csv=p=0", video_path,
@@ -342,7 +473,20 @@ async def mix_scene_audio(
             music_filters.append(f"afade=t=out:st={fade_out_start}:d={music_fade_out}")
 
         music_chain = ",".join(music_filters)
-        filter_complex = f"[2:a]{music_chain}[music];[1:a][music]amix=inputs=2:duration=shortest[a]"
+
+        # sidechaincompress: dialogue (sidechain input) controls music compression.
+        # level_in=1: no input gain on music
+        # threshold=0.02: trigger ducking at low dialogue levels (catches quiet speech)
+        # ratio=6: compress music 6:1 when dialogue present (strong ducking)
+        # attack=200: 200ms ramp-down (smooth entry)
+        # release=1000: 1s recovery after dialogue stops
+        # makeup=1: no makeup gain after compression
+        filter_complex = (
+            f"[2:a]{music_chain}[music];"
+            f"[music][1:a]sidechaincompress="
+            f"level_in=1:threshold=0.02:ratio=6:attack=200:release=1000:makeup=1[ducked];"
+            f"[1:a][ducked]amix=inputs=2:duration=shortest:normalize=0[a]"
+        )
 
         cmd = [
             "ffmpeg", "-y",
@@ -647,6 +791,7 @@ async def generate_scene(scene_id: str):
                     shot_steps = shot["steps"] or 25
                     shot_seconds = float(shot["duration_seconds"] or 3)
                     shot_use_f1 = shot["use_f1"] if shot["use_f1"] is not None else False
+                    shot_engine = shot.get("video_engine") or "framepack"
 
                     # Vary seed on retry to get different results
                     import random
@@ -655,17 +800,44 @@ async def generate_scene(scene_id: str):
                     # Bump steps on later attempts for higher quality
                     retry_steps = shot_steps + (attempt * 5)
 
-                    workflow_data, sampler_node_id, prefix = build_framepack_workflow(
-                        prompt_text=prompt_text,
-                        image_path=image_filename,
-                        total_seconds=shot_seconds,
-                        steps=retry_steps,
-                        use_f1=shot_use_f1,
-                        seed=shot_seed,
-                        gpu_memory_preservation=6.0,
-                    )
-
-                    comfyui_prompt_id = _submit_comfyui_workflow(workflow_data["prompt"])
+                    # Dispatch to the right video engine
+                    if shot_engine == "wan":
+                        fps = 16
+                        num_frames = max(9, int(shot_seconds * fps) + 1)
+                        workflow, prefix = build_wan_t2v_workflow(
+                            prompt_text=prompt_text,
+                            num_frames=num_frames,
+                            fps=fps,
+                            steps=retry_steps,
+                            seed=shot_seed,
+                            use_gguf=True,
+                        )
+                        comfyui_prompt_id = _submit_wan_workflow(workflow)
+                    elif shot_engine == "ltx":
+                        fps = 24
+                        num_frames = max(9, int(shot_seconds * fps) + 1)
+                        workflow, prefix = build_ltx_workflow(
+                            prompt_text=prompt_text,
+                            image_path=image_filename if image_filename else None,
+                            num_frames=num_frames,
+                            fps=fps,
+                            steps=retry_steps,
+                            seed=shot_seed,
+                        )
+                        comfyui_prompt_id = _submit_ltx_workflow(workflow)
+                    else:
+                        # framepack or framepack_f1
+                        use_f1 = shot_engine == "framepack_f1" or shot_use_f1
+                        workflow_data, sampler_node_id, prefix = build_framepack_workflow(
+                            prompt_text=prompt_text,
+                            image_path=image_filename,
+                            total_seconds=shot_seconds,
+                            steps=retry_steps,
+                            use_f1=use_f1,
+                            seed=shot_seed,
+                            gpu_memory_preservation=6.0,
+                        )
+                        comfyui_prompt_id = _submit_comfyui_workflow(workflow_data["prompt"])
 
                     await conn.execute(
                         "UPDATE shots SET comfyui_prompt_id = $2, first_frame_path = $3 WHERE id = $1",
@@ -783,6 +955,30 @@ async def generate_scene(scene_id: str):
                         "duration": float(shot.get("transition_duration", 0.3) or 0.3),
                     })
                 await concat_videos(completed_videos, scene_video_path, transitions=transitions)
+
+                # Optional post-processing: frame interpolation then upscaling
+                scene_meta = await conn.fetchrow(
+                    "SELECT post_interpolate_fps, post_upscale_factor FROM scenes WHERE id = $1",
+                    scene_id,
+                )
+                if scene_meta:
+                    interp_fps = scene_meta["post_interpolate_fps"]
+                    if interp_fps and interp_fps > 30:
+                        interp_path = scene_video_path.rsplit(".", 1)[0] + f"_{interp_fps}fps.mp4"
+                        result_path = await interpolate_video(
+                            scene_video_path, interp_path, target_fps=interp_fps
+                        )
+                        if result_path != scene_video_path:
+                            os.replace(result_path, scene_video_path)
+
+                    upscale_factor = scene_meta["post_upscale_factor"]
+                    if upscale_factor and upscale_factor > 1:
+                        upscale_path = scene_video_path.rsplit(".", 1)[0] + f"_{upscale_factor}x.mp4"
+                        result_path = await upscale_video(
+                            scene_video_path, upscale_path, scale_factor=upscale_factor
+                        )
+                        if result_path != scene_video_path:
+                            os.replace(result_path, scene_video_path)
 
                 # Apply audio (dialogue + music) — non-fatal wrapper
                 await apply_scene_audio(conn, scene_id, scene_video_path)
