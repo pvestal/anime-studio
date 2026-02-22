@@ -78,25 +78,30 @@
       </button>
     </div>
 
-    <!-- Model filter chips -->
-    <div v-if="modelNames.length > 1" style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
+    <!-- Model filter chips / indicator -->
+    <div v-if="modelNames.length > 0" style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
       <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; margin-right: 4px;">Model:</span>
-      <button
-        class="model-chip"
-        :class="{ active: !filterModel }"
-        @click="$emit('update:filterModel', '')"
-      >
-        All ({{ allFilteredCount }})
-      </button>
-      <button
-        v-for="m in modelNames"
-        :key="m.name"
-        class="model-chip"
-        :class="{ active: filterModel === m.name }"
-        @click="$emit('update:filterModel', filterModel === m.name ? '' : m.name)"
-      >
-        {{ m.short }} ({{ m.count }})
-      </button>
+      <template v-if="modelNames.length > 1">
+        <button
+          class="model-chip"
+          :class="{ active: !filterModel }"
+          @click="$emit('update:filterModel', '')"
+        >
+          All ({{ allFilteredCount }})
+        </button>
+        <button
+          v-for="m in modelNames"
+          :key="m.name"
+          class="model-chip"
+          :class="{ active: filterModel === m.name }"
+          @click="$emit('update:filterModel', filterModel === m.name ? '' : m.name)"
+        >
+          {{ m.short }} ({{ m.count }})
+        </button>
+      </template>
+      <span v-else class="model-chip active" style="cursor: default;">
+        {{ modelNames[0].short }}
+      </span>
     </div>
   </div>
 </template>
