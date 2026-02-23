@@ -523,6 +523,8 @@ export interface BuilderScene {
   actual_duration_seconds: number | null
   total_shots: number
   completed_shots: number
+  post_interpolate_fps: number | null
+  post_upscale_factor: number | null
   final_video_path: string | null
   current_generating_shot_id: string | null
   narrative_text?: string | null
@@ -555,6 +557,9 @@ export interface BuilderShot {
   generation_time_seconds: number | null
   dialogue_text: string | null
   dialogue_character_slug: string | null
+  video_engine: 'framepack' | 'framepack_f1' | 'ltx' | 'wan' | null
+  transition_type: string | null
+  transition_duration: number | null
 }
 
 export interface SceneCreateRequest {
@@ -566,6 +571,8 @@ export interface SceneCreateRequest {
   weather?: string | null
   mood?: string | null
   target_duration_seconds?: number
+  post_interpolate_fps?: number | null
+  post_upscale_factor?: number | null
 }
 
 export interface ShotCreateRequest {
@@ -581,6 +588,9 @@ export interface ShotCreateRequest {
   use_f1?: boolean
   dialogue_text?: string | null
   dialogue_character_slug?: string | null
+  video_engine?: 'framepack' | 'framepack_f1' | 'ltx' | 'wan' | null
+  transition_type?: string | null
+  transition_duration?: number | null
 }
 
 export interface SceneGenerationStatus {
@@ -1003,4 +1013,95 @@ export interface GapAnalysisResponse {
   summary: GapAnalysisSummary
   actions: GapActionItem[]
   pose_labels: string[]
+}
+
+// --- Orchestrator ---
+
+export interface OrchestratorStatus {
+  enabled: boolean
+  training_target: number | null
+  tick_interval: number
+}
+
+export interface PipelineEntry {
+  id: number
+  entity_type: 'character' | 'project'
+  entity_id: string
+  project_id: number
+  phase: string
+  status: 'pending' | 'active' | 'completed' | 'skipped' | 'failed'
+  gate_check_result: Record<string, unknown> | null
+  updated_at: string
+}
+
+export interface PipelineStatus {
+  project_id: number
+  entries: PipelineEntry[]
+}
+
+// --- Music Generation (ACE-Step) ---
+
+export interface MusicGenerateRequest {
+  mood: string
+  genre?: string
+  duration?: number
+  bpm?: number | null
+  caption?: string | null
+  seed?: number | null
+  instrumental?: boolean
+  scene_id?: string | null
+}
+
+export interface MusicGenerateResponse {
+  task_id: string
+  status: string
+  caption: string
+  duration: number
+  scene_id: string | null
+}
+
+export interface MusicTaskStatus {
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  output_path?: string
+  cached_path?: string
+  error?: string
+}
+
+export interface MusicTrack {
+  filename: string
+  size_kb: number
+  path: string
+  mood?: string
+  genre?: string
+  duration?: number
+}
+
+// --- Wan T2V ---
+
+export interface WanModelsStatus {
+  models: Record<string, unknown>
+  standard_ready: boolean
+  gguf_ready: boolean
+  download_instructions: Record<string, string>
+}
+
+export interface WanGenerateParams {
+  prompt: string
+  width?: number
+  height?: number
+  num_frames?: number
+  fps?: number
+  steps?: number
+  cfg?: number
+  seed?: number | null
+  use_gguf?: boolean
+}
+
+export interface WanGenerateResponse {
+  prompt_id: string
+  engine: string
+  mode: string
+  seconds: number
+  resolution: string
+  prefix: string
 }

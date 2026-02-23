@@ -101,15 +101,45 @@
     </div>
 
     <div class="field-group">
-      <label class="field-label">
+      <label class="field-label">Video Engine</label>
+      <select
+        :value="shot.video_engine || 'framepack'"
+        @change="updateField('video_engine', ($event.target as HTMLSelectElement).value)"
+        class="field-input"
+      >
+        <option value="framepack">FramePack (I2V, highest quality)</option>
+        <option value="framepack_f1">FramePack F1 (I2V, faster)</option>
+        <option value="ltx">LTX-Video (I2V/T2V, LoRA support)</option>
+        <option value="wan">Wan T2V (text-only, environments)</option>
+      </select>
+      <div v-if="shot.video_engine === 'wan'" style="font-size: 10px; color: var(--status-warning); margin-top: 3px;">
+        No source image needed — generates from motion prompt text only
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field-group">
+        <label class="field-label">Transition</label>
+        <select
+          :value="shot.transition_type || 'dissolve'"
+          @change="updateField('transition_type', ($event.target as HTMLSelectElement).value)"
+          class="field-input"
+        >
+          <option value="dissolve">Dissolve</option>
+          <option value="fade">Fade</option>
+          <option value="fadeblack">Fade Black</option>
+          <option value="wipeleft">Wipe Left</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Transition (s)</label>
         <input
-          type="checkbox"
-          :checked="shot.use_f1"
-          @change="updateField('use_f1', ($event.target as HTMLInputElement).checked)"
-          style="margin-right: 6px;"
+          :value="shot.transition_duration ?? 0.3"
+          @input="updateField('transition_duration', Number(($event.target as HTMLInputElement).value))"
+          type="number" min="0.1" max="2" step="0.1"
+          class="field-input"
         />
-        Use F1 model (faster, lower quality)
-      </label>
+      </div>
     </div>
 
     <!-- Dialogue -->

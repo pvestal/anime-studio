@@ -50,6 +50,7 @@
             >
               <span style="color: var(--text-muted); min-width: 20px;">{{ idx + 1 }}.</span>
               <span style="flex: 1;">{{ s.title || 'Untitled' }}</span>
+              <span v-if="s.transition && s.transition !== 'cut'" style="font-size: 10px; color: var(--text-muted); padding: 1px 4px;">{{ s.transition }}</span>
               <span :class="statusClass(s.generation_status)" style="font-size: 10px; padding: 1px 6px; border-radius: 3px;">{{ s.generation_status }}</span>
               <span v-if="s.actual_duration_seconds" style="color: var(--text-muted);">{{ s.actual_duration_seconds.toFixed(1) }}s</span>
               <button class="btn btn-danger" style="font-size: 10px; padding: 1px 6px;" @click="removeScene(ep, s.scene_id)">×</button>
@@ -59,10 +60,24 @@
 
           <!-- Add scene picker -->
           <div style="margin-top: 8px;">
-            <select v-model="addSceneId" class="field-input" style="font-size: 12px; padding: 4px 6px;">
-              <option value="">Add a scene...</option>
-              <option v-for="s in availableScenes" :key="s.id" :value="s.id">{{ s.title }} ({{ s.generation_status }})</option>
-            </select>
+            <div style="display: flex; gap: 6px; align-items: flex-end;">
+              <div style="flex: 1;">
+                <select v-model="addSceneId" class="field-input" style="font-size: 12px; padding: 4px 6px;">
+                  <option value="">Add a scene...</option>
+                  <option v-for="s in availableScenes" :key="s.id" :value="s.id">{{ s.title }} ({{ s.generation_status }})</option>
+                </select>
+              </div>
+              <div style="width: 110px;">
+                <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 2px;">Transition</label>
+                <select v-model="addTransition" class="field-input" style="font-size: 11px; padding: 4px 6px;">
+                  <option value="fadeblack">Fade Black</option>
+                  <option value="dissolve">Dissolve</option>
+                  <option value="fade">Fade</option>
+                  <option value="wipeleft">Wipe Left</option>
+                  <option value="cut">Cut</option>
+                </select>
+              </div>
+            </div>
             <button v-if="addSceneId" class="btn btn-primary" style="font-size: 11px; padding: 3px 10px; margin-top: 4px;" @click="addScene(ep)">Add Scene</button>
           </div>
         </div>
@@ -118,6 +133,7 @@ const selectedEpisodeId = ref('')
 const selectedEpisode = ref<Episode | null>(null)
 const showCreateModal = ref(false)
 const addSceneId = ref('')
+const addTransition = ref('fadeblack')
 
 const newEpisode = ref({
   episode_number: 1,
@@ -186,8 +202,9 @@ async function addScene(ep: Episode) {
   if (!addSceneId.value) return
   const pos = (selectedEpisode.value?.scenes?.length ?? 0) + 1
   try {
-    await episodesApi.addSceneToEpisode(ep.id, addSceneId.value, pos)
+    await episodesApi.addSceneToEpisode(ep.id, addSceneId.value, pos, addTransition.value)
     addSceneId.value = ''
+    addTransition.value = 'fadeblack'
     selectedEpisode.value = await episodesApi.getEpisode(ep.id)
     await loadEpisodes()
   } catch (e) {

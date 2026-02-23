@@ -159,6 +159,55 @@
       </template>
     </div>
 
+    <!-- Production Orchestrator -->
+    <div class="section" v-if="selectedProject">
+      <div class="section-toggle" @click="showOrchestrator = !showOrchestrator">
+        <h3 style="margin-bottom: 0;">Production Orchestrator</h3>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span v-if="orchestratorStatus" class="chip" :class="orchestratorStatus.enabled ? 'chip-enabled' : 'chip-disabled'">
+            {{ orchestratorStatus.enabled ? 'Enabled' : 'Disabled' }}
+          </span>
+          <span class="toggle-arrow" :class="{ open: showOrchestrator }">&#9654;</span>
+        </div>
+      </div>
+
+      <template v-if="showOrchestrator">
+        <div style="display: flex; gap: 8px; align-items: center; margin-top: 12px; margin-bottom: 12px;">
+          <button class="btn btn-sm" :class="orchestratorStatus?.enabled ? 'btn-danger-sm' : 'btn-success-sm'" @click="toggleOrchestrator">
+            {{ orchestratorStatus?.enabled ? 'Disable' : 'Enable' }}
+          </button>
+          <button class="btn btn-sm" @click="orchestratorTick" :disabled="!orchestratorStatus?.enabled">Manual Tick</button>
+          <button class="btn btn-sm" @click="initOrchestrator" :disabled="!selectedProjectId">Initialize Project</button>
+        </div>
+
+        <!-- Pipeline entries -->
+        <div v-if="pipelineEntries.length > 0" style="display: flex; flex-direction: column; gap: 4px;">
+          <div class="pipeline-row pipeline-header">
+            <span>Entity</span>
+            <span>Phase</span>
+            <span>Status</span>
+            <span>Updated</span>
+            <span></span>
+          </div>
+          <div v-for="entry in pipelineEntries" :key="entry.id" class="pipeline-row" :class="'pipeline-' + entry.status">
+            <span class="pipeline-entity">{{ entry.entity_type === 'character' ? entry.entity_id : 'Project' }}</span>
+            <span>{{ entry.phase.replace(/_/g, ' ') }}</span>
+            <span class="pipeline-status-badge" :class="'pstatus-' + entry.status">{{ entry.status }}</span>
+            <span style="color: var(--text-muted); font-size: 11px;">{{ formatRelativeTime(entry.updated_at) }}</span>
+            <span style="display: flex; gap: 4px;">
+              <button v-if="entry.status === 'active' || entry.status === 'pending'" class="btn btn-sm" style="font-size: 10px; padding: 1px 6px;"
+                @click="overrideEntry(entry, 'skip')">Skip</button>
+              <button v-if="entry.status === 'failed'" class="btn btn-sm" style="font-size: 10px; padding: 1px 6px;"
+                @click="overrideEntry(entry, 'reset')">Reset</button>
+            </span>
+          </div>
+        </div>
+        <div v-else style="color: var(--text-muted); font-size: 12px; margin-top: 8px;">
+          No pipeline entries. Initialize this project to start the production pipeline.
+        </div>
+      </template>
+    </div>
+
     <!-- Quality Trend Chart -->
     <div class="section" v-if="trendData.length > 1">
       <h3>Quality Trend ({{ trendDays }}d)</h3>
@@ -202,6 +251,8 @@ import type {
   DriftAlert,
   QualityTrendPoint,
   CheckpointRanking,
+  OrchestratorStatus,
+  PipelineEntry,
 } from '@/types'
 
 interface ProjectSummary { id: number; name: string; default_style: string; character_count: number }
@@ -210,6 +261,9 @@ const loading = ref(false)
 const selectedProject = ref('')
 const trendDays = ref(14)
 const showAutonomy = ref(false)
+const showOrchestrator = ref(false)
+const orchestratorStatus = ref<OrchestratorStatus | null>(null)
+const pipelineEntries = ref<PipelineEntry[]>([])
 
 const projects = ref<ProjectSummary[]>([])
 const datasetStats = ref<DatasetStatsResponse | null>(null)
@@ -260,6 +314,82 @@ const trendPoints = computed(() => {
 const qualityLinePoints = computed(() =>
   trendPoints.value.map(p => `${p.x},${p.y}`).join(' ')
 )
+
+const selectedProjectId = computed(() => {
+  const p = projects.value.find(p => p.name === selectedProject.value)
+  return p?.id ?? null
+})
+
+function formatRelativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return `${Math.floor(hrs / 24)}d ago`
+}
+
+async function loadOrchestrator() {
+  try {
+    orchestratorStatus.value = await learningApi.getOrchestratorStatus()
+  } catch (e) {
+    console.error('Failed to load orchestrator status:', e)
+  }
+  if (selectedProjectId.value) {
+    try {
+      const data = await learningApi.getOrchestratorPipeline(selectedProjectId.value)
+      pipelineEntries.value = data.entries
+    } catch (e) {
+      pipelineEntries.value = []
+    }
+  }
+}
+
+async function toggleOrchestrator() {
+  const enable = !orchestratorStatus.value?.enabled
+  try {
+    await learningApi.toggleOrchestrator(enable)
+    await loadOrchestrator()
+  } catch (e) {
+    console.error('Failed to toggle orchestrator:', e)
+    alert(`Failed: ${e}`)
+  }
+}
+
+async function orchestratorTick() {
+  try {
+    await learningApi.orchestratorTick()
+    await loadOrchestrator()
+  } catch (e) {
+    console.error('Tick failed:', e)
+  }
+}
+
+async function initOrchestrator() {
+  if (!selectedProjectId.value) return
+  try {
+    await learningApi.initializeOrchestrator(selectedProjectId.value)
+    await loadOrchestrator()
+  } catch (e) {
+    console.error('Initialize failed:', e)
+    alert(`Initialize failed: ${e}`)
+  }
+}
+
+async function overrideEntry(entry: PipelineEntry, action: 'skip' | 'reset' | 'complete') {
+  try {
+    await learningApi.orchestratorOverride({
+      entity_type: entry.entity_type,
+      entity_id: entry.entity_id,
+      phase: entry.phase,
+      action,
+    })
+    await loadOrchestrator()
+  } catch (e) {
+    console.error('Override failed:', e)
+  }
+}
 
 function rateClass(rate: number): string {
   if (rate >= 0.6) return 'quality-high'
@@ -325,7 +455,7 @@ async function loadTrend() {
 async function refreshAll() {
   loading.value = true
   try {
-    await Promise.all([loadDatasetStats(), loadStats(), loadProjectData(), loadTrend()])
+    await Promise.all([loadDatasetStats(), loadStats(), loadProjectData(), loadTrend(), loadOrchestrator()])
   } finally {
     loading.value = false
   }
@@ -335,6 +465,7 @@ watch(selectedProject, () => {
   loadDatasetStats()
   loadProjectData()
   loadTrend()
+  loadOrchestrator()
 })
 
 onMounted(async () => {
@@ -684,6 +815,45 @@ onMounted(async () => {
 .trend-dot {
   fill: var(--accent-primary);
 }
+
+/* Orchestrator Pipeline */
+.pipeline-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 80px 80px 60px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-primary);
+}
+.pipeline-header {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.pipeline-entity {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pipeline-active { background: rgba(122, 162, 247, 0.05); }
+.pipeline-completed { opacity: 0.6; }
+.pipeline-status-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-align: center;
+}
+.pstatus-pending { background: var(--bg-tertiary); color: var(--text-secondary); }
+.pstatus-active { background: rgba(122, 162, 247, 0.2); color: var(--accent-primary); }
+.pstatus-completed { background: rgba(80, 160, 80, 0.2); color: var(--status-success, #4caf50); }
+.pstatus-skipped { background: var(--bg-tertiary); color: var(--text-muted); }
+.pstatus-failed { background: rgba(160, 80, 80, 0.2); color: var(--status-error, #f44336); }
+.chip-enabled { background: rgba(80, 160, 80, 0.2); color: var(--status-success, #4caf50); border-color: var(--status-success, #4caf50); }
+.chip-disabled { background: var(--bg-tertiary); color: var(--text-muted); }
+.btn-success-sm { border-color: var(--status-success, #4caf50); color: var(--status-success, #4caf50); }
+.btn-danger-sm { border-color: var(--status-error, #f44336); color: var(--status-error, #f44336); }
 
 @media (max-width: 900px) {
   .stats-grid { grid-template-columns: repeat(3, 1fr); }

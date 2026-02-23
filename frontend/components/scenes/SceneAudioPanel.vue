@@ -80,8 +80,63 @@
         >Connect Apple Music</a>
       </div>
 
-      <!-- Authorized: playlist browser -->
+      <!-- Authorized: source tabs -->
       <div v-else>
+        <!-- Source tabs -->
+        <div style="display: flex; gap: 0; margin-bottom: 10px; border-bottom: 1px solid var(--border-primary);">
+          <button class="audio-tab" :class="{ active: audioSource === 'apple' }" @click="audioSource = 'apple'">Apple Music</button>
+          <button class="audio-tab" :class="{ active: audioSource === 'generate' }" @click="audioSource = 'generate'">Generate (ACE-Step)</button>
+          <button class="audio-tab" :class="{ active: audioSource === 'library' }" @click="audioSource = 'library'; loadGeneratedLibrary()">Library</button>
+        </div>
+
+        <!-- ACE-Step Generator -->
+        <div v-if="audioSource === 'generate'" style="display: flex; flex-direction: column; gap: 8px;">
+          <div>
+            <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 3px;">Mood</label>
+            <select v-model="genMood" style="width: 100%; padding: 4px 6px; font-size: 12px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px;">
+              <option v-for="m in moods" :key="m" :value="m">{{ m }}</option>
+            </select>
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <div style="flex: 1;">
+              <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 3px;">Genre</label>
+              <input v-model="genGenre" type="text" placeholder="anime, orchestral..." style="width: 100%; padding: 3px 6px; font-size: 11px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px;" />
+            </div>
+            <div style="width: 70px;">
+              <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 3px;">Duration</label>
+              <input v-model.number="genDuration" type="number" min="10" max="120" step="5" style="width: 100%; padding: 3px 6px; font-size: 11px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px;" />
+            </div>
+          </div>
+          <button class="btn-small btn-primary" @click="generateMusic" :disabled="generating">
+            {{ generating ? 'Generating...' : 'Generate Track' }}
+          </button>
+          <div v-if="genTaskId" style="font-size: 11px; color: var(--text-muted);">
+            Task: {{ genTaskId }} — {{ genTaskStatus }}
+            <span v-if="genTaskStatus === 'completed'" style="color: var(--status-success);">Done!</span>
+          </div>
+          <div v-if="generatedTrackUrl" style="margin-top: 4px;">
+            <audio :src="generatedTrackUrl" controls preload="none" style="width: 100%; height: 28px; margin-bottom: 4px;"></audio>
+            <button class="btn-small btn-primary" @click="assignGeneratedTrack" :disabled="assigning">Use This Track</button>
+          </div>
+        </div>
+
+        <!-- Generated Music Library -->
+        <div v-else-if="audioSource === 'library'">
+          <div v-if="loadingLibrary" style="font-size: 11px; color: var(--text-muted); padding: 8px 0;">Loading library...</div>
+          <div v-else-if="generatedLibrary.length > 0" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-primary); border-radius: 3px;">
+            <div v-for="t in generatedLibrary" :key="t.filename" class="track-row" @click="assignLibraryTrack(t)">
+              <div style="min-width: 0; flex: 1;">
+                <div style="font-size: 11px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ t.mood }} — {{ t.genre || 'mixed' }}</div>
+                <div style="font-size: 10px; color: var(--text-muted);">{{ t.duration }}s &middot; {{ t.filename }}</div>
+              </div>
+              <span style="font-size: 10px; color: var(--accent-primary); flex-shrink: 0;">assign</span>
+            </div>
+          </div>
+          <div v-else style="font-size: 12px; color: var(--text-muted);">No generated tracks yet. Use the Generate tab to create music.</div>
+        </div>
+
+        <!-- Apple Music browser -->
+        <div v-else>
         <!-- Playlist selector -->
         <div style="margin-bottom: 8px;">
           <label style="font-size: 10px; color: var(--text-muted); display: block; margin-bottom: 3px;">Playlist</label>
@@ -125,14 +180,15 @@
 
         <!-- Error -->
         <div v-if="error" style="font-size: 11px; color: var(--status-error); margin-top: 6px;">{{ error }}</div>
+        </div><!-- close Apple Music v-else -->
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
-import type { SceneAudio, AppleMusicTrack, AppleMusicPlaylist } from '@/types'
+import { ref, onMounted, watch, onUnmounted } from 'vue'
+import type { SceneAudio, AppleMusicTrack, AppleMusicPlaylist, MusicTrack } from '@/types'
 import { scenesApi } from '@/api/scenes'
 
 const props = defineProps<{
@@ -154,6 +210,21 @@ const loadingTracks = ref(false)
 const assigning = ref(false)
 const removing = ref(false)
 const error = ref('')
+
+const audioSource = ref<'apple' | 'generate' | 'library'>('apple')
+const genMood = ref('tense')
+const genGenre = ref('')
+const genDuration = ref(30)
+const generating = ref(false)
+const genTaskId = ref('')
+const genTaskStatus = ref('')
+const generatedTrackUrl = ref('')
+const generatedFilename = ref('')
+const generatedLibrary = ref<MusicTrack[]>([])
+const loadingLibrary = ref(false)
+let genPollTimer: ReturnType<typeof setInterval> | null = null
+
+const moods = ['tense', 'romantic', 'seductive', 'action', 'melancholy', 'mysterious', 'triumphant', 'peaceful', 'playful', 'epic', 'horror', 'comedic', 'nostalgic', 'ethereal', 'dramatic']
 
 const currentAudio = ref<SceneAudio | null>(props.audio ?? null)
 
@@ -289,6 +360,119 @@ async function updateFade(field: 'fade_in' | 'fade_out' | 'start_offset', value:
   } catch { /* silent — user can retry */ }
 }
 
+async function generateMusic() {
+  generating.value = true
+  genTaskId.value = ''
+  genTaskStatus.value = ''
+  generatedTrackUrl.value = ''
+  error.value = ''
+  try {
+    const result = await scenesApi.generateMusic({
+      mood: genMood.value,
+      genre: genGenre.value || undefined,
+      duration: genDuration.value,
+    })
+    genTaskId.value = result.task_id
+    genTaskStatus.value = 'queued'
+    // Poll for completion
+    genPollTimer = setInterval(async () => {
+      try {
+        const status = await scenesApi.getMusicTaskStatus(genTaskId.value)
+        genTaskStatus.value = status.status
+        if (status.status === 'completed' && (status.output_path || status.cached_path)) {
+          const outPath = status.cached_path || status.output_path || ''
+          generatedFilename.value = outPath.split('/').pop() || outPath
+          generatedTrackUrl.value = scenesApi.generatedMusicUrl(generatedFilename.value)
+          generating.value = false
+          if (genPollTimer) clearInterval(genPollTimer)
+        } else if (status.status === 'failed') {
+          error.value = `Generation failed: ${status.error || 'unknown'}`
+          generating.value = false
+          if (genPollTimer) clearInterval(genPollTimer)
+        }
+      } catch { /* keep polling */ }
+    }, 3000)
+  } catch (e) {
+    error.value = `Generate failed: ${(e as Error).message}`
+    generating.value = false
+  }
+}
+
+async function assignGeneratedTrack() {
+  if (!props.sceneId || !generatedTrackUrl.value) return
+  assigning.value = true
+  error.value = ''
+  try {
+    await scenesApi.setSceneAudio(props.sceneId, {
+      track_id: `ace-step:${generatedFilename.value}`,
+      preview_url: generatedTrackUrl.value,
+      track_name: `${genMood.value} ${genGenre.value || 'track'}`,
+      track_artist: 'ACE-Step AI',
+    })
+    const newAudio: SceneAudio = {
+      track_id: `ace-step:${generatedFilename.value}`,
+      track_name: `${genMood.value} ${genGenre.value || 'track'}`,
+      track_artist: 'ACE-Step AI',
+      preview_url: generatedTrackUrl.value,
+      fade_in: 1.0,
+      fade_out: 2.0,
+      start_offset: 0,
+    }
+    currentAudio.value = newAudio
+    emit('audio-changed', newAudio)
+  } catch (e) {
+    error.value = `Assign failed: ${(e as Error).message}`
+  } finally {
+    assigning.value = false
+  }
+}
+
+async function loadGeneratedLibrary() {
+  loadingLibrary.value = true
+  try {
+    const result = await scenesApi.listGeneratedMusic()
+    generatedLibrary.value = result.tracks
+  } catch {
+    generatedLibrary.value = []
+  } finally {
+    loadingLibrary.value = false
+  }
+}
+
+async function assignLibraryTrack(track: MusicTrack) {
+  if (!props.sceneId) return
+  assigning.value = true
+  error.value = ''
+  const url = scenesApi.generatedMusicUrl(track.filename)
+  try {
+    await scenesApi.setSceneAudio(props.sceneId, {
+      track_id: `ace-step:${track.filename}`,
+      preview_url: url,
+      track_name: `${track.mood} ${track.genre || 'track'}`,
+      track_artist: 'ACE-Step AI',
+    })
+    const newAudio: SceneAudio = {
+      track_id: `ace-step:${track.filename}`,
+      track_name: `${track.mood} ${track.genre || 'track'}`,
+      track_artist: 'ACE-Step AI',
+      preview_url: url,
+      fade_in: 1.0,
+      fade_out: 2.0,
+      start_offset: 0,
+    }
+    currentAudio.value = newAudio
+    emit('audio-changed', newAudio)
+  } catch (e) {
+    error.value = `Assign failed: ${(e as Error).message}`
+  } finally {
+    assigning.value = false
+  }
+}
+
+onUnmounted(() => {
+  if (genPollTimer) clearInterval(genPollTimer)
+})
+
 function formatDuration(ms: number): string {
   const totalSec = Math.floor(ms / 1000)
   const min = Math.floor(totalSec / 60)
@@ -340,5 +524,22 @@ function formatDuration(ms: number): string {
 .btn-small:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.audio-tab {
+  padding: 4px 12px;
+  font-size: 11px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-primary);
+}
+.audio-tab:hover {
+  color: var(--text-primary);
+}
+.audio-tab.active {
+  color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
 }
 </style>

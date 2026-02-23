@@ -11,10 +11,19 @@ import type {
   AppleMusicTrack,
   AppleMusicPlaylist,
   SceneRecommendationsResponse,
+  WanModelsStatus,
+  WanGenerateParams,
+  WanGenerateResponse,
+  MusicGenerateRequest,
+  MusicGenerateResponse,
+  MusicTaskStatus,
+  MusicTrack,
 } from '@/types'
 import { createRequest } from './base'
 
 const request = createRequest('/api/scenes')
+const genRequest = createRequest('/api')
+const audioRequest = createRequest('/api/audio')
 const SCENES_BASE = '/api/scenes'
 const MUSIC_API = '/api/music'
 
@@ -159,5 +168,42 @@ export const scenesApi = {
     const resp = await fetch(`${MUSIC_API}/search?q=${encodeURIComponent(query)}&types=songs&limit=10`)
     if (!resp.ok) throw new Error('Search failed')
     return resp.json()
+  },
+
+  // --- Wan T2V ---
+
+  async getWanModels(): Promise<WanModelsStatus> {
+    return genRequest('/generate/wan/models')
+  },
+
+  async generateWan(params: WanGenerateParams): Promise<WanGenerateResponse> {
+    const qs = new URLSearchParams({ prompt: params.prompt })
+    if (params.width) qs.set('width', String(params.width))
+    if (params.height) qs.set('height', String(params.height))
+    if (params.num_frames) qs.set('num_frames', String(params.num_frames))
+    if (params.fps) qs.set('fps', String(params.fps))
+    if (params.steps) qs.set('steps', String(params.steps))
+    if (params.cfg) qs.set('cfg', String(params.cfg))
+    if (params.seed != null) qs.set('seed', String(params.seed))
+    if (params.use_gguf !== undefined) qs.set('use_gguf', String(params.use_gguf))
+    return genRequest(`/generate/wan?${qs}`, { method: 'POST' })
+  },
+
+  // --- ACE-Step Music Generation ---
+
+  async generateMusic(params: MusicGenerateRequest): Promise<MusicGenerateResponse> {
+    return audioRequest('/generate-music', { method: 'POST', body: JSON.stringify(params) })
+  },
+
+  async getMusicTaskStatus(taskId: string): Promise<MusicTaskStatus> {
+    return audioRequest(`/generate-music/${taskId}/status`)
+  },
+
+  async listGeneratedMusic(): Promise<{ tracks: MusicTrack[]; total: number }> {
+    return audioRequest('/music')
+  },
+
+  generatedMusicUrl(filename: string): string {
+    return `/api/audio/music/${encodeURIComponent(filename)}`
   },
 }

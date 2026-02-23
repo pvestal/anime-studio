@@ -50,6 +50,25 @@
         <input v-model.number="localScene.target_duration_seconds" type="number" min="5" max="300" class="field-input" />
       </div>
 
+      <!-- Post-processing -->
+      <div style="border-top: 1px solid var(--border-primary); padding-top: 8px; margin-top: 8px;">
+        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px;">Post-Processing</div>
+        <div class="field-group">
+          <label class="field-label">Frame Interpolation</label>
+          <select v-model="localPostInterpolate" class="field-input">
+            <option :value="null">Off</option>
+            <option :value="60">30 → 60 fps</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">Upscale</label>
+          <select v-model="localPostUpscale" class="field-input">
+            <option :value="null">Off</option>
+            <option :value="2">2x (max 1080p)</option>
+          </select>
+        </div>
+      </div>
+
       <div style="font-size: 12px; color: var(--text-muted); margin-top: 12px;">
         {{ shots.length }} shots, est. {{ estimateMinutes(shots) }} min gen time
       </div>
@@ -295,14 +314,26 @@ const echoScenePayload = computed(() => ({
 
 // Local reactive copy of scene data that syncs back to parent
 const localScene = reactive<Partial<BuilderScene>>({ ...props.scene })
+const localPostInterpolate = ref<number | null>(props.scene.post_interpolate_fps ?? null)
+const localPostUpscale = ref<number | null>(props.scene.post_upscale_factor ?? null)
 
 watch(() => props.scene, (newScene) => {
   Object.assign(localScene, newScene)
+  localPostInterpolate.value = newScene.post_interpolate_fps ?? null
+  localPostUpscale.value = newScene.post_upscale_factor ?? null
 }, { deep: true })
 
 watch(localScene, (val) => {
   emit('update-scene', { ...val })
 }, { deep: true })
+
+watch(localPostInterpolate, (val) => {
+  localScene.post_interpolate_fps = val
+})
+
+watch(localPostUpscale, (val) => {
+  localScene.post_upscale_factor = val
+})
 
 function statusBadgeClass(status: string): string {
   const map: Record<string, string> = {

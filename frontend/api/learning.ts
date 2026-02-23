@@ -14,6 +14,8 @@ import type {
   CheckpointRanking,
   ReplenishmentStatus,
   ReadinessResponse,
+  OrchestratorStatus,
+  PipelineStatus,
 } from '@/types'
 import { createRequest } from './base'
 
@@ -133,5 +135,47 @@ export const learningApi = {
   async getCharacterReadiness(projectName?: string): Promise<ReadinessResponse> {
     const qs = projectName ? `?project_name=${encodeURIComponent(projectName)}` : ''
     return request(`/replenishment/readiness${qs}`)
+  },
+
+  // --- Orchestrator ---
+
+  async getOrchestratorStatus(): Promise<OrchestratorStatus> {
+    return request('/orchestrator/status')
+  },
+
+  async toggleOrchestrator(enabled: boolean): Promise<{ enabled: boolean }> {
+    return request('/orchestrator/toggle', { method: 'POST', body: JSON.stringify({ enabled }) })
+  },
+
+  async initializeOrchestrator(projectId: number, trainingTarget?: number): Promise<Record<string, unknown>> {
+    return request('/orchestrator/initialize', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId, training_target: trainingTarget }),
+    })
+  },
+
+  async getOrchestratorPipeline(projectId: number): Promise<PipelineStatus> {
+    return request(`/orchestrator/pipeline/${projectId}`)
+  },
+
+  async getOrchestratorSummary(projectId: number): Promise<{ project_id: number; summary: string }> {
+    return request(`/orchestrator/summary/${projectId}`)
+  },
+
+  async orchestratorTick(): Promise<Record<string, unknown>> {
+    return request('/orchestrator/tick', { method: 'POST' })
+  },
+
+  async orchestratorOverride(params: {
+    entity_type: 'character' | 'project'
+    entity_id: string
+    phase: string
+    action: 'skip' | 'reset' | 'complete'
+  }): Promise<Record<string, unknown>> {
+    return request('/orchestrator/override', { method: 'POST', body: JSON.stringify(params) })
+  },
+
+  async setTrainingTarget(target: number): Promise<{ training_target: number }> {
+    return request('/orchestrator/training-target', { method: 'POST', body: JSON.stringify({ target }) })
   },
 }

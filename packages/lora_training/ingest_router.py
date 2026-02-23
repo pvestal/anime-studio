@@ -19,7 +19,7 @@ from packages.core.comfyui import build_ipadapter_workflow
 from packages.core.db import get_char_project_map
 from packages.lora_training.dedup import is_duplicate, register_hash
 from packages.lora_training.feedback import register_pending_image
-from packages.lora_training.frame_extraction import extract_smart_frames, download_video
+from packages.lora_training.frame_extraction import extract_smart_frames, extract_frames_with_timestamps, download_video
 
 logger = logging.getLogger(__name__)
 ingest_router = APIRouter()
@@ -159,7 +159,7 @@ async def get_ingest_progress():
     This endpoint merges active job data to the top level for the frontend.
     """
     # Check for background task progress stored under named keys
-    for key in ("movie", "youtube-project", "local-video", "youtube"):
+    for key in ("clip-classify", "movie", "youtube-project", "local-video", "youtube"):
         if key in _ingest_progress and isinstance(_ingest_progress[key], dict):
             return _ingest_progress[key]
     return _ingest_progress
@@ -877,6 +877,347 @@ async def _extract_movie_task(
         }
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+class ClipClassifyRequest(BaseModel):
+    path: str
+    project_name: str
+    target_character: str | None = None
+    max_frames: int = 200
+    extract_clips: bool = True
+    clip_duration: float = 2.0
+
+
+class ClipClassifyLocalRequest(BaseModel):
+    frames_dir: str
+    project_name: str
+    target_character: str | None = None
+    source_video: str | None = None
+
+
+@ingest_router.post("/ingest/clip-classify")
+async def clip_classify_video(req: ClipClassifyRequest):
+    """Classify characters in a video using CLIP visual similarity.
+
+    Runs as background task. Supports local paths and YouTube URLs.
+    Poll GET /ingest/progress for status (key: clip-classify).
+    """
+    existing = _ingest_progress.get("clip-classify")
+    if isinstance(existing, dict) and existing.get("active"):
+        raise HTTPException(status_code=409, detail="A CLIP classification is already running")
+
+    # Determine video path
+    is_url = req.path.startswith("http://") or req.path.startswith("https://")
+    if not is_url:
+        video_path = Path(req.path)
+        if not video_path.exists():
+            raise HTTPException(status_code=404, detail=f"Video not found: {req.path}")
+
+    char_map = await get_char_project_map()
+    project_slugs = [
+        slug for slug, info in char_map.items()
+        if info.get("project_name") == req.project_name
+    ]
+    if not project_slugs:
+        raise HTTPException(status_code=404, detail=f"No characters for project '{req.project_name}'")
+
+    asyncio.create_task(_clip_classify_task(req, char_map, project_slugs, is_url))
+
+    return {
+        "status": "started",
+        "project": req.project_name,
+        "target_character": req.target_character,
+        "characters": len(project_slugs),
+        "message": "CLIP classification started. Poll GET /api/training/ingest/progress for status.",
+    }
+
+
+async def _clip_classify_task(
+    req: ClipClassifyRequest,
+    char_map: dict,
+    project_slugs: list[str],
+    is_url: bool,
+):
+    """Background task: CLIP-based video frame classification."""
+    tmpdir = tempfile.mkdtemp(prefix="clip_classify_")
+    try:
+        def _update_progress(phase, detail=""):
+            _ingest_progress["clip-classify"] = {
+                "active": True,
+                "stage": phase,
+                "project": req.project_name,
+                "target": req.target_character,
+                "detail": detail,
+            }
+
+        # Phase 1: Download if URL
+        video_path = None
+        if is_url:
+            _update_progress("downloading", req.path)
+            video_path = await asyncio.to_thread(download_video, req.path, tmpdir)
+        else:
+            video_path = Path(req.path)
+
+        # Phase 2: Extract frames with timestamps
+        _update_progress("extracting", f"max_frames={req.max_frames}")
+        frame_data = await asyncio.to_thread(
+            extract_frames_with_timestamps, video_path, req.max_frames, tmpdir
+        )
+
+        if not frame_data:
+            _ingest_progress["clip-classify"] = {
+                "active": False, "stage": "error",
+                "message": "No frames extracted",
+            }
+            return
+
+        frame_paths = [d["path"] for d in frame_data]
+        frame_timestamps = [d["timestamp"] for d in frame_data]
+
+        # Phase 3-5: Run CLIP pipeline
+        _update_progress("classifying", f"{len(frame_paths)} frames")
+        from packages.visual_pipeline.clip_classifier import run_clip_pipeline
+
+        result = await asyncio.to_thread(
+            run_clip_pipeline,
+            frame_paths=frame_paths,
+            project_name=req.project_name,
+            character_slugs=project_slugs,
+            target_slug=req.target_character,
+            video_path=video_path if req.extract_clips else None,
+            clip_duration=req.clip_duration,
+            extract_clips=req.extract_clips,
+            frame_timestamps=frame_timestamps,
+            progress_callback=lambda phase, detail: _update_progress(phase, detail),
+        )
+
+        if "error" in result:
+            _ingest_progress["clip-classify"] = {
+                "active": False, "stage": "error",
+                "message": result["error"],
+            }
+            return
+
+        # Phase 6: Save matched frames to character datasets
+        _update_progress("saving", f"{result['total_matched']} matched frames")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        per_char_saved: dict[str, int] = {}
+        duplicates = 0
+
+        for cls in result["classifications"]:
+            slug = cls.get("matched_slug")
+            if not slug:
+                continue
+
+            frame_path = Path(cls["frame_path"])
+            if not frame_path.exists():
+                continue
+
+            saved_slugs, dup_count = await _save_frame_to_characters(
+                frame_path, [slug],
+                char_map=char_map,
+                source="clip_classify",
+                source_url=req.path,
+                frame_number=cls.get("frame_index", 0) + 1,
+                timestamp=timestamp,
+                project_name=req.project_name,
+                description=json.dumps({
+                    "similarity": cls.get("similarity", 0),
+                    "verified": cls.get("verified", False),
+                }),
+                prefix="clip",
+            )
+            duplicates += dup_count
+            for s in saved_slugs:
+                per_char_saved[s] = per_char_saved.get(s, 0) + 1
+
+        _ingest_progress["clip-classify"] = {
+            "active": False,
+            "stage": "complete",
+            "project": req.project_name,
+            "target": req.target_character,
+            "total_frames": result["total_frames"],
+            "total_matched": result["total_matched"],
+            "per_character": result["per_character"],
+            "per_character_saved": per_char_saved,
+            "duplicates": duplicates,
+            "clips_extracted": len(result.get("clips", [])),
+            "reference_characters": result["reference_characters"],
+            "message": (
+                f"Done. {result['total_matched']} matched, "
+                f"{sum(per_char_saved.values())} saved, {duplicates} dupes."
+            ),
+        }
+        logger.info(
+            f"CLIP classify complete: {result['total_matched']} matched, "
+            f"{sum(per_char_saved.values())} saved"
+        )
+
+    except Exception as e:
+        logger.error(f"CLIP classification failed: {e}", exc_info=True)
+        _ingest_progress["clip-classify"] = {
+            "active": False, "stage": "error",
+            "message": f"Failed: {e}",
+        }
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@ingest_router.post("/ingest/clip-classify-local")
+async def clip_classify_local(req: ClipClassifyLocalRequest):
+    """Classify pre-extracted frames using CLIP visual similarity.
+
+    For directories of frames already on disk (e.g. /tmp/yoshi_frames/).
+    Runs as background task.
+    """
+    frames_dir = Path(req.frames_dir)
+    if not frames_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"Directory not found: {req.frames_dir}")
+
+    char_map = await get_char_project_map()
+    project_slugs = [
+        slug for slug, info in char_map.items()
+        if info.get("project_name") == req.project_name
+    ]
+    if not project_slugs:
+        raise HTTPException(status_code=404, detail=f"No characters for project '{req.project_name}'")
+
+    # Gather frame files
+    frame_paths = []
+    for ext in ("*.jpg", "*.jpeg", "*.png", "*.webp"):
+        frame_paths.extend(sorted(frames_dir.glob(ext)))
+    if not frame_paths:
+        raise HTTPException(status_code=400, detail=f"No image files in {req.frames_dir}")
+
+    asyncio.create_task(
+        _clip_classify_local_task(req, frame_paths, char_map, project_slugs)
+    )
+
+    return {
+        "status": "started",
+        "frames": len(frame_paths),
+        "project": req.project_name,
+        "target_character": req.target_character,
+        "message": "CLIP local classification started. Poll GET /api/training/ingest/progress for status.",
+    }
+
+
+async def _clip_classify_local_task(
+    req: ClipClassifyLocalRequest,
+    frame_paths: list[Path],
+    char_map: dict,
+    project_slugs: list[str],
+):
+    """Background: classify local frames with CLIP."""
+    try:
+        def _update_progress(phase, detail=""):
+            _ingest_progress["clip-classify"] = {
+                "active": True,
+                "stage": phase,
+                "project": req.project_name,
+                "target": req.target_character,
+                "detail": detail,
+                "frames_total": len(frame_paths),
+            }
+
+        _update_progress("classifying", f"{len(frame_paths)} frames")
+        from packages.visual_pipeline.clip_classifier import run_clip_pipeline
+
+        result = await asyncio.to_thread(
+            run_clip_pipeline,
+            frame_paths=frame_paths,
+            project_name=req.project_name,
+            character_slugs=project_slugs,
+            target_slug=req.target_character,
+            video_path=Path(req.source_video) if req.source_video else None,
+            extract_clips=bool(req.source_video),
+            progress_callback=lambda phase, detail: _update_progress(phase, detail),
+        )
+
+        if "error" in result:
+            _ingest_progress["clip-classify"] = {
+                "active": False, "stage": "error",
+                "message": result["error"],
+            }
+            return
+
+        # Save matched frames
+        _update_progress("saving", f"{result['total_matched']} matched frames")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        per_char_saved: dict[str, int] = {}
+        duplicates = 0
+
+        for cls in result["classifications"]:
+            slug = cls.get("matched_slug")
+            if not slug:
+                continue
+            frame_path = Path(cls["frame_path"])
+            if not frame_path.exists():
+                continue
+
+            saved_slugs, dup_count = await _save_frame_to_characters(
+                frame_path, [slug],
+                char_map=char_map,
+                source="clip_classify_local",
+                source_url=req.frames_dir,
+                frame_number=cls.get("frame_index", 0) + 1,
+                timestamp=timestamp,
+                project_name=req.project_name,
+                description=json.dumps({
+                    "similarity": cls.get("similarity", 0),
+                    "verified": cls.get("verified", False),
+                }),
+                prefix="clip",
+            )
+            duplicates += dup_count
+            for s in saved_slugs:
+                per_char_saved[s] = per_char_saved.get(s, 0) + 1
+
+        _ingest_progress["clip-classify"] = {
+            "active": False,
+            "stage": "complete",
+            "project": req.project_name,
+            "target": req.target_character,
+            "total_frames": result["total_frames"],
+            "total_matched": result["total_matched"],
+            "per_character": result["per_character"],
+            "per_character_saved": per_char_saved,
+            "duplicates": duplicates,
+            "reference_characters": result["reference_characters"],
+            "message": (
+                f"Done. {result['total_matched']} matched, "
+                f"{sum(per_char_saved.values())} saved, {duplicates} dupes."
+            ),
+        }
+
+    except Exception as e:
+        logger.error(f"CLIP local classification failed: {e}", exc_info=True)
+        _ingest_progress["clip-classify"] = {
+            "active": False, "stage": "error",
+            "message": f"Failed: {e}",
+        }
+
+
+@ingest_router.post("/ingest/rebuild-references")
+async def rebuild_references(project_name: str):
+    """Force-rebuild CLIP reference embeddings for a project.
+
+    Call this after adding new reference images to character datasets.
+    """
+    from packages.visual_pipeline.clip_classifier import build_reference_embeddings
+
+    try:
+        refs = await asyncio.to_thread(
+            build_reference_embeddings, project_name, force_rebuild=True,
+        )
+        return {
+            "status": "rebuilt",
+            "project": project_name,
+            "characters": {slug: emb.shape[0] for slug, emb in refs.items()},
+            "total_references": sum(emb.shape[0] for emb in refs.values()),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Rebuild failed: {e}")
 
 
 COMFYUI_INPUT_DIR = Path("/opt/ComfyUI/input")
