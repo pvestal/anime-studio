@@ -645,6 +645,155 @@ async def delete_shot(scene_id: str, shot_id: str):
     finally:
         await conn.close()
 
+
+# --- Video QC Review Endpoints ---
+
+@router.post("/scenes/{scene_id}/shots/{shot_id}/qc-review")
+async def qc_review_shot(scene_id: str, shot_id: str, auto_fix: bool = False):
+    """Run multi-frame QC review on an existing shot video.
+
+    Returns structured assessment: score, per-frame results, issues, suggested fixes.
+    Set auto_fix=true to also return modified prompt/negative from build_prompt_fixes().
+    """
+    from .video_qc import extract_review_frames, review_video_frames, build_prompt_fixes
+
+    shid = uuid.UUID(shot_id)
+    conn = await connect_direct()
+    try:
+        shot = await conn.fetchrow(
+            "SELECT * FROM shots WHERE id = $1 AND scene_id = $2",
+            shid, uuid.UUID(scene_id),
+        )
+        if not shot:
+            raise HTTPException(status_code=404, detail="Shot not found")
+        if not shot["output_video_path"] or not Path(shot["output_video_path"]).exists():
+            raise HTTPException(status_code=400, detail="Shot has no generated video")
+
+        # Extract review frames
+        frame_paths = await extract_review_frames(shot["output_video_path"])
+        if not frame_paths:
+            raise HTTPException(status_code=500, detail="Failed to extract review frames")
+
+        # Get character slug from characters_present
+        chars = shot["characters_present"]
+        char_slug = chars[0] if chars and isinstance(chars, list) and len(chars) > 0 else None
+
+        # Vision review
+        motion_prompt = shot["motion_prompt"] or shot.get("generation_prompt") or ""
+        review = await review_video_frames(frame_paths, motion_prompt, char_slug)
+
+        result = {
+            "shot_id": shot_id,
+            "scene_id": scene_id,
+            "video_path": shot["output_video_path"],
+            "overall_score": review["overall_score"],
+            "issues": review["issues"],
+            "category_averages": review.get("category_averages", {}),
+            "per_frame": review["per_frame"],
+            "frame_paths": frame_paths,
+            "current_quality_score": float(shot["quality_score"]) if shot["quality_score"] else None,
+        }
+
+        if auto_fix and review["issues"]:
+            current_negative = "low quality, blurry, distorted, watermark"
+            fixes = build_prompt_fixes(review["issues"], motion_prompt, current_negative)
+            result["suggested_fixes"] = fixes
+
+        # Update shot quality_score in DB with new assessment
+        await conn.execute(
+            "UPDATE shots SET quality_score = $2 WHERE id = $1",
+            shid, review["overall_score"],
+        )
+
+        return result
+    finally:
+        await conn.close()
+
+
+@router.post("/scenes/{scene_id}/shots/{shot_id}/qc-regenerate")
+async def qc_regenerate_shot(scene_id: str, shot_id: str):
+    """Trigger a full QC loop on a specific shot (with prompt refinement).
+
+    Runs run_qc_loop() as a background task with vision-informed fixes.
+    Returns immediately with tracking info.
+    """
+    from .video_qc import run_qc_loop
+    from .builder import _QUALITY_GATES, _MAX_RETRIES, _scene_generation_tasks
+
+    shid = uuid.UUID(shot_id)
+    sid = uuid.UUID(scene_id)
+
+    if scene_id in _scene_generation_tasks:
+        task = _scene_generation_tasks[scene_id]
+        if not task.done():
+            raise HTTPException(status_code=409, detail="Scene is currently generating")
+
+    conn = await connect_direct()
+    try:
+        shot = await conn.fetchrow(
+            "SELECT * FROM shots WHERE id = $1 AND scene_id = $2", shid, sid)
+        if not shot:
+            raise HTTPException(status_code=404, detail="Shot not found")
+
+        # Get previous shot's last frame for continuity
+        prev = await conn.fetchrow(
+            "SELECT last_frame_path FROM shots WHERE scene_id = $1 AND shot_number < $2 "
+            "ORDER BY shot_number DESC LIMIT 1", sid, shot["shot_number"])
+
+        await conn.execute(
+            "UPDATE shots SET status = 'generating', error_message = NULL WHERE id = $1", shid)
+    finally:
+        await conn.close()
+
+    async def _run_qc():
+        c = await connect_direct()
+        try:
+            shot_dict = dict(shot)
+            shot_dict["_prev_last_frame"] = (
+                prev["last_frame_path"] if prev and prev["last_frame_path"]
+                and Path(prev["last_frame_path"]).exists() else None
+            )
+
+            qc_result = await run_qc_loop(
+                shot_data=shot_dict,
+                conn=c,
+                max_attempts=_MAX_RETRIES,
+                accept_threshold=_QUALITY_GATES[0]["threshold"],
+                min_threshold=_QUALITY_GATES[-1]["threshold"],
+            )
+
+            if qc_result.get("video_path"):
+                status = "completed" if qc_result["accepted"] else "accepted_best"
+                await c.execute("""
+                    UPDATE shots SET status = $2, output_video_path = $3,
+                           last_frame_path = $4, generation_time_seconds = $5,
+                           quality_score = $6
+                    WHERE id = $1
+                """, shid, status, qc_result["video_path"],
+                    qc_result["last_frame_path"], qc_result["generation_time"],
+                    qc_result["quality_score"])
+            else:
+                await c.execute(
+                    "UPDATE shots SET status = 'failed', error_message = 'QC loop failed' WHERE id = $1",
+                    shid)
+        except Exception as e:
+            logger.error(f"QC regenerate failed for shot {shot_id}: {e}")
+            await c.execute(
+                "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
+                shid, str(e)[:500])
+        finally:
+            await c.close()
+
+    asyncio.create_task(_run_qc())
+    return {
+        "message": "QC regeneration started",
+        "shot_id": shot_id,
+        "scene_id": scene_id,
+        "max_attempts": _MAX_RETRIES,
+        "poll_url": f"/api/scenes/{scene_id}/status",
+    }
+
+
 # --- Scene Builder: Audio Assignment Endpoints ---
 
 @router.post("/scenes/{scene_id}/audio")

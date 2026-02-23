@@ -772,152 +772,34 @@ async def generate_scene(scene_id: str):
                 scene_id, shot_id,
             )
 
-            # Progressive gate: retry with loosening thresholds
-            for attempt in range(_MAX_RETRIES):
-                gate = _QUALITY_GATES[attempt]
-                shot_start = _time.time()
+            # QC loop: multi-frame review with prompt refinement
+            try:
+                from .video_qc import run_qc_loop
 
-                try:
-                    # Determine first frame: previous shot's last frame or source image
-                    if prev_last_frame and Path(prev_last_frame).exists():
-                        first_frame_path = prev_last_frame
-                        image_filename = await copy_to_comfyui_input(first_frame_path)
-                    else:
-                        source_path = shot["source_image_path"]
-                        image_filename = await copy_to_comfyui_input(source_path)
-                        first_frame_path = str(BASE_PATH / source_path) if not Path(source_path).is_absolute() else source_path
+                # Pass previous shot's last frame for continuity chaining
+                shot_dict = dict(shot)
+                shot_dict["_prev_last_frame"] = prev_last_frame
 
-                    prompt_text = shot["motion_prompt"] or shot["generation_prompt"] or ""
-                    shot_steps = shot["steps"] or 25
-                    shot_seconds = float(shot["duration_seconds"] or 3)
-                    shot_use_f1 = shot["use_f1"] if shot["use_f1"] is not None else False
-                    shot_engine = shot.get("video_engine") or "framepack"
+                qc_result = await run_qc_loop(
+                    shot_data=shot_dict,
+                    conn=conn,
+                    max_attempts=_MAX_RETRIES,
+                    accept_threshold=_QUALITY_GATES[0]["threshold"],
+                    min_threshold=_QUALITY_GATES[-1]["threshold"],
+                )
 
-                    # Vary seed on retry to get different results
-                    import random
-                    shot_seed = shot["seed"] if attempt == 0 else random.randint(0, 2**63 - 1)
+                best_video = qc_result.get("video_path")
+                best_last_frame = qc_result.get("last_frame_path")
+                best_quality = qc_result.get("quality_score", 0.0)
+                shot_accepted = qc_result.get("accepted", False)
+                gen_time = qc_result.get("generation_time", 0.0)
 
-                    # Bump steps on later attempts for higher quality
-                    retry_steps = shot_steps + (attempt * 5)
-
-                    # Dispatch to the right video engine
-                    if shot_engine == "wan":
-                        fps = 16
-                        num_frames = max(9, int(shot_seconds * fps) + 1)
-                        workflow, prefix = build_wan_t2v_workflow(
-                            prompt_text=prompt_text,
-                            num_frames=num_frames,
-                            fps=fps,
-                            steps=retry_steps,
-                            seed=shot_seed,
-                            use_gguf=True,
-                        )
-                        comfyui_prompt_id = _submit_wan_workflow(workflow)
-                    elif shot_engine == "ltx":
-                        fps = 24
-                        num_frames = max(9, int(shot_seconds * fps) + 1)
-                        workflow, prefix = build_ltx_workflow(
-                            prompt_text=prompt_text,
-                            image_path=image_filename if image_filename else None,
-                            num_frames=num_frames,
-                            fps=fps,
-                            steps=retry_steps,
-                            seed=shot_seed,
-                        )
-                        comfyui_prompt_id = _submit_ltx_workflow(workflow)
-                    else:
-                        # framepack or framepack_f1
-                        use_f1 = shot_engine == "framepack_f1" or shot_use_f1
-                        workflow_data, sampler_node_id, prefix = build_framepack_workflow(
-                            prompt_text=prompt_text,
-                            image_path=image_filename,
-                            total_seconds=shot_seconds,
-                            steps=retry_steps,
-                            use_f1=use_f1,
-                            seed=shot_seed,
-                            gpu_memory_preservation=6.0,
-                        )
-                        comfyui_prompt_id = _submit_comfyui_workflow(workflow_data["prompt"])
-
-                    await conn.execute(
-                        "UPDATE shots SET comfyui_prompt_id = $2, first_frame_path = $3 WHERE id = $1",
-                        shot_id, comfyui_prompt_id, first_frame_path,
-                    )
-
-                    # Poll for completion — one at a time
-                    result = await poll_comfyui_completion(comfyui_prompt_id)
-                    gen_time = _time.time() - shot_start
-
-                    if result["status"] != "completed" or not result["output_files"]:
-                        logger.warning(
-                            f"Shot {shot_id} attempt {attempt+1}: ComfyUI {result['status']}"
-                        )
-                        continue  # retry
-
-                    video_filename = result["output_files"][0]
-                    video_path = str(COMFYUI_OUTPUT_DIR / video_filename)
-                    last_frame = await extract_last_frame(video_path)
-
-                    # Quality gate check
-                    shot_quality = await _quality_gate_check(last_frame)
-
-                    # None means vision check unavailable — auto-pass
-                    if shot_quality is None:
-                        shot_quality = 0.7  # assume decent
-
-                    logger.info(
-                        f"Shot {shot_id} attempt {attempt+1}/{_MAX_RETRIES}: "
-                        f"quality={shot_quality:.2f}, gate={gate['threshold']} ({gate['label']})"
-                    )
-
-                    # Track best attempt even if below threshold
-                    if shot_quality > best_quality:
-                        best_quality = shot_quality
-                        best_video = video_path
-                        best_last_frame = last_frame
-
-                    if shot_quality >= gate["threshold"]:
-                        # Passed this gate level
-                        shot_accepted = True
-                        await log_decision(
-                            decision_type="shot_quality_gate",
-                            input_context={
-                                "shot_id": str(shot_id),
-                                "scene_id": scene_id,
-                                "quality_score": shot_quality,
-                                "attempt": attempt + 1,
-                                "gate": gate["label"],
-                                "video": video_filename,
-                            },
-                            decision_made="accepted",
-                            confidence_score=shot_quality,
-                            reasoning=f"Quality {shot_quality:.0%} passed {gate['label']} gate ({gate['threshold']:.0%}) on attempt {attempt+1}",
-                        )
-                        break
-                    else:
-                        # Below threshold — log and retry with looser gate
-                        await log_decision(
-                            decision_type="shot_quality_gate",
-                            input_context={
-                                "shot_id": str(shot_id),
-                                "scene_id": scene_id,
-                                "quality_score": shot_quality,
-                                "attempt": attempt + 1,
-                                "gate": gate["label"],
-                                "video": video_filename,
-                            },
-                            decision_made="retry" if attempt < _MAX_RETRIES - 1 else "accepted_best",
-                            confidence_score=round(1.0 - shot_quality, 2),
-                            reasoning=f"Quality {shot_quality:.0%} below {gate['label']} gate ({gate['threshold']:.0%}), attempt {attempt+1}/{_MAX_RETRIES}",
-                        )
-
-                except Exception as e:
-                    logger.error(f"Shot {shot_id} attempt {attempt+1} failed: {e}")
-                    if attempt == _MAX_RETRIES - 1:
-                        await conn.execute(
-                            "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
-                            shot_id, str(e)[:500],
-                        )
+            except Exception as e:
+                logger.error(f"Shot {shot_id} QC loop failed: {e}")
+                await conn.execute(
+                    "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
+                    shot_id, str(e)[:500],
+                )
 
             # Use best result even if no attempt fully passed
             if best_video:

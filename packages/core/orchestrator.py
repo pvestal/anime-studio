@@ -51,7 +51,7 @@ _active_work: dict[str, asyncio.Task] = {}  # tracks running _do_work tasks by "
 CHARACTER_PHASES = ["training_data", "lora_training", "ready"]
 PROJECT_PHASES = [
     "scene_planning", "shot_preparation", "video_generation",
-    "scene_assembly", "episode_assembly", "publishing",
+    "video_qc", "scene_assembly", "episode_assembly", "publishing",
 ]
 
 
@@ -238,6 +238,29 @@ async def _gate_video_generation(conn, project_id: int) -> dict:
     }
 
 
+async def _gate_video_qc(conn, project_id: int) -> dict:
+    """Check if all completed shots meet minimum quality threshold."""
+    total = await conn.fetchval("""
+        SELECT COUNT(*) FROM shots s
+        JOIN scenes sc ON s.scene_id = sc.id
+        WHERE sc.project_id = $1
+          AND s.status IN ('completed', 'accepted_best')
+    """, project_id)
+    below_threshold = await conn.fetchval("""
+        SELECT COUNT(*) FROM shots s
+        JOIN scenes sc ON s.scene_id = sc.id
+        WHERE sc.project_id = $1
+          AND s.status IN ('completed', 'accepted_best')
+          AND (s.quality_score IS NULL OR s.quality_score < 0.3)
+    """, project_id)
+    return {
+        "passed": total > 0 and below_threshold == 0,
+        "action_needed": below_threshold > 0,
+        "total_completed_shots": total,
+        "below_threshold": below_threshold,
+    }
+
+
 async def _gate_scene_assembly(conn, project_id: int) -> dict:
     """Check if all scenes have final_video_path."""
     total = await conn.fetchval(
@@ -361,13 +384,109 @@ async def _work_lora_training(slug: str, project_id: int):
     )
 
 
+async def _echo_narrate(context_type: str, **kwargs) -> str | None:
+    """Call Echo Brain narrate endpoint for contextual suggestions.
+
+    Returns the suggestion text on success, None on any failure.
+    Non-blocking: failures are logged and swallowed so the orchestrator
+    keeps working even if Echo Brain is down.
+    """
+    import urllib.request as _ur
+
+    ECHO_BRAIN_URL = "http://localhost:8309"
+    payload = json.dumps({
+        "question": _build_echo_prompt(context_type, kwargs),
+    }).encode()
+
+    try:
+        req = _ur.Request(
+            f"{ECHO_BRAIN_URL}/api/echo/ask",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = _ur.urlopen(req, timeout=30)
+        data = json.loads(resp.read())
+        answer = data.get("answer", data.get("response", ""))
+        return answer.strip() if answer else None
+    except Exception as e:
+        logger.debug(f"Echo narrate ({context_type}) unavailable: {e}")
+        return None
+
+
+def _build_echo_prompt(context_type: str, ctx: dict) -> str:
+    """Build Echo Brain prompt for orchestrator enrichment."""
+    project = ctx.get("project_name", "unnamed")
+    genre = ctx.get("project_genre", "anime")
+
+    if context_type == "scene_location":
+        return (
+            f"Suggest a specific, vivid scene location for '{project}' ({genre}). "
+            f"Scene description: {ctx.get('scene_description', 'none')}. "
+            "Return ONLY a brief location (e.g. 'abandoned rooftop overlooking neon district')."
+        )
+    elif context_type == "scene_mood":
+        return (
+            f"Suggest 1-3 mood words for a scene in '{project}' ({genre}). "
+            f"Scene description: {ctx.get('scene_description', 'none')}. "
+            "Return ONLY mood words (e.g. 'tense, foreboding')."
+        )
+    elif context_type == "motion_prompt":
+        return (
+            f"Suggest motion/animation for a {ctx.get('shot_type', 'medium')} shot. "
+            f"Scene: {ctx.get('scene_description', 'no description')}. "
+            "Return ONLY a brief motion description for video generation."
+        )
+    return f"Provide a suggestion for: {context_type}"
+
+
 async def _work_scene_planning(project_id: int):
-    """Generate scenes from story using AI."""
+    """Generate scenes from story using AI, then optionally enrich via Echo Brain."""
     from packages.scene_generation.story_to_scenes import generate_scenes_from_story
 
     try:
         scenes = await generate_scenes_from_story(project_id)
         logger.info(f"Orchestrator: generated {len(scenes)} scenes for project {project_id}")
+
+        # Fetch project context for Echo enrichment
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            project_row = await conn.fetchrow(
+                "SELECT name, genre FROM projects WHERE id = $1", project_id
+            )
+            project_name = project_row["name"] if project_row else str(project_id)
+            project_genre = project_row["genre"] if project_row else "anime"
+
+        # Enrich scenes with Echo Brain narration (best-effort, non-blocking)
+        enriched = 0
+        for scene_data in scenes:
+            desc = scene_data.get("description", "")
+
+            # Fill empty locations via Echo Brain
+            if not scene_data.get("location") and desc:
+                suggested = await _echo_narrate(
+                    "scene_location",
+                    project_name=project_name,
+                    project_genre=project_genre,
+                    scene_description=desc,
+                )
+                if suggested:
+                    scene_data["location"] = suggested
+                    enriched += 1
+
+            # Fill empty moods via Echo Brain
+            if not scene_data.get("mood") and desc:
+                suggested = await _echo_narrate(
+                    "scene_mood",
+                    project_name=project_name,
+                    project_genre=project_genre,
+                    scene_description=desc,
+                )
+                if suggested:
+                    scene_data["mood"] = suggested
+                    enriched += 1
+
+        if enriched:
+            logger.info(f"Orchestrator: Echo Brain enriched {enriched} scene fields")
 
         # Insert scenes and shots into DB
         pool = await get_pool()
@@ -414,10 +533,10 @@ async def _work_scene_planning(project_id: int):
     await log_decision(
         decision_type="orchestrator_scene_planning",
         project_name=str(project_id),
-        input_context={"project_id": project_id},
+        input_context={"project_id": project_id, "echo_enriched": enriched if 'enriched' in dir() else 0},
         decision_made="generated_scenes",
         confidence_score=0.8,
-        reasoning="Generated scenes from storyline via AI",
+        reasoning="Generated scenes from storyline via AI" + (f", Echo Brain enriched {enriched} fields" if 'enriched' in dir() and enriched else ""),
     )
 
 
@@ -573,6 +692,71 @@ async def _work_video_generation(conn, project_id: int):
         decision_made="generated_scene_video",
         confidence_score=0.8,
         reasoning="Generated video for next incomplete scene",
+    )
+
+
+async def _work_video_qc(conn, project_id: int):
+    """Run QC refinement pass on shots that are below quality threshold."""
+    from packages.scene_generation.video_qc import run_qc_loop
+
+    # Find shots that need QC refinement
+    shots = await conn.fetch("""
+        SELECT s.* FROM shots s
+        JOIN scenes sc ON s.scene_id = sc.id
+        WHERE sc.project_id = $1
+          AND s.status IN ('completed', 'accepted_best')
+          AND (s.quality_score IS NULL OR s.quality_score < 0.3)
+        ORDER BY s.quality_score ASC NULLS FIRST
+        LIMIT 1
+    """, project_id)
+
+    if not shots:
+        return
+
+    shot = dict(shots[0])
+    shot_id = shot["id"]
+    logger.info(f"Orchestrator: running QC refinement on shot {shot_id} (quality={shot.get('quality_score')})")
+
+    try:
+        shot["_prev_last_frame"] = None
+        # Get previous shot's last frame for continuity
+        prev = await conn.fetchrow(
+            "SELECT last_frame_path FROM shots WHERE scene_id = $1 AND shot_number < $2 "
+            "ORDER BY shot_number DESC LIMIT 1", shot["scene_id"], shot["shot_number"])
+        if prev and prev["last_frame_path"]:
+            from pathlib import Path
+            if Path(prev["last_frame_path"]).exists():
+                shot["_prev_last_frame"] = prev["last_frame_path"]
+
+        qc_result = await run_qc_loop(
+            shot_data=shot,
+            conn=conn,
+            max_attempts=3,
+            accept_threshold=0.6,
+            min_threshold=0.3,
+        )
+
+        if qc_result.get("video_path"):
+            status = "completed" if qc_result["accepted"] else "accepted_best"
+            await conn.execute("""
+                UPDATE shots SET status = $2, output_video_path = $3,
+                       last_frame_path = $4, generation_time_seconds = $5,
+                       quality_score = $6
+                WHERE id = $1
+            """, shot_id, status, qc_result["video_path"],
+                qc_result["last_frame_path"], qc_result["generation_time"],
+                qc_result["quality_score"])
+            logger.info(f"Orchestrator: QC refinement complete for shot {shot_id}, quality={qc_result['quality_score']:.2f}")
+    except Exception as e:
+        logger.error(f"Orchestrator: QC refinement failed for shot {shot_id}: {e}")
+
+    await log_decision(
+        decision_type="orchestrator_video_qc",
+        project_name=str(project_id),
+        input_context={"shot_id": str(shot_id), "original_quality": shot.get("quality_score")},
+        decision_made="qc_refinement_pass",
+        confidence_score=qc_result.get("quality_score", 0) if 'qc_result' in dir() else 0,
+        reasoning=f"QC refinement pass on shot with quality below threshold",
     )
 
 
@@ -832,6 +1016,8 @@ async def _check_gate(conn, entity_type: str, entity_id: str, project_id: int, p
             return await _gate_shot_preparation(conn, project_id)
         elif phase == "video_generation":
             return await _gate_video_generation(conn, project_id)
+        elif phase == "video_qc":
+            return await _gate_video_qc(conn, project_id)
         elif phase == "scene_assembly":
             return await _gate_scene_assembly(conn, project_id)
         elif phase == "episode_assembly":
@@ -862,6 +1048,8 @@ async def _do_work(entity_type: str, entity_id: str, project_id: int, phase: str
                     await _work_shot_preparation(conn, project_id)
                 elif phase == "video_generation":
                     await _work_video_generation(conn, project_id)
+                elif phase == "video_qc":
+                    await _work_video_qc(conn, project_id)
                 elif phase == "episode_assembly":
                     await _work_episode_assembly(conn, project_id)
                 elif phase == "publishing":
