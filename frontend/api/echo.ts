@@ -31,6 +31,7 @@ export const echoApi = {
     return request('/echo/narrate', {
       method: 'POST',
       body: JSON.stringify(payload),
+      timeoutMs: 60000,
     })
   },
 

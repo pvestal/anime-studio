@@ -48,6 +48,14 @@
         </button>
         <button
           v-if="selectedCount > 0"
+          class="btn btn-reassign"
+          @click="$emit('batch-reassign')"
+          :disabled="loading"
+        >
+          Reassign {{ selectedCount }}
+        </button>
+        <button
+          v-if="selectedCount > 0"
           class="btn btn-danger"
           @click="$emit('batch-approve', false)"
           :disabled="loading"
@@ -148,6 +156,7 @@ defineEmits<{
   (e: 'update:sortBy', value: string): void
   (e: 'refresh'): void
   (e: 'batch-approve', approved: boolean): void
+  (e: 'batch-reassign'): void
 }>()
 </script>
 
@@ -192,6 +201,16 @@ defineEmits<{
   border-color: var(--status-warning);
   color: var(--status-warning);
   font-weight: 500;
+}
+
+/* Reassign button */
+.btn-reassign {
+  background: rgba(160, 120, 200, 0.15) !important;
+  border-color: #a070c8 !important;
+  color: #c090e0 !important;
+}
+.btn-reassign:hover {
+  background: rgba(160, 120, 200, 0.25) !important;
 }
 
 /* New badge */

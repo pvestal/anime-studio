@@ -19,6 +19,12 @@
       >
         Ingest Content
       </button>
+      <button
+        :class="['sub-tab', activeSubTab === 'workbench' ? 'sub-tab-active' : '']"
+        @click="activeSubTab = 'workbench'"
+      >
+        Workbench
+      </button>
     </div>
 
     <!-- ========== INGEST CONTENT SUB-TAB ========== -->
@@ -300,7 +306,7 @@
         </div>
         <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase;">Total Approved</div>
       </div>
-      <button class="btn" style="align-self: center; white-space: nowrap; padding: 10px 20px; font-size: 14px; color: var(--accent-primary); border-color: var(--accent-primary);" @click="showNewCharForm = true" v-if="!showNewCharForm">
+      <button class="btn" style="align-self: center; white-space: nowrap; padding: 10px 20px; font-size: 14px; color: var(--accent-primary); border-color: var(--accent-primary);" @click="openNewCharForm" v-if="!showNewCharForm">
         + New Character
       </button>
     </div>
@@ -322,13 +328,33 @@
         </div>
         <div style="flex: 2; min-width: 240px;">
           <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Description (optional)</label>
-          <input v-model="newCharDescription" type="text" placeholder="Brief description..." style="width: 100%; padding: 6px 8px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px;" />
+          <input v-model="newCharDescription" type="text" placeholder="e.g., A dark-haired swordsman with a missing eye" style="width: 100%; padding: 6px 8px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px;" />
         </div>
+      </div>
+      <div style="margin-top: 10px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+          <label style="font-size: 11px; color: var(--text-muted);">Design Prompt (optional)</label>
+          <EchoAssistButton
+            v-if="newCharProject"
+            context-type="design_prompt"
+            :context-payload="{
+              project_name: newCharProject,
+              character_name: newCharName,
+              checkpoint_model: charactersStore.characters.find(c => c.project_name === newCharProject)?.checkpoint_model || undefined,
+            }"
+            :current-value="newCharDesignPrompt"
+            compact
+            @accept="newCharDesignPrompt = $event.suggestion"
+          />
+        </div>
+        <textarea v-model="newCharDesignPrompt" rows="2" placeholder="1girl, silver hair, red eyes, dark armor, full body..." style="width: 100%; padding: 6px 8px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; resize: vertical; font-family: var(--font-primary);"></textarea>
+      </div>
+      <div style="display: flex; gap: 6px; margin-top: 10px;">
         <div style="display: flex; gap: 6px;">
           <button class="btn" style="color: var(--accent-primary); border-color: var(--accent-primary);" @click="createNewCharacter" :disabled="!newCharName.trim() || !newCharProject || creatingCharacter">
             {{ creatingCharacter ? 'Creating...' : 'Create' }}
           </button>
-          <button class="btn" @click="showNewCharForm = false; newCharName = ''; newCharProject = ''; newCharDescription = ''">Cancel</button>
+          <button class="btn" @click="showNewCharForm = false; newCharName = ''; newCharProject = ''; newCharDescription = ''; newCharDesignPrompt = ''">Cancel</button>
         </div>
       </div>
       <div v-if="newCharError" style="margin-top: 8px; font-size: 12px; color: var(--status-error);">{{ newCharError }}</div>
@@ -410,6 +436,9 @@
 
     </template>
 
+    <!-- ========== WORKBENCH SUB-TAB ========== -->
+    <CreateTab v-if="activeSubTab === 'workbench'" />
+
     <!-- Character Detail Panel -->
     <CharacterDetailPanel
       v-if="detailCharacter"
@@ -435,13 +464,15 @@ import type { Character, DatasetImage } from '@/types'
 import CharacterFilters from './characters/CharacterFilters.vue'
 import CharacterCard from './characters/CharacterCard.vue'
 import CharacterDetailPanel from './characters/CharacterDetailPanel.vue'
+import EchoAssistButton from './EchoAssistButton.vue'
+import CreateTab from './CreateTab.vue'
 
-const MIN_TRAINING_IMAGES = 10
+const MIN_TRAINING_IMAGES = 100
 
 const charactersStore = useCharactersStore()
 const trainingStore = useTrainingStore()
 const projectStore = useProjectStore()
-const activeSubTab = ref<'characters' | 'ingest'>('characters')
+const activeSubTab = ref<'characters' | 'ingest' | 'workbench'>('characters')
 const filterProject = ref('')
 const filterCharacter = ref('')
 const filterModel = ref('')
@@ -456,6 +487,7 @@ const showNewCharForm = ref(false)
 const newCharName = ref('')
 const newCharProject = ref('')
 const newCharDescription = ref('')
+const newCharDesignPrompt = ref('')
 const creatingCharacter = ref(false)
 const newCharError = ref('')
 
@@ -806,6 +838,11 @@ function closeDetailPanel() {
   detailCharacter.value = null
 }
 
+function openNewCharForm() {
+  showNewCharForm.value = true
+  newCharProject.value = filterProject.value || (projectStore.projects.length === 1 ? projectStore.projects[0].name : '')
+}
+
 async function createNewCharacter() {
   if (!newCharName.value.trim() || !newCharProject.value) return
   creatingCharacter.value = true
@@ -815,11 +852,13 @@ async function createNewCharacter() {
       name: newCharName.value.trim(),
       project_name: newCharProject.value,
       description: newCharDescription.value.trim() || undefined,
+      design_prompt: newCharDesignPrompt.value.trim() || undefined,
     })
     showNewCharForm.value = false
     newCharName.value = ''
     newCharProject.value = ''
     newCharDescription.value = ''
+    newCharDesignPrompt.value = ''
     await charactersStore.fetchCharacters()
   } catch (error: any) {
     newCharError.value = error.message || 'Failed to create character'

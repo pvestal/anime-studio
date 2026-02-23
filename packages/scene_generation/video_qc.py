@@ -7,27 +7,29 @@ Replaces the old single-frame "rate 1-10" gate with:
   4. Regenerate with targeted fixes (not just new seed + more steps)
 
 Primary engine: FramePack (HunyuanVideo I2V), also supports LTX and Wan.
+
+Vision model interaction lives in video_vision.py; re-exported here for external callers.
 """
 
 import asyncio
-import base64
 import json
 import logging
 import random
 import time
 from pathlib import Path
 
-from packages.core.config import COMFYUI_OUTPUT_DIR, COMFYUI_URL, OLLAMA_URL, VISION_MODEL
+from packages.core.config import COMFYUI_OUTPUT_DIR
 from packages.core.audit import log_decision
 
-logger = logging.getLogger(__name__)
+# Re-export vision functions so external callers can still import from video_qc
+from .video_vision import (  # noqa: F401
+    KNOWN_ISSUES,
+    extract_review_frames,
+    _vision_review_single_frame,
+    review_video_frames,
+)
 
-# Known issue categories the vision model can identify
-KNOWN_ISSUES = [
-    "artifact_flicker", "blurry", "wrong_character", "bad_anatomy",
-    "frozen_motion", "wrong_action", "poor_lighting", "text_watermark",
-    "color_shift",
-]
+logger = logging.getLogger(__name__)
 
 # Issue → prompt/negative fix mapping
 _ISSUE_FIXES = {
@@ -78,186 +80,6 @@ _ISSUE_FIXES = {
         "fixable": False,
     },
 }
-
-
-async def extract_review_frames(video_path: str, count: int = 3) -> list[str]:
-    """Extract frames at start (0.1s), midpoint, and end (-0.1s) via ffmpeg.
-
-    Returns list of PNG paths stored alongside the video as _qc_frame_N.png.
-    """
-    video = Path(video_path)
-    if not video.exists():
-        raise FileNotFoundError(f"Video not found: {video_path}")
-
-    # Get video duration
-    proc = await asyncio.create_subprocess_exec(
-        "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-        "-of", "csv=p=0", video_path,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, _ = await proc.communicate()
-    duration = float(stdout.decode().strip()) if stdout.decode().strip() else 3.0
-
-    # Calculate timestamps: 0.1s, midpoint, duration-0.1s
-    timestamps = [0.1]
-    if count >= 2:
-        timestamps.append(max(0.2, duration / 2))
-    if count >= 3:
-        timestamps.append(max(0.3, duration - 0.1))
-
-    frame_paths = []
-    base = video_path.rsplit(".", 1)[0]
-
-    for i, ts in enumerate(timestamps[:count]):
-        out_path = f"{base}_qc_frame_{i}.png"
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-y", "-ss", str(ts), "-i", video_path,
-            "-vframes", "1", "-q:v", "2", out_path,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode == 0 and Path(out_path).exists():
-            frame_paths.append(out_path)
-        else:
-            logger.warning(f"Frame extraction failed at {ts}s: {stderr.decode()[-200:]}")
-
-    return frame_paths
-
-
-async def _vision_review_single_frame(
-    frame_path: str,
-    motion_prompt: str,
-    character_slug: str | None = None,
-) -> dict:
-    """Send a single frame to the vision model for structured assessment.
-
-    Returns dict with visual_quality, motion_coherence, character_consistency,
-    composition (all 1-10), and issues list.
-    """
-    import urllib.request
-
-    with open(frame_path, "rb") as f:
-        img_b64 = base64.b64encode(f.read()).decode()
-
-    char_context = f" The character should be '{character_slug}'." if character_slug else ""
-    issue_list = ", ".join(KNOWN_ISSUES)
-
-    prompt = (
-        f"You are reviewing an anime video frame. The intended motion/action is: \"{motion_prompt}\".{char_context}\n\n"
-        f"Score each category 1-10:\n"
-        f"- visual_quality: sharpness, no artifacts, no glitches\n"
-        f"- motion_coherence: does the frame match the described motion/action\n"
-        f"- character_consistency: character appears on-model and correct\n"
-        f"- composition: framing, lighting, visual appeal\n\n"
-        f"Also list any issues from this set: [{issue_list}]\n\n"
-        f"Reply in EXACTLY this JSON format, nothing else:\n"
-        f'{{"visual_quality": N, "motion_coherence": N, "character_consistency": N, '
-        f'"composition": N, "issues": ["issue1", "issue2"]}}'
-    )
-
-    payload = json.dumps({
-        "model": VISION_MODEL,
-        "prompt": prompt,
-        "images": [img_b64],
-        "stream": False,
-        "options": {"temperature": 0.1},
-    }).encode()
-
-    req = urllib.request.Request(
-        f"{OLLAMA_URL}/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-
-    try:
-        resp = urllib.request.urlopen(req, timeout=60)
-        result = json.loads(resp.read())
-        text = result.get("response", "").strip()
-
-        # Extract JSON from response (may have markdown fences)
-        if "```" in text:
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-
-        parsed = json.loads(text)
-
-        # Validate and clamp scores
-        scores = {}
-        for key in ("visual_quality", "motion_coherence", "character_consistency", "composition"):
-            val = parsed.get(key, 5)
-            scores[key] = max(1, min(10, int(val)))
-
-        # Validate issues
-        issues = [i for i in parsed.get("issues", []) if i in KNOWN_ISSUES]
-
-        return {**scores, "issues": issues}
-
-    except Exception as e:
-        logger.warning(f"Vision review failed for {frame_path}: {e}")
-        return {
-            "visual_quality": 5,
-            "motion_coherence": 5,
-            "character_consistency": 5,
-            "composition": 5,
-            "issues": [],
-        }
-
-
-async def review_video_frames(
-    frame_paths: list[str],
-    motion_prompt: str,
-    character_slug: str | None = None,
-) -> dict:
-    """Review multiple frames and aggregate scores.
-
-    Returns:
-        {
-            overall_score: float (0-1),
-            issues: list[str],
-            per_frame: list[dict],
-        }
-    """
-    if not frame_paths:
-        return {"overall_score": 0.5, "issues": [], "per_frame": []}
-
-    # Review frames sequentially (Ollama single-model queue)
-    per_frame = []
-    for fp in frame_paths:
-        result = await _vision_review_single_frame(fp, motion_prompt, character_slug)
-        per_frame.append(result)
-
-    # Aggregate: weighted average across frames, then weighted category mix
-    # Weights: visual 0.3, motion 0.3, character 0.2, composition 0.2
-    weights = {
-        "visual_quality": 0.3,
-        "motion_coherence": 0.3,
-        "character_consistency": 0.2,
-        "composition": 0.2,
-    }
-
-    category_avgs = {}
-    for key in weights:
-        vals = [fr[key] for fr in per_frame]
-        category_avgs[key] = sum(vals) / len(vals)
-
-    # Weighted sum normalized to 0-1 (scores are 1-10)
-    raw_score = sum(category_avgs[k] * w for k, w in weights.items())
-    overall_score = round((raw_score - 1) / 9, 2)  # map 1-10 → 0-1
-    overall_score = max(0.0, min(1.0, overall_score))
-
-    # Union of all frame issues
-    all_issues = set()
-    for fr in per_frame:
-        all_issues.update(fr.get("issues", []))
-
-    return {
-        "overall_score": overall_score,
-        "issues": sorted(all_issues),
-        "per_frame": per_frame,
-        "category_averages": {k: round(v, 1) for k, v in category_avgs.items()},
-    }
 
 
 def build_prompt_fixes(
@@ -355,6 +177,37 @@ async def run_qc_loop(
     shot_id = shot_data["id"]
     scene_id = shot_data["scene_id"]
 
+    # Check engine blacklist before spending GPU time
+    shot_engine_check = shot_data.get("video_engine") or "framepack"
+    chars_check = shot_data.get("characters_present")
+    char_slug_check = chars_check[0] if chars_check and isinstance(chars_check, list) and len(chars_check) > 0 else None
+    if char_slug_check:
+        # Get project_id from scene
+        project_id = None
+        try:
+            scene_row = await conn.fetchrow("SELECT project_id FROM scenes WHERE id = $1", scene_id)
+            if scene_row:
+                project_id = scene_row["project_id"]
+        except Exception:
+            pass
+        bl = await check_engine_blacklist(conn, char_slug_check, project_id, shot_engine_check)
+        if bl:
+            logger.warning(
+                f"Shot {shot_id}: engine '{shot_engine_check}' blacklisted for "
+                f"'{char_slug_check}' — reason: {bl.get('reason')}"
+            )
+            return {
+                "accepted": False,
+                "video_path": None,
+                "last_frame_path": None,
+                "quality_score": 0.0,
+                "attempts": 0,
+                "status": "engine_blacklisted",
+                "issues": [f"Engine '{shot_engine_check}' is blacklisted for '{char_slug_check}'"],
+                "prompt_modifications": [],
+                "generation_time": 0.0,
+            }
+
     # Build progressive thresholds (linear interpolation from accept to min)
     thresholds = []
     for i in range(max_attempts):
@@ -428,6 +281,8 @@ async def run_qc_loop(
                     fps=fps,
                     steps=retry_steps,
                     seed=shot_seed,
+                    lora_name=shot_data.get("lora_name"),
+                    lora_strength=shot_data.get("lora_strength", 0.8),
                 )
                 comfyui_prompt_id = _submit_ltx_workflow(workflow)
             else:
@@ -465,10 +320,17 @@ async def run_qc_loop(
             video_path = str(COMFYUI_OUTPUT_DIR / video_filename)
             last_frame = await extract_last_frame(video_path)
 
-            # Multi-frame QC review
+            # Multi-frame QC review (comparative when source image available)
+            source_img = shot_data.get("source_image_path")
+            if source_img and not Path(source_img).is_absolute():
+                from packages.core.config import BASE_PATH
+                source_img = str(BASE_PATH / source_img) if (BASE_PATH / source_img).exists() else source_img
+
             frame_paths = await extract_review_frames(video_path)
             if frame_paths:
-                review = await review_video_frames(frame_paths, current_prompt, character_slug)
+                review = await review_video_frames(
+                    frame_paths, current_prompt, character_slug, source_img,
+                )
                 shot_quality = review["overall_score"]
                 issues = review["issues"]
             else:
@@ -514,6 +376,16 @@ async def run_qc_loop(
                         f"({threshold:.0%}) on attempt {attempt+1}"
                     ),
                 )
+
+                # Store QC detail data + set review_status
+                review_status = "approved" if shot_quality >= 0.75 else "pending_review"
+                await _store_qc_review_data(
+                    conn, shot_id, issues,
+                    review.get("category_averages", {}),
+                    review.get("per_frame", []),
+                    review_status,
+                )
+
                 return {
                     "accepted": True,
                     "video_path": video_path,
@@ -585,6 +457,13 @@ async def run_qc_loop(
         reasoning=f"All {max_attempts} attempts exhausted, using best (quality={best_quality:.0%})",
     )
 
+    # Store QC detail data + set review_status for the best attempt
+    if best_video:
+        review_status = "approved" if best_quality >= 0.85 else "pending_review"
+        await _store_qc_review_data(
+            conn, shot_id, best_issues, {}, [], review_status,
+        )
+
     return {
         "accepted": best_quality >= min_threshold,
         "video_path": best_video,
@@ -596,3 +475,57 @@ async def run_qc_loop(
         "prompt_modifications": all_modifications,
         "generation_time": final_gen_time,
     }
+
+
+async def _store_qc_review_data(
+    conn,
+    shot_id,
+    issues: list[str],
+    category_averages: dict,
+    per_frame: list[dict],
+    review_status: str,
+):
+    """Persist QC review details and review_status to the shots table."""
+    try:
+        await conn.execute("""
+            UPDATE shots
+            SET qc_issues = $2,
+                qc_category_averages = $3::jsonb,
+                qc_per_frame = $4::jsonb,
+                review_status = $5
+            WHERE id = $1
+        """, shot_id,
+            issues if issues else None,
+            json.dumps(category_averages) if category_averages else '{}',
+            json.dumps(per_frame) if per_frame else '[]',
+            review_status,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to store QC review data for shot {shot_id}: {e}")
+
+
+async def check_engine_blacklist(
+    conn,
+    character_slug: str | None,
+    project_id: int | None,
+    video_engine: str,
+) -> dict | None:
+    """Check if a video engine is blacklisted for a character+project.
+
+    Returns the blacklist row dict if blacklisted, None if allowed.
+    """
+    if not character_slug:
+        return None
+    try:
+        row = await conn.fetchrow("""
+            SELECT id, reason, created_at
+            FROM engine_blacklist
+            WHERE character_slug = $1
+              AND video_engine = $2
+              AND (project_id = $3 OR project_id IS NULL)
+            LIMIT 1
+        """, character_slug, video_engine, project_id)
+        return dict(row) if row else None
+    except Exception as e:
+        logger.warning(f"Engine blacklist check failed (non-fatal): {e}")
+        return None

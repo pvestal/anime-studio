@@ -27,6 +27,11 @@ class ReassignRequest(BaseModel):
     target_character_slug: str
 
 
+class BulkReassignRequest(BaseModel):
+    images: List[Dict[str, str]]  # [{"character_slug": "x", "image_name": "y"}, ...]
+    target_character_slug: str
+
+
 class CharacterCreate(BaseModel):
     name: str
     project_name: str
@@ -92,6 +97,7 @@ class NarrateRequest(BaseModel):
     project_name: Optional[str] = None
     project_genre: Optional[str] = None
     project_description: Optional[str] = None
+    project_premise: Optional[str] = None
     storyline_title: Optional[str] = None
     storyline_summary: Optional[str] = None
     storyline_theme: Optional[str] = None
@@ -103,6 +109,8 @@ class NarrateRequest(BaseModel):
     design_prompt: Optional[str] = None
     current_value: Optional[str] = None
     concept_description: Optional[str] = None
+    scene_description: Optional[str] = None
+    shot_type: Optional[str] = None
 
 
 class VisionReviewRequest(BaseModel):
@@ -338,6 +346,19 @@ class MusicGenerateRequest(BaseModel):
 
 
 # --- Video A/B Comparison Models ---
+
+class VideoReviewRequest(BaseModel):
+    shot_id: str
+    approved: bool
+    feedback: Optional[str] = None
+    reject_engine: bool = False  # blacklist this engine for this character
+
+
+class BatchVideoReviewRequest(BaseModel):
+    shot_ids: List[str]
+    approved: bool
+    feedback: Optional[str] = None
+
 
 class VideoEngineConfig(BaseModel):
     engine: str  # "framepack", "framepack_f1", "ltx"

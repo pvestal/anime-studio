@@ -56,7 +56,20 @@
     </div>
 
     <div class="field-group">
-      <label class="field-label">Motion Prompt</label>
+      <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+        <label class="field-label" style="margin-bottom: 0;">Motion Prompt</label>
+        <EchoAssistButton
+          context-type="motion_prompt"
+          :context-payload="{
+            project_name: projectStore.currentProject?.name,
+            shot_type: shot.shot_type,
+            scene_description: shot.motion_prompt ?? undefined,
+          }"
+          :current-value="shot.motion_prompt || ''"
+          compact
+          @accept="updateField('motion_prompt', $event.suggestion)"
+        />
+      </div>
       <div v-if="motionPresets.length > 0" style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px;">
         <button
           v-for="preset in motionPresets"
@@ -69,7 +82,7 @@
         :value="shot.motion_prompt"
         @input="updateField('motion_prompt', ($event.target as HTMLTextAreaElement).value)"
         rows="4"
-        placeholder="Describe the motion/action in this shot..."
+        :placeholder="motionPlaceholder"
         class="field-input field-textarea"
       ></textarea>
     </div>
@@ -183,9 +196,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { BuilderShot } from '@/types'
 import { scenesApi } from '@/api/scenes'
+import { useProjectStore } from '@/stores/project'
+import EchoAssistButton from '../EchoAssistButton.vue'
+
+const projectStore = useProjectStore()
 
 const props = defineProps<{
   shot: Partial<BuilderShot> | null
@@ -204,6 +221,19 @@ const shotTypes = ['establishing', 'wide', 'medium', 'close-up', 'extreme_close-
 const cameraAngles = ['eye-level', 'high', 'low', 'dutch', 'pov']
 
 const motionPresets = ref<string[]>([])
+
+const motionPlaceholder = computed(() => {
+  const type = props.shot?.shot_type || 'medium'
+  const hints: Record<string, string> = {
+    'close-up': 'subtle breathing, eyes shifting, light flickering across face...',
+    'extreme_close-up': 'pupil dilation, tear rolling down cheek, lips trembling...',
+    'establishing': 'slow pan across cityscape, clouds drifting, lights flickering...',
+    'wide': 'characters walking through scene, wind in environment...',
+    'medium': 'character gesturing, shifting weight, looking around...',
+    'action': 'running forward, sword swing, cape billowing in wind...',
+  }
+  return hints[type] || 'Describe the motion/action in this shot...'
+})
 
 async function loadPresets(shotType: string) {
   try {

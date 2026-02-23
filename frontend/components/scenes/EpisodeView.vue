@@ -85,7 +85,7 @@
     </div>
 
     <!-- Create Episode Modal -->
-    <div v-if="showCreateModal" style="position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center;" @click.self="showCreateModal = false">
+    <div v-if="showCreateModal" style="position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center;" @click.self="showCreateModal = false" @keydown.escape.window="showCreateModal = false">
       <div class="card" style="width: 400px;">
         <div style="font-size: 14px; font-weight: 500; margin-bottom: 16px;">New Episode</div>
         <div class="field-group">
@@ -94,15 +94,39 @@
         </div>
         <div class="field-group">
           <label class="field-label">Title</label>
-          <input v-model="newEpisode.title" type="text" placeholder="Episode title" class="field-input" />
+          <input v-model="newEpisode.title" type="text" :placeholder="`Episode ${newEpisode.episode_number}`" class="field-input" />
         </div>
         <div class="field-group">
-          <label class="field-label">Description</label>
-          <textarea v-model="newEpisode.description" rows="2" class="field-input" style="resize: vertical;"></textarea>
+          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+            <label class="field-label" style="margin-bottom: 0;">Description</label>
+            <EchoAssistButton
+              context-type="description"
+              :context-payload="{
+                project_name: projectStore.currentProject?.name,
+                project_genre: projectStore.currentProject?.genre || undefined,
+                project_premise: projectStore.currentProject?.premise || undefined,
+                storyline_summary: projectStore.currentProject?.storyline?.summary || undefined,
+              }"
+              :current-value="newEpisode.description"
+              compact
+              @accept="newEpisode.description = $event.suggestion"
+            />
+          </div>
+          <textarea v-model="newEpisode.description" rows="2" placeholder="What happens in this episode..." class="field-input" style="resize: vertical;"></textarea>
         </div>
         <div class="field-group">
           <label class="field-label">Story Arc</label>
           <input v-model="newEpisode.story_arc" type="text" placeholder="Optional story arc tag" class="field-input" />
+          <div v-if="storyArcs.length > 0" style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;">
+            <button
+              v-for="arc in storyArcs"
+              :key="arc"
+              type="button"
+              style="padding: 2px 8px; font-size: 11px; background: var(--bg-primary); color: var(--text-secondary); border: 1px solid var(--border-primary); border-radius: 10px; cursor: pointer; font-family: var(--font-primary);"
+              :style="newEpisode.story_arc === arc ? { borderColor: 'var(--accent-primary)', color: 'var(--accent-primary)', background: 'rgba(122,162,247,0.1)' } : {}"
+              @click="newEpisode.story_arc = newEpisode.story_arc === arc ? '' : arc"
+            >{{ arc }}</button>
+          </div>
         </div>
         <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px;">
           <button class="btn" @click="showCreateModal = false">Cancel</button>
@@ -114,9 +138,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { Episode, BuilderScene } from '@/types'
 import { episodesApi } from '@/api/episodes'
+import { useProjectStore } from '@/stores/project'
+import EchoAssistButton from '../EchoAssistButton.vue'
+
+const projectStore = useProjectStore()
 
 const props = defineProps<{
   projectId: number
@@ -143,6 +171,8 @@ const newEpisode = ref({
 })
 
 const availableScenes = ref<BuilderScene[]>([])
+
+const storyArcs = computed(() => projectStore.currentProject?.storyline?.story_arcs || [])
 
 watch(() => props.projectId, async (pid) => {
   if (pid) await loadEpisodes()

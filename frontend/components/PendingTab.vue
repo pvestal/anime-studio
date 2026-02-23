@@ -45,7 +45,7 @@
       @submit-quick="onSubmitQuick"
     />
 
-    <!-- Reassign modal -->
+    <!-- Reassign modal (single) -->
     <ImageReassignModal
       :image="reassigningImage"
       :targets="availableReassignTargets"
@@ -53,6 +53,19 @@
       @close="reassigningImage = null"
       @submit="submitReassign"
       @create-submit="createAndReassign"
+    />
+
+    <!-- Bulk reassign modal -->
+    <BulkReassignModal
+      :show="bulkReassignOpen"
+      :count="selectedImages.size"
+      :source-breakdown="bulkReassignSourceBreakdown"
+      :project-name="bulkReassignProjectName"
+      :targets="bulkReassignTargets"
+      :submitting="reassigning"
+      @close="bulkReassignOpen = false"
+      @submit="submitBulkReassign"
+      @create-submit="createAndBulkReassign"
     />
 
     <!-- Filters and batch actions -->
@@ -81,6 +94,7 @@
       @update:sort-by="sortBy = $event"
       @refresh="refresh()"
       @batch-approve="batchApprove"
+      @batch-reassign="openBulkReassign"
     />
 
     <!-- Replenishment Panel (collapsible) -->
@@ -292,6 +306,7 @@ import type { PendingImage, ReplenishmentStatus, ReadinessResponse } from '@/typ
 import ImageDetailPanel from '@/components/ImageDetailPanel.vue'
 import ImageApprovalModal from '@/components/pending/ImageApprovalModal.vue'
 import ImageReassignModal from '@/components/pending/ImageReassignModal.vue'
+import BulkReassignModal from '@/components/pending/BulkReassignModal.vue'
 import PendingFilters from '@/components/pending/PendingFilters.vue'
 import ProjectCharacterGrid from '@/components/pending/ProjectCharacterGrid.vue'
 import { useVisionReview } from '@/components/pending/useVisionReview'
@@ -691,6 +706,115 @@ async function createAndReassign(image: PendingImage, name: string, designPrompt
     showToast(`Create & reassign failed: ${e.message}`, 'reject')
   } finally {
     reassigning.value = false
+  }
+}
+
+// --- Bulk Reassign ---
+const bulkReassignOpen = ref(false)
+
+const bulkReassignSourceBreakdown = computed(() => {
+  const counts: Record<string, number> = {}
+  for (const img of approvalStore.pendingImages) {
+    if (selectedImages.value.has(img.id)) {
+      counts[img.character_name] = (counts[img.character_name] || 0) + 1
+    }
+  }
+  return Object.entries(counts).map(([name, count]) => ({ name, count }))
+})
+
+const bulkReassignProjectName = computed(() => {
+  const selected = approvalStore.pendingImages.filter(img => selectedImages.value.has(img.id))
+  if (selected.length === 0) return ''
+  return selected[0].project_name || ''
+})
+
+const bulkReassignTargets = computed(() => {
+  return charactersStore.characters
+    .sort((a, b) => a.name.localeCompare(b.name))
+})
+
+function openBulkReassign() {
+  if (selectedImages.value.size === 0) return
+  bulkReassignOpen.value = true
+  if (charactersStore.characters.length === 0) {
+    charactersStore.fetchCharacters()
+  }
+}
+
+async function submitBulkReassign(targetSlug: string) {
+  const selected = approvalStore.pendingImages.filter(img => selectedImages.value.has(img.id))
+  reassigning.value = true
+  bulkReassignOpen.value = false
+
+  batchProgress.value = { action: `Reassigning ${selected.length} images...`, done: 0, total: selected.length }
+
+  try {
+    const result = await api.bulkReassignImages({
+      images: selected.map(img => ({ character_slug: img.character_slug, image_name: img.name })),
+      target_character_slug: targetSlug,
+    })
+
+    batchProgress.value!.done = result.reassigned_count
+    const targetChar = charactersStore.characters.find(c => c.slug === targetSlug)
+    showToast(`Moved ${result.reassigned_count} image(s) to ${targetChar?.name || targetSlug}`, 'regen')
+
+    if (result.error_count > 0) {
+      showToast(`${result.error_count} failed to reassign`, 'reject')
+    }
+
+    // Remove reassigned images from local list
+    const reassignedIds = new Set(selected.map(img => img.id))
+    approvalStore.pendingImages = approvalStore.pendingImages.filter(img => !reassignedIds.has(img.id))
+    selectedImages.value = new Set()
+  } catch (e: any) {
+    showToast(`Bulk reassign failed: ${e.message}`, 'reject')
+  } finally {
+    reassigning.value = false
+    batchProgress.value = null
+  }
+}
+
+async function createAndBulkReassign(name: string, designPrompt: string) {
+  const selected = approvalStore.pendingImages.filter(img => selectedImages.value.has(img.id))
+  if (selected.length === 0) return
+
+  reassigning.value = true
+  bulkReassignOpen.value = false
+
+  batchProgress.value = { action: `Creating ${name} & reassigning ${selected.length} images...`, done: 0, total: selected.length + 1 }
+
+  try {
+    // 1. Create the new character
+    const projectName = selected[0].project_name
+    const createResult = await api.createCharacter({
+      name,
+      project_name: projectName,
+      design_prompt: designPrompt || undefined,
+    })
+    const newSlug = createResult.slug
+    batchProgress.value!.done = 1
+
+    // 2. Bulk reassign
+    const result = await api.bulkReassignImages({
+      images: selected.map(img => ({ character_slug: img.character_slug, image_name: img.name })),
+      target_character_slug: newSlug,
+    })
+
+    batchProgress.value!.done = 1 + result.reassigned_count
+    showToast(`Created ${name} & moved ${result.reassigned_count} image(s)`, 'regen')
+
+    // Remove from local list
+    const reassignedIds = new Set(selected.map(img => img.id))
+    approvalStore.pendingImages = approvalStore.pendingImages.filter(img => !reassignedIds.has(img.id))
+    selectedImages.value = new Set()
+
+    // Refresh characters list in background
+    charactersStore.fetchCharacters()
+  } catch (e: any) {
+    showToast(`Create & reassign failed: ${e.message}`, 'reject')
+  } finally {
+    reassigning.value = false
+    batchProgress.value = null
   }
 }
 

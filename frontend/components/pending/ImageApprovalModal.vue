@@ -1,6 +1,6 @@
 <template>
   <!-- Inline prompt editor overlay -->
-  <div v-if="image" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 998; display: flex; align-items: center; justify-content: center;" @click.self="$emit('close')">
+  <div v-if="image" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 998; display: flex; align-items: center; justify-content: center;" @click.self="$emit('close')" @keydown.escape.window="$emit('close')">
     <div class="card" style="min-width: 700px; max-width: 850px;">
       <h4 style="font-size: 14px; font-weight: 500; margin-bottom: 8px;">
         {{ action === 'approve' ? 'Approve' : 'Reject' }} — {{ image.character_name }}

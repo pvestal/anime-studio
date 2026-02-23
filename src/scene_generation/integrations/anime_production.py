@@ -10,6 +10,17 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import json
 
+from .production_export import (
+    validate_resolution,
+    build_generation_prompt,
+    build_generation_parameters,
+    optimize_visual_description,
+    optimize_technical_specs,
+    build_export_result,
+    validate_scene_for_generation,
+    DEFAULT_MODEL,
+)
+
 logger = logging.getLogger(__name__)
 
 class AnimeProductionIntegration:
@@ -74,7 +85,7 @@ class AnimeProductionIntegration:
             ) as response:
                 if response.status == 200:
                     result = await response.json()
-                    return await self._process_export_result(result, scene_ids, project_id)
+                    return build_export_result(result, scene_ids, project_id)
                 else:
                     error_text = await response.text()
                     logger.error(f"Scene export failed: {response.status} - {error_text}")
@@ -126,28 +137,6 @@ class AnimeProductionIntegration:
             logger.error(f"Project creation failed: {e}")
             return 1  # Default project ID
 
-    async def _process_export_result(
-        self,
-        result: Dict[str, Any],
-        scene_ids: List[int],
-        project_id: int
-    ) -> Dict[str, Any]:
-        """Process the export result from anime production system"""
-
-        return {
-            "success": True,
-            "project_id": project_id,
-            "scenes_exported": len(scene_ids),
-            "export_status": result.get("status", "queued"),
-            "generation_queue_id": result.get("queue_id"),
-            "estimated_completion": result.get("estimated_completion"),
-            "summary": {
-                "total_scenes": len(scene_ids),
-                "project_type": "scene_description_export",
-                "export_timestamp": datetime.utcnow().isoformat()
-            }
-        }
-
     async def convert_scene_to_generation_prompt(
         self,
         scene_description: Dict[str, Any]
@@ -161,12 +150,12 @@ class AnimeProductionIntegration:
         technical_specs = scene_description.get("technical_specifications", {})
 
         # Create comprehensive generation prompt
-        generation_prompt = await self._build_generation_prompt(
+        generation_prompt = build_generation_prompt(
             visual_description, cinematography_notes, atmosphere_description, technical_specs
         )
 
         # Add technical parameters
-        generation_parameters = await self._build_generation_parameters(technical_specs)
+        generation_parameters = build_generation_parameters(technical_specs)
 
         return {
             "prompt": generation_prompt,
@@ -175,66 +164,6 @@ class AnimeProductionIntegration:
                 "source": "scene_description_generator",
                 "conversion_timestamp": datetime.utcnow().isoformat()
             }
-        }
-
-    async def _build_generation_prompt(
-        self,
-        visual_description: str,
-        cinematography_notes: str,
-        atmosphere_description: str,
-        technical_specs: Dict[str, Any]
-    ) -> str:
-        """Build comprehensive generation prompt"""
-
-        prompt_parts = []
-
-        # Start with visual description
-        if visual_description:
-            prompt_parts.append(f"Visual composition: {visual_description}")
-
-        # Add cinematography elements
-        if cinematography_notes:
-            prompt_parts.append(f"Camera work: {cinematography_notes}")
-
-        # Add atmospheric elements
-        if atmosphere_description:
-            prompt_parts.append(f"Atmosphere: {atmosphere_description}")
-
-        # Add technical specifications
-        if technical_specs:
-            camera_angle = technical_specs.get("camera_angle", "medium_shot")
-            camera_movement = technical_specs.get("camera_movement", "static")
-            lighting_type = technical_specs.get("lighting_type", "natural")
-
-            prompt_parts.append(f"Camera angle: {camera_angle}")
-            prompt_parts.append(f"Camera movement: {camera_movement}")
-            prompt_parts.append(f"Lighting: {lighting_type}")
-
-        # Combine into single prompt
-        full_prompt = ". ".join(prompt_parts)
-
-        # Add anime-specific enhancement
-        anime_enhanced_prompt = f"Professional anime scene: {full_prompt}. High quality, detailed animation, studio production quality."
-
-        return anime_enhanced_prompt
-
-    async def _build_generation_parameters(
-        self,
-        technical_specs: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Build generation parameters from technical specifications"""
-
-        return {
-            "resolution": technical_specs.get("resolution", "1920x1080"),
-            "aspect_ratio": technical_specs.get("aspect_ratio", "16:9"),
-            "frame_rate": technical_specs.get("frame_rate", 24),
-            "duration_seconds": technical_specs.get("duration_seconds", 5.0),
-            "quality": "high",
-            "style": "anime",
-            "model": "animatediff_evolved",
-            "guidance_scale": 7.5,
-            "num_inference_steps": 20,
-            "seed": -1  # Random seed
         }
 
     async def trigger_scene_generation(
@@ -381,58 +310,7 @@ class AnimeProductionIntegration:
         scene_description: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Validate scene description for anime generation compatibility"""
-
-        validation_results = {
-            "valid": True,
-            "issues": [],
-            "warnings": [],
-            "requirements_met": {}
-        }
-
-        # Check required fields
-        required_fields = ["visual_description", "technical_specifications"]
-        for field in required_fields:
-            if field not in scene_description or not scene_description[field]:
-                validation_results["valid"] = False
-                validation_results["issues"].append(f"Missing required field: {field}")
-                validation_results["requirements_met"][field] = False
-            else:
-                validation_results["requirements_met"][field] = True
-
-        # Check technical specifications
-        tech_specs = scene_description.get("technical_specifications", {})
-        if isinstance(tech_specs, dict):
-            # Check resolution
-            resolution = tech_specs.get("resolution", "1920x1080")
-            if not self._validate_resolution(resolution):
-                validation_results["warnings"].append(f"Non-standard resolution: {resolution}")
-
-            # Check frame rate
-            frame_rate = tech_specs.get("frame_rate", 24)
-            if frame_rate not in [24, 30, 60]:
-                validation_results["warnings"].append(f"Non-standard frame rate: {frame_rate}")
-
-            # Check duration
-            duration = tech_specs.get("duration_seconds")
-            if duration and (duration < 1 or duration > 30):
-                validation_results["warnings"].append(f"Duration outside recommended range: {duration}s")
-
-        # Check visual description quality
-        visual_desc = scene_description.get("visual_description", "")
-        if len(visual_desc) < 20:
-            validation_results["warnings"].append("Visual description is very brief")
-
-        return validation_results
-
-    def _validate_resolution(self, resolution: str) -> bool:
-        """Validate resolution format"""
-        try:
-            width, height = resolution.split('x')
-            width_int = int(width)
-            height_int = int(height)
-            return width_int > 0 and height_int > 0
-        except:
-            return False
+        return validate_scene_for_generation(scene_description)
 
     async def get_project_status(self, project_id: int) -> Dict[str, Any]:
         """Get status of anime project"""
@@ -467,13 +345,13 @@ class AnimeProductionIntegration:
             ) as response:
                 if response.status == 200:
                     result = await response.json()
-                    return result.get("models", ["animatediff_evolved"])
+                    return result.get("models", [DEFAULT_MODEL])
                 else:
-                    return ["animatediff_evolved"]  # Default model
+                    return [DEFAULT_MODEL]
 
         except Exception as e:
             logger.error(f"Model listing failed: {e}")
-            return ["animatediff_evolved"]  # Default model
+            return [DEFAULT_MODEL]
 
     async def optimize_scene_for_generation(
         self,
@@ -486,12 +364,12 @@ class AnimeProductionIntegration:
         # Optimize visual description
         visual_desc = scene_description.get("visual_description", "")
         if visual_desc:
-            optimized["visual_description"] = await self._optimize_visual_description(visual_desc)
+            optimized["visual_description"] = optimize_visual_description(visual_desc)
 
         # Optimize technical specifications
         tech_specs = scene_description.get("technical_specifications", {})
         if tech_specs:
-            optimized["technical_specifications"] = await self._optimize_technical_specs(tech_specs)
+            optimized["technical_specifications"] = optimize_technical_specs(tech_specs)
 
         # Add generation-specific enhancements
         optimized["generation_optimizations"] = {
@@ -501,43 +379,3 @@ class AnimeProductionIntegration:
         }
 
         return optimized
-
-    async def _optimize_visual_description(self, visual_desc: str) -> str:
-        """Optimize visual description for anime generation"""
-
-        # Add anime-specific keywords and enhancement
-        anime_keywords = [
-            "high quality", "detailed", "professional anime", "studio quality",
-            "crisp", "vibrant", "well-lit", "sharp focus"
-        ]
-
-        # Check if description already contains optimization keywords
-        desc_lower = visual_desc.lower()
-        missing_keywords = [kw for kw in anime_keywords if kw not in desc_lower]
-
-        if missing_keywords:
-            optimization = ", ".join(missing_keywords[:3])  # Add top 3 missing keywords
-            return f"{visual_desc}. {optimization}."
-        else:
-            return visual_desc
-
-    async def _optimize_technical_specs(self, tech_specs: Dict[str, Any]) -> Dict[str, Any]:
-        """Optimize technical specifications for generation"""
-
-        optimized_specs = tech_specs.copy()
-
-        # Set optimal defaults
-        if "resolution" not in optimized_specs:
-            optimized_specs["resolution"] = "1920x1080"
-
-        if "frame_rate" not in optimized_specs:
-            optimized_specs["frame_rate"] = 24
-
-        if "duration_seconds" not in optimized_specs:
-            optimized_specs["duration_seconds"] = 5.0
-
-        # Ensure compatibility
-        if optimized_specs.get("duration_seconds", 0) > 10:
-            optimized_specs["duration_seconds"] = 10.0  # Cap at 10 seconds
-
-        return optimized_specs

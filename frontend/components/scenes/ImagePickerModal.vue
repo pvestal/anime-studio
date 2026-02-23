@@ -3,6 +3,7 @@
     v-if="visible"
     style="position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center;"
     @click.self="$emit('close')"
+    @keydown.escape.window="$emit('close')"
   >
     <div class="card" style="width: 740px; max-height: 80vh; overflow-y: auto;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">

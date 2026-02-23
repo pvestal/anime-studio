@@ -133,16 +133,18 @@ def main():
     logger.info("Running verification pass...")
     classifications = verify_assignments(classifications)
 
-    # Stats
+    # Stats — use matched_slugs for multi-character frames
     per_char: dict[str, int] = {}
     for c in classifications:
-        slug = c["matched_slug"]
-        if slug:
+        for slug in c.get("matched_slugs", []):
             per_char[slug] = per_char.get(slug, 0) + 1
+        if not c.get("matched_slugs") and c.get("matched_slug"):
+            per_char[c["matched_slug"]] = per_char.get(c["matched_slug"], 0) + 1
 
-    logger.info(f"Classification results: {json.dumps(per_char, indent=2)}")
+    logger.info(f"Classification results (multi-char): {json.dumps(per_char, indent=2)}")
 
-    target_hits = [c for c in classifications if c["matched_slug"] == target]
+    # Target hits = frames where target is in matched_slugs (not just top match)
+    target_hits = [c for c in classifications if target in c.get("matched_slugs", [])]
     logger.info(f"{target} frames: {len(target_hits)} / {len(remaining)}")
 
     # Save target frames
@@ -154,19 +156,24 @@ def main():
 
     for c in classifications:
         frame_path = Path(c["frame_path"])
+        matched_slugs = c.get("matched_slugs", [])
+        target_score = c.get("all_scores", {}).get(target, 0)
         hit = {
             "file": frame_path.name,
             "matched_slug": c["matched_slug"],
+            "matched_slugs": matched_slugs,
+            "target_score": target_score,
             "similarity": c.get("similarity", 0),
             "verified": c.get("verified", False),
         }
-        # Legacy compat field
-        hit[target] = c["matched_slug"] == target
+        hit[target] = target in matched_slugs
 
-        if c["matched_slug"] == target:
+        if target in matched_slugs:
+            best_char = c["matched_slug"]
+            shared = f" (shared w/ {best_char})" if best_char != target else ""
             if args.dry_run:
                 saved += 1
-                logger.info(f"  {target.upper()}: {frame_path.name} (sim={c['similarity']:.3f})")
+                logger.info(f"  {target.upper()}: {frame_path.name} (sim={target_score:.3f}){shared}")
             else:
                 if is_duplicate(frame_path, target):
                     duplicates += 1
@@ -196,8 +203,9 @@ def main():
                     "project_name": PROJECT_NAME,
                     "character_name": target.replace("_", " ").title(),
                     "generated_at": datetime.now().isoformat(),
-                    "clip_similarity": c.get("similarity", 0),
+                    "clip_similarity": target_score,
                     "clip_verified": c.get("verified", False),
+                    "all_characters_in_frame": matched_slugs,
                     "original_file": frame_path.name,
                 }
                 dest.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
@@ -207,7 +215,7 @@ def main():
                 register_pending_image(target, dest_name)
                 register_hash(dest, target)
                 saved += 1
-                logger.info(f"  {target.upper()}: {frame_path.name} -> {dest_name} (sim={c['similarity']:.3f})")
+                logger.info(f"  {target.upper()}: {frame_path.name} -> {dest_name} (sim={target_score:.3f}){shared}")
 
         hits.append(hit)
 

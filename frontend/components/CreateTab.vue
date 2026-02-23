@@ -306,7 +306,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useCharactersStore } from '@/stores/characters'
 import { api } from '@/api/client'
 import type { GenerateResponse } from '@/types'
@@ -368,6 +368,17 @@ onUnmounted(() => {
     clearInterval(pollTimer)
     pollTimer = null
   }
+})
+
+// Reset form fields when character changes
+watch(selectedSlug, () => {
+  promptOverride.value = ''
+  negativePrompt.value = ''
+  seed.value = undefined
+  generationType.value = 'image'
+  fpSeconds.value = 3
+  fpSteps.value = 25
+  fpUseF1.value = false
 })
 
 const selectedChar = computed(() =>

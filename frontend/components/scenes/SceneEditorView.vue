@@ -6,7 +6,7 @@
 
       <div class="field-group">
         <label class="field-label">Title</label>
-        <input v-model="localScene.title" type="text" class="field-input" />
+        <input v-model="localScene.title" type="text" placeholder="Scene title" class="field-input" />
       </div>
       <div class="field-group">
         <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
@@ -22,7 +22,21 @@
         <textarea v-model="localScene.description" rows="3" class="field-input field-textarea"></textarea>
       </div>
       <div class="field-group">
-        <label class="field-label">Location</label>
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+          <label class="field-label" style="margin-bottom: 0;">Location</label>
+          <EchoAssistButton
+            context-type="scene_location"
+            :context-payload="{
+              project_name: projectStore.currentProject?.name,
+              project_genre: projectStore.currentProject?.genre ?? undefined,
+              storyline_summary: storyline?.summary ?? undefined,
+              scene_description: localScene.description ?? undefined,
+            }"
+            :current-value="localScene.location || ''"
+            compact
+            @accept="localScene.location = $event.suggestion"
+          />
+        </div>
         <input v-model="localScene.location" type="text" placeholder="dark alley, rooftop..." class="field-input" />
       </div>
       <div class="field-row">
@@ -42,7 +56,21 @@
         </div>
       </div>
       <div class="field-group">
-        <label class="field-label">Mood</label>
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+          <label class="field-label" style="margin-bottom: 0;">Mood</label>
+          <EchoAssistButton
+            context-type="scene_mood"
+            :context-payload="{
+              project_name: projectStore.currentProject?.name,
+              project_genre: projectStore.currentProject?.genre ?? undefined,
+              storyline_theme: storyline?.tone ?? undefined,
+              scene_description: localScene.description ?? undefined,
+            }"
+            :current-value="localScene.mood || ''"
+            compact
+            @accept="localScene.mood = $event.suggestion"
+          />
+        </div>
         <input v-model="localScene.mood" type="text" placeholder="tense, peaceful..." class="field-input" />
       </div>
       <div class="field-group">

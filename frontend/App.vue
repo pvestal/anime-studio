@@ -4,7 +4,7 @@
       <div style="max-width: 1400px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center;">
         <div>
           <h1 style="font-size: 20px; font-weight: 500; color: var(--text-primary);">Anime Studio</h1>
-          <p style="font-size: 13px; color: var(--text-muted);">Anime production: project, create, review, train, voice, scenes</p>
+          <p style="font-size: 13px; color: var(--text-muted);">Anime production: project, characters, review, production, voice, analytics</p>
         </div>
         <EchoFloatingPanel />
       </div>
@@ -49,12 +49,10 @@ onMounted(() => {
 const navLinks = computed(() => [
   { to: '/project', label: '1. Project' },
   { to: '/characters', label: '2. Characters' },
-  { to: '/generate', label: '3. Generate' },
-  { to: '/review', label: '4. Review', count: approvalStore.pendingImages.length },
-  { to: '/train', label: '5. Train' },
-  { to: '/voice', label: '6. Voice' },
-  { to: '/scenes', label: '7. Scenes' },
-  { to: '/analytics', label: '8. Analytics' },
+  { to: '/review', label: '3. Review', count: approvalStore.pendingImages.length },
+  { to: '/production', label: '4. Production' },
+  { to: '/voice', label: '5. Voice' },
+  { to: '/analytics', label: '6. Analytics' },
 ])
 </script>
 

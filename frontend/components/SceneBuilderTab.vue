@@ -114,7 +114,7 @@
     />
 
     <!-- Video Player Modal -->
-    <div v-if="showVideoPlayer" style="position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center;" @click.self="showVideoPlayer = false">
+    <div v-if="showVideoPlayer" style="position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center;" @click.self="showVideoPlayer = false" @keydown.escape.window="showVideoPlayer = false">
       <div style="max-width: 90vw; max-height: 90vh;">
         <video :src="videoPlayerSrc" controls autoplay style="max-width: 100%; max-height: 85vh; border-radius: 4px;"></video>
         <div style="text-align: center; margin-top: 8px;">
@@ -124,7 +124,7 @@
     </div>
 
     <!-- Generate Confirmation -->
-    <div v-if="showGenerateConfirm" style="position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center;" @click.self="showGenerateConfirm = false">
+    <div v-if="showGenerateConfirm" style="position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center;" @click.self="showGenerateConfirm = false" @keydown.escape.window="showGenerateConfirm = false">
       <div class="card" style="width: 400px;">
         <div style="font-size: 14px; font-weight: 500; margin-bottom: 12px;">Start Scene Generation?</div>
         <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
@@ -157,6 +157,7 @@ import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import { trainingApi } from '@/api/training'
+import { useProjectStore } from '@/stores/project'
 import type { BuilderScene, BuilderShot, SceneGenerationStatus, SceneAudio, ShotRecommendation, ShotRecommendations, ImageWithMetadata, GapAnalysisResponse, GapAnalysisScene, GapAnalysisCharacter } from '@/types'
 import SceneLibraryView from './scenes/SceneLibraryView.vue'
 import SceneEditorView from './scenes/SceneEditorView.vue'
@@ -165,6 +166,7 @@ import ImagePickerModal from './scenes/ImagePickerModal.vue'
 import EpisodeView from './scenes/EpisodeView.vue'
 
 const router = useRouter()
+const projectStore = useProjectStore()
 
 const projects = ref<Array<{ id: number; name: string }>>([])
 const selectedProjectId = ref(0)
@@ -322,6 +324,7 @@ watch(selectedProjectId, async (pid) => {
   }
   await loadScenes()
   loadGapAnalysis()
+  projectStore.fetchProjectDetail(pid)
 })
 
 async function loadScenes() {
@@ -345,10 +348,11 @@ function backToLibrary() {
 }
 
 function openNewScene() {
+  const ws = projectStore.worldSettings
   editScene.value = {
-    title: '',
+    title: `Scene ${scenes.value.length + 1}`,
     description: '',
-    location: '',
+    location: ws?.world_location?.primary || '',
     time_of_day: '',
     weather: '',
     mood: '',

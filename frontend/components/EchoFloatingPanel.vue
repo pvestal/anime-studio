@@ -13,7 +13,7 @@
   <!-- Slide-over panel -->
   <Teleport to="body">
     <Transition name="echo-panel">
-      <div v-if="open" class="echo-overlay" @click.self="open = false">
+      <div v-if="open" class="echo-overlay" @click.self="open = false" @keydown.escape.window="open = false">
         <div class="echo-panel">
           <!-- Header -->
           <div class="echo-header">

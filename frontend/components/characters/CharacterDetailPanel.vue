@@ -1,5 +1,5 @@
 <template>
-  <div class="panel-overlay" @click.self="$emit('close')">
+  <div class="panel-overlay" @click.self="$emit('close')" @keydown.escape.window="$emit('close')">
     <div class="panel-slide">
       <!-- Header -->
       <div class="panel-header">

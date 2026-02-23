@@ -18,6 +18,11 @@ import type {
   MusicGenerateResponse,
   MusicTaskStatus,
   MusicTrack,
+  PendingVideo,
+  VideoReviewRequest,
+  BatchVideoReviewRequest,
+  EngineStats,
+  EngineBlacklistEntry,
 } from '@/types'
 import { createRequest } from './base'
 
@@ -205,5 +210,40 @@ export const scenesApi = {
 
   generatedMusicUrl(filename: string): string {
     return `/api/audio/music/${encodeURIComponent(filename)}`
+  },
+
+  // --- Video Review ---
+
+  async getPendingVideos(filters?: {
+    project_id?: number; video_engine?: string; character_slug?: string
+  }): Promise<{ pending_videos: PendingVideo[]; total: number }> {
+    const params = new URLSearchParams()
+    if (filters?.project_id) params.set('project_id', String(filters.project_id))
+    if (filters?.video_engine) params.set('video_engine', filters.video_engine)
+    if (filters?.character_slug) params.set('character_slug', filters.character_slug)
+    const qs = params.toString()
+    return request(`/pending-videos${qs ? '?' + qs : ''}`)
+  },
+
+  async reviewVideo(data: VideoReviewRequest): Promise<{
+    message: string; shot_id: string; review_status: string; engine_blacklisted: boolean
+  }> {
+    return request('/review-video', { method: 'POST', body: JSON.stringify(data) })
+  },
+
+  async batchReviewVideo(data: BatchVideoReviewRequest): Promise<{
+    message: string; updated: number; total: number; review_status: string
+  }> {
+    return request('/batch-review-video', { method: 'POST', body: JSON.stringify(data) })
+  },
+
+  async getEngineStats(filters?: {
+    project_id?: number; character_slug?: string
+  }): Promise<{ engine_stats: EngineStats[]; blacklist: EngineBlacklistEntry[] }> {
+    const params = new URLSearchParams()
+    if (filters?.project_id) params.set('project_id', String(filters.project_id))
+    if (filters?.character_slug) params.set('character_slug', filters.character_slug)
+    const qs = params.toString()
+    return request(`/engine-stats${qs ? '?' + qs : ''}`)
   },
 }

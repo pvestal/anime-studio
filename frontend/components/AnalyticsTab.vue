@@ -180,26 +180,58 @@
           <button class="btn btn-sm" @click="initOrchestrator" :disabled="!selectedProjectId">Initialize Project</button>
         </div>
 
-        <!-- Pipeline entries -->
-        <div v-if="pipelineEntries.length > 0" style="display: flex; flex-direction: column; gap: 4px;">
-          <div class="pipeline-row pipeline-header">
-            <span>Entity</span>
-            <span>Phase</span>
-            <span>Status</span>
-            <span>Updated</span>
-            <span></span>
+        <!-- Pipeline cards -->
+        <div v-if="pipelineEntries.length > 0">
+          <!-- Project phases card -->
+          <div v-if="projectPhases.length > 0" class="orch-card" :class="{ 'orch-card-dim': projectPhases.every(p => p.status === 'completed') }">
+            <div class="orch-card-header">
+              <span class="orch-card-title">Project Pipeline</span>
+              <span class="pipeline-status-badge" :class="'pstatus-' + currentPhase(projectPhases).status">
+                {{ currentPhase(projectPhases).status }}
+              </span>
+            </div>
+            <div class="phase-pills">
+              <span v-for="p in projectPhases" :key="p.phase" class="phase-pill" :class="'pstatus-' + p.status"
+                    :title="p.phase.replace(/_/g, ' ') + ': ' + p.status">
+                {{ p.phase.replace(/_/g, ' ') }}
+              </span>
+            </div>
+            <div class="orch-card-footer">
+              <span class="orch-card-actions">
+                <template v-for="p in projectPhases" :key="'a-' + p.phase">
+                  <button v-if="p.status === 'failed'" class="btn btn-sm orch-action-btn" @click="overrideEntry(p, 'reset')">Reset {{ p.phase.replace(/_/g, ' ') }}</button>
+                  <button v-if="p.status === 'active' || p.status === 'pending'" class="btn btn-sm orch-action-btn" @click="overrideEntry(p, 'skip')">Skip {{ p.phase.replace(/_/g, ' ') }}</button>
+                </template>
+              </span>
+              <span class="orch-card-time">{{ formatRelativeTime(latestTime(projectPhases)) }}</span>
+            </div>
           </div>
-          <div v-for="entry in pipelineEntries" :key="entry.id" class="pipeline-row" :class="'pipeline-' + entry.status">
-            <span class="pipeline-entity">{{ entry.entity_type === 'character' ? entry.entity_id : 'Project' }}</span>
-            <span>{{ entry.phase.replace(/_/g, ' ') }}</span>
-            <span class="pipeline-status-badge" :class="'pstatus-' + entry.status">{{ entry.status }}</span>
-            <span style="color: var(--text-muted); font-size: 11px;">{{ formatRelativeTime(entry.updated_at) }}</span>
-            <span style="display: flex; gap: 4px;">
-              <button v-if="entry.status === 'active' || entry.status === 'pending'" class="btn btn-sm" style="font-size: 10px; padding: 1px 6px;"
-                @click="overrideEntry(entry, 'skip')">Skip</button>
-              <button v-if="entry.status === 'failed'" class="btn btn-sm" style="font-size: 10px; padding: 1px 6px;"
-                @click="overrideEntry(entry, 'reset')">Reset</button>
-            </span>
+
+          <!-- Character cards grid -->
+          <div v-if="characterCards.length > 0" class="orch-grid">
+            <div v-for="card in characterCards" :key="card.slug" class="orch-card" :class="{ 'orch-card-dim': card.phases.every(p => p.status === 'completed') }">
+              <div class="orch-card-header">
+                <span class="orch-card-title">{{ card.slug }}</span>
+                <span class="pipeline-status-badge" :class="'pstatus-' + currentPhase(card.phases).status">
+                  {{ currentPhase(card.phases).status }}
+                </span>
+              </div>
+              <div class="phase-pills">
+                <span v-for="p in card.phases" :key="p.phase" class="phase-pill" :class="'pstatus-' + p.status"
+                      :title="p.phase.replace(/_/g, ' ') + ': ' + p.status">
+                  {{ p.phase.replace(/_/g, ' ') }}
+                </span>
+              </div>
+              <div class="orch-card-footer">
+                <span class="orch-card-actions">
+                  <template v-for="p in card.phases" :key="'a-' + p.phase">
+                    <button v-if="p.status === 'failed'" class="btn btn-sm orch-action-btn" @click="overrideEntry(p, 'reset')">Reset</button>
+                    <button v-if="p.status === 'active'" class="btn btn-sm orch-action-btn" @click="overrideEntry(p, 'skip')">Skip</button>
+                  </template>
+                </span>
+                <span class="orch-card-time">{{ formatRelativeTime(latestTime(card.phases)) }}</span>
+              </div>
+            </div>
           </div>
         </div>
         <div v-else style="color: var(--text-muted); font-size: 12px; margin-top: 8px;">
@@ -320,6 +352,58 @@ const selectedProjectId = computed(() => {
   return p?.id ?? null
 })
 
+// Orchestrator card groupings
+const projectPhases = computed(() => {
+  return pipelineEntries.value
+    .filter(e => e.entity_type === 'project')
+    .sort((a, b) => {
+      const order = ['scene_planning', 'shot_prep', 'video_gen', 'scene_assembly', 'episode', 'publishing']
+      return (order.indexOf(a.phase) ?? 99) - (order.indexOf(b.phase) ?? 99)
+    })
+})
+
+const characterCards = computed(() => {
+  const grouped: Record<string, PipelineEntry[]> = {}
+  for (const e of pipelineEntries.value) {
+    if (e.entity_type !== 'character') continue
+    if (!grouped[e.entity_id]) grouped[e.entity_id] = []
+    grouped[e.entity_id].push(e)
+  }
+  const cards = Object.entries(grouped).map(([slug, phases]) => ({
+    slug,
+    phases: phases.sort((a, b) => {
+      const order = ['training_data', 'lora_training', 'ready']
+      return (order.indexOf(a.phase) ?? 99) - (order.indexOf(b.phase) ?? 99)
+    }),
+  }))
+  // Active/failed first, completed last
+  cards.sort((a, b) => {
+    const hasActive = (ps: PipelineEntry[]) => ps.some(p => p.status === 'active' || p.status === 'failed')
+    const allDone = (ps: PipelineEntry[]) => ps.every(p => p.status === 'completed')
+    if (hasActive(a.phases) && !hasActive(b.phases)) return -1
+    if (!hasActive(a.phases) && hasActive(b.phases)) return 1
+    if (allDone(a.phases) && !allDone(b.phases)) return 1
+    if (!allDone(a.phases) && allDone(b.phases)) return -1
+    return a.slug.localeCompare(b.slug)
+  })
+  return cards
+})
+
+function currentPhase(phases: PipelineEntry[]): PipelineEntry {
+  return phases.find(p => p.status === 'active')
+    || phases.find(p => p.status === 'failed')
+    || phases.find(p => p.status === 'pending')
+    || phases[phases.length - 1]
+}
+
+function latestTime(phases: PipelineEntry[]): string {
+  let latest = ''
+  for (const p of phases) {
+    if (p.updated_at && p.updated_at > latest) latest = p.updated_at
+  }
+  return latest
+}
+
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
   const mins = Math.floor(diff / 60000)
@@ -339,7 +423,27 @@ async function loadOrchestrator() {
   if (selectedProjectId.value) {
     try {
       const data = await learningApi.getOrchestratorPipeline(selectedProjectId.value)
-      pipelineEntries.value = data.entries
+      // API returns { characters: {slug: phases[]}, project_phases: {phase: entry} }
+      // Flatten into PipelineEntry[] for the template
+      const entries: PipelineEntry[] = []
+      if (data.characters) {
+        for (const [slug, phases] of Object.entries(data.characters as Record<string, PipelineEntry[]>)) {
+          for (const p of phases) {
+            entries.push({ ...p, entity_id: slug, entity_type: 'character' })
+          }
+        }
+      }
+      if (data.project_phases) {
+        for (const [phase, entry] of Object.entries(data.project_phases as Record<string, PipelineEntry>)) {
+          entries.push({ ...entry, phase, entity_type: 'project' })
+        }
+      }
+      // Sort: active/pending first, then by entity
+      entries.sort((a, b) => {
+        const order: Record<string, number> = { active: 0, pending: 1, blocked: 2, failed: 3, completed: 4, skipped: 5 }
+        return (order[a.status] ?? 9) - (order[b.status] ?? 9)
+      })
+      pipelineEntries.value = entries
     } catch (e) {
       pipelineEntries.value = []
     }
@@ -816,29 +920,77 @@ onMounted(async () => {
   fill: var(--accent-primary);
 }
 
-/* Orchestrator Pipeline */
-.pipeline-row {
+/* Orchestrator Cards */
+.orch-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 80px 80px 60px;
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
+  margin-top: 8px;
+}
+.orch-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 0;
+  transition: opacity 150ms ease;
+}
+.orch-card:first-child { margin-bottom: 8px; }
+.orch-card-dim { opacity: 0.6; }
+.orch-card:hover .orch-action-btn { opacity: 1; }
+.orch-card-header {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  padding: 6px 8px;
-  font-size: 12px;
-  border-bottom: 1px solid var(--border-primary);
+  margin-bottom: 6px;
 }
-.pipeline-header {
-  font-weight: 500;
-  color: var(--text-muted);
+.orch-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.orch-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  min-height: 20px;
+}
+.orch-card-time {
   font-size: 11px;
-  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-left: auto;
 }
-.pipeline-entity {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.orch-card-actions {
+  display: flex;
+  gap: 4px;
+}
+.orch-action-btn {
+  font-size: 10px !important;
+  padding: 1px 6px !important;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.orch-card:hover .orch-action-btn,
+.orch-action-btn:focus { opacity: 1; }
+.phase-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.phase-pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
   white-space: nowrap;
 }
-.pipeline-active { background: rgba(122, 162, 247, 0.05); }
-.pipeline-completed { opacity: 0.6; }
+.phase-pill.pstatus-active {
+  animation: pill-pulse 2s ease-in-out infinite;
+}
+@keyframes pill-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
 .pipeline-status-badge {
   font-size: 11px;
   padding: 1px 6px;
@@ -850,6 +1002,7 @@ onMounted(async () => {
 .pstatus-completed { background: rgba(80, 160, 80, 0.2); color: var(--status-success, #4caf50); }
 .pstatus-skipped { background: var(--bg-tertiary); color: var(--text-muted); }
 .pstatus-failed { background: rgba(160, 80, 80, 0.2); color: var(--status-error, #f44336); }
+.pstatus-blocked { background: rgba(255, 152, 0, 0.2); color: var(--status-warning, #ff9800); }
 .chip-enabled { background: rgba(80, 160, 80, 0.2); color: var(--status-success, #4caf50); border-color: var(--status-success, #4caf50); }
 .chip-disabled { background: var(--bg-tertiary); color: var(--text-muted); }
 .btn-success-sm { border-color: var(--status-success, #4caf50); color: var(--status-success, #4caf50); }
@@ -858,5 +1011,6 @@ onMounted(async () => {
 @media (max-width: 900px) {
   .stats-grid { grid-template-columns: repeat(3, 1fr); }
   .quality-row { grid-template-columns: 1fr 50px 1fr 50px; }
+  .orch-grid { grid-template-columns: 1fr; }
 }
 </style>

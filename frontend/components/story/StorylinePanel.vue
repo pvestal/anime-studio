@@ -117,6 +117,7 @@ interface EchoPayload {
   project_name?: string
   project_genre?: string
   project_description?: string
+  project_premise?: string
   checkpoint_model?: string
   storyline_title?: string
   storyline_summary?: string

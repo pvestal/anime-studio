@@ -6,7 +6,7 @@
       @click="expanded = !expanded"
     >
       <div style="display: flex; align-items: center; gap: 12px;">
-        <span style="font-size: 11px; color: var(--text-muted); transition: transform 150ms;" :style="{ transform: expanded ? 'rotate(90deg)' : '' }">&#9654;</span>
+        <span class="collapse-arrow" :class="{ open: expanded }">&#9654;</span>
         <h3 style="font-size: 15px; font-weight: 500; margin: 0;">Project Configuration</h3>
         <!-- Collapsed summary -->
         <span v-if="!expanded && projectStore.currentProject" style="font-size: 12px; color: var(--text-secondary);">
@@ -169,6 +169,7 @@ const echoContext = computed(() => ({
   project_name: editProject.name || projectStore.currentProject?.name || undefined,
   project_genre: editProject.genre || projectStore.currentProject?.genre || undefined,
   project_description: editProject.description || projectStore.currentProject?.description || undefined,
+  project_premise: projectStore.currentProject?.premise || undefined,
   checkpoint_model: projectStore.currentProject?.style?.checkpoint_model || undefined,
   storyline_title: projectStore.currentProject?.storyline?.title || undefined,
   storyline_summary: projectStore.currentProject?.storyline?.summary || undefined,
@@ -274,5 +275,14 @@ onMounted(async () => {
   background: var(--status-success) !important;
   color: var(--bg-primary) !important;
   border-color: var(--status-success) !important;
+}
+.collapse-arrow {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: inline-block;
+  transition: transform 150ms ease;
+}
+.collapse-arrow.open {
+  transform: rotate(90deg);
 }
 </style>

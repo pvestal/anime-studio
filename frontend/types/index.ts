@@ -388,10 +388,11 @@ export interface StyleCheckpointStats {
 // --- Echo Brain Narrator Assist ---
 
 export interface NarrateRequest {
-  context_type: 'storyline' | 'description' | 'positive_template' | 'negative_template' | 'design_prompt' | 'prompt_override' | 'concept'
+  context_type: 'storyline' | 'description' | 'positive_template' | 'negative_template' | 'design_prompt' | 'prompt_override' | 'concept' | 'scene_location' | 'scene_mood' | 'motion_prompt' | 'production_notes'
   project_name?: string
   project_genre?: string
   project_description?: string
+  project_premise?: string
   storyline_title?: string
   storyline_summary?: string
   storyline_theme?: string
@@ -403,6 +404,8 @@ export interface NarrateRequest {
   design_prompt?: string
   current_value?: string
   concept_description?: string
+  scene_description?: string
+  shot_type?: string
 }
 
 export interface NarrateResponse {
@@ -1029,14 +1032,17 @@ export interface PipelineEntry {
   entity_id: string
   project_id: number
   phase: string
-  status: 'pending' | 'active' | 'completed' | 'skipped' | 'failed'
+  status: 'pending' | 'active' | 'completed' | 'skipped' | 'failed' | 'blocked'
   gate_check_result: Record<string, unknown> | null
+  blocked_reason?: string | null
   updated_at: string
 }
 
 export interface PipelineStatus {
   project_id: number
-  entries: PipelineEntry[]
+  characters: Record<string, PipelineEntry[]>
+  project_phases: Record<string, PipelineEntry>
+  progress: { total_phases: number; completed: number; active: number; failed: number; percent: number }
 }
 
 // --- Music Generation (ACE-Step) ---
@@ -1074,6 +1080,65 @@ export interface MusicTrack {
   mood?: string
   genre?: string
   duration?: number
+}
+
+// --- Video Review ---
+
+export interface PendingVideo {
+  id: string
+  scene_id: string
+  shot_number: number
+  shot_type: string
+  camera_angle: string
+  duration_seconds: number
+  characters_present: string[]
+  motion_prompt: string | null
+  source_image_path: string | null
+  output_video_path: string | null
+  quality_score: number | null
+  video_engine: 'framepack' | 'framepack_f1' | 'ltx' | 'wan'
+  seed: number | null
+  steps: number | null
+  generation_time_seconds: number | null
+  review_status: 'pending_review' | 'approved' | 'rejected' | 'unreviewed'
+  qc_issues: string[]
+  qc_category_averages: Record<string, number>
+  qc_per_frame: Array<Record<string, unknown>>
+  scene_title: string
+  project_id: number
+  project_name: string
+}
+
+export interface VideoReviewRequest {
+  shot_id: string
+  approved: boolean
+  feedback?: string
+  reject_engine?: boolean
+}
+
+export interface BatchVideoReviewRequest {
+  shot_ids: string[]
+  approved: boolean
+  feedback?: string
+}
+
+export interface EngineStats {
+  video_engine: string
+  total: number
+  avg_quality: number | null
+  min_quality: number | null
+  max_quality: number | null
+  approved: number
+  rejected: number
+  pending: number
+  avg_gen_time: number | null
+}
+
+export interface EngineBlacklistEntry {
+  character_slug: string
+  video_engine: string
+  reason: string | null
+  created_at: string | null
 }
 
 // --- Wan T2V ---

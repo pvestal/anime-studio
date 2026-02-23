@@ -62,6 +62,16 @@ export const trainingApi = {
     })
   },
 
+  async bulkReassignImages(params: {
+    images: Array<{ character_slug: string; image_name: string }>
+    target_character_slug: string
+  }): Promise<{ message: string; reassigned_count: number; error_count: number; errors: Array<{ image_name: string; error: string }> }> {
+    return request('/approval/bulk-reassign', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    })
+  },
+
   async bulkReject(params: { character_slug: string; criteria: string; quality_threshold?: number; dry_run?: boolean }): Promise<{
     dry_run: boolean; character_slug: string; criteria: string; matched_count?: number; rejected_count?: number; matched_images?: string[]; rejected_images?: string[]
   }> {

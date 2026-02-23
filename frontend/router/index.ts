@@ -16,29 +16,19 @@ const routes = [
     component: () => import('@/components/CharactersTab.vue'),
   },
   {
-    path: '/generate',
-    name: 'Generate',
-    component: () => import('@/components/CreateTab.vue'),
-  },
-  {
     path: '/review',
     name: 'Review',
     component: () => import('@/components/ReviewTab.vue'),
   },
   {
-    path: '/train',
-    name: 'Train',
-    component: () => import('@/components/TrainingTab.vue'),
+    path: '/production',
+    name: 'Production',
+    component: () => import('@/components/ProductionTab.vue'),
   },
   {
     path: '/voice',
     name: 'Voice',
     component: () => import('@/components/VoiceTab.vue'),
-  },
-  {
-    path: '/scenes',
-    name: 'Scenes',
-    component: () => import('@/components/SceneBuilderTab.vue'),
   },
   {
     path: '/analytics',
@@ -47,10 +37,13 @@ const routes = [
   },
   // Legacy redirects
   { path: '/story', redirect: '/project' },
-  { path: '/create', redirect: '/generate' },
+  { path: '/create', redirect: '/characters' },
+  { path: '/generate', redirect: '/characters' },
   { path: '/approve', redirect: '/review' },
   { path: '/library', redirect: '/review' },
   { path: '/gallery', redirect: '/review' },
+  { path: '/train', redirect: '/production' },
+  { path: '/scenes', redirect: '/production' },
   { path: '/dashboard', redirect: '/analytics' },
   { path: '/echo', redirect: '/analytics' },
   { path: '/ingest', redirect: '/characters' },

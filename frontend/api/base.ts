@@ -18,18 +18,19 @@ export class ApiError extends Error {
  * Prepends the given base path to every endpoint call.
  */
 export function createRequest(base: string) {
-  return async function<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  return async function<T>(endpoint: string, options: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
     const controller = new AbortController()
-    const timeoutMs = 15000
+    const timeoutMs = options.timeoutMs ?? 15000
+    const { timeoutMs: _, ...fetchOptions } = options
     const timer = setTimeout(() => controller.abort(), timeoutMs)
 
     try {
       const response = await fetch(`${base}${endpoint}`, {
         headers: {
           'Content-Type': 'application/json',
-          ...options.headers,
+          ...fetchOptions.headers,
         },
-        ...options,
+        ...fetchOptions,
         signal: controller.signal,
       })
 

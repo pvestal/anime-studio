@@ -1,85 +1,95 @@
 <template>
   <div
-    class="card character-card"
-    :style="characterStats.canTrain ? { borderColor: 'var(--status-success)' } : {}"
+    class="character-card"
+    :class="{ 'card-ready': characterStats.canTrain }"
     @click="$emit('open-detail', character)"
   >
-    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
-      <h3 style="font-size: 15px; font-weight: 500;">{{ character.name }}</h3>
-      <span
-        v-if="characterStats.canTrain"
-        class="badge badge-approved"
-        style="font-size: 11px;"
-      >
-        Ready
-      </span>
-    </div>
-
-    <!-- Thumbnail strip -->
-    <div v-if="thumbnails.length > 0" class="thumbnail-strip">
+    <!-- Hero image -->
+    <div class="hero-area">
       <img
-        v-for="img in thumbnails"
-        :key="img"
-        :src="img"
-        class="thumbnail"
+        v-if="heroImage"
+        :src="heroImage"
+        class="hero-img"
         loading="lazy"
-        @click.stop
+        alt=""
       />
-      <span v-if="characterStats.approved > thumbnails.length" class="thumbnail-more">
-        +{{ characterStats.approved - thumbnails.length }}
-      </span>
-    </div>
-
-    <!-- SSOT design prompt (click to edit) -->
-    <div @click.stop>
-      <DesignPromptEditor
-        :character="character"
-        :editing="editingSlug === character.slug"
-        :edit-text="editPromptText"
-        :saving="savingPrompt"
-        @start-edit="$emit('start-edit', character)"
-        @cancel="$emit('cancel-edit')"
-        @save="$emit('save-prompt', { character, text: $event })"
-        @save-regenerate="$emit('save-regenerate', { character, text: $event })"
-      />
-    </div>
-
-    <!-- Approved progress toward threshold -->
-    <div style="margin-bottom: 12px;">
-      <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
-        <span :style="{ color: characterStats.canTrain ? 'var(--status-success)' : 'var(--text-secondary)' }">
-          {{ characterStats.approved }}/{{ minTrainingImages }} approved
-        </span>
-        <span v-if="characterStats.pending > 0" style="color: var(--text-muted);">
-          {{ characterStats.pending }} pending
-        </span>
-        <span v-else-if="!characterStats.canTrain" style="color: var(--status-error); font-size: 11px;">
-          Need {{ minTrainingImages - characterStats.approved }} more
-        </span>
+      <div v-else class="hero-placeholder">
+        <span class="hero-letter">{{ character.name.charAt(0) }}</span>
       </div>
-      <div class="progress-track" style="height: 6px;">
-        <div
-          class="progress-bar"
-          :class="{ ready: characterStats.canTrain }"
-          :style="{ width: `${Math.min(100, (characterStats.approved / minTrainingImages) * 100)}%` }"
-        ></div>
+
+      <!-- Overlay badges -->
+      <div class="hero-overlay">
+        <span v-if="characterStats.canTrain" class="hero-badge badge-ready">Ready</span>
+        <span v-else class="hero-badge badge-count">{{ characterStats.approved }}/{{ minTrainingImages }}</span>
       </div>
     </div>
 
-    <!-- Action area -->
-    <div style="display: flex; gap: 6px;" @click.stop>
-      <button
-        v-if="!characterStats.canTrain"
-        class="btn"
-        style="flex: 1; font-size: 12px;"
-        @click="$emit('generate-more', character)"
-        :disabled="generatingSlug === character.slug"
-      >
-        {{ generatingSlug === character.slug ? 'Queued...' : `Generate ${minTrainingImages - characterStats.approved} More` }}
-      </button>
-      <span v-if="!characterStats.canTrain && characterStats.pending > 0" style="font-size: 11px; color: var(--text-muted); align-self: center;">
-        {{ characterStats.pending }} pending
-      </span>
+    <!-- Card body -->
+    <div class="card-body">
+      <h3 class="char-name">{{ character.name }}</h3>
+
+      <!-- Secondary thumbnails -->
+      <div v-if="secondaryThumbs.length > 0" class="thumb-row">
+        <img
+          v-for="img in secondaryThumbs"
+          :key="img"
+          :src="img"
+          class="thumb-secondary"
+          loading="lazy"
+          @click.stop
+        />
+        <span v-if="characterStats.approved > secondaryThumbs.length + 1" class="thumb-more">
+          +{{ characterStats.approved - secondaryThumbs.length - 1 }}
+        </span>
+      </div>
+
+      <!-- SSOT design prompt (click to edit) -->
+      <div @click.stop>
+        <DesignPromptEditor
+          :character="character"
+          :editing="editingSlug === character.slug"
+          :edit-text="editPromptText"
+          :saving="savingPrompt"
+          @start-edit="$emit('start-edit', character)"
+          @cancel="$emit('cancel-edit')"
+          @save="$emit('save-prompt', { character, text: $event })"
+          @save-regenerate="$emit('save-regenerate', { character, text: $event })"
+        />
+      </div>
+
+      <!-- Approved progress -->
+      <div class="progress-section">
+        <div class="progress-labels">
+          <span :style="{ color: characterStats.canTrain ? 'var(--status-success)' : 'var(--text-secondary)' }">
+            {{ characterStats.approved }}/{{ minTrainingImages }} approved
+          </span>
+          <span v-if="characterStats.pending > 0" class="progress-pending">
+            {{ characterStats.pending }} pending
+          </span>
+          <span v-else-if="!characterStats.canTrain" class="progress-need">
+            Need {{ minTrainingImages - characterStats.approved }} more
+          </span>
+        </div>
+        <div class="progress-track">
+          <div
+            class="progress-bar"
+            :class="{ ready: characterStats.canTrain }"
+            :style="{ width: `${Math.min(100, (characterStats.approved / minTrainingImages) * 100)}%` }"
+          ></div>
+        </div>
+      </div>
+
+      <!-- Action area -->
+      <div class="action-row" @click.stop>
+        <button
+          v-if="!characterStats.canTrain"
+          class="btn action-btn"
+          @click="$emit('generate-more', character)"
+          :disabled="generatingSlug === character.slug"
+        >
+          {{ generatingSlug === character.slug ? 'Queued...' : `Generate ${minTrainingImages - characterStats.approved} More` }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -118,46 +128,186 @@ defineEmits<{
   (e: 'open-detail', character: Character): void
 }>()
 
-const thumbnails = computed(() => {
+const approvedImages = computed(() => {
   const images = props.datasetImages || []
-  const approved = images.filter(img => img.status === 'approved')
-  return approved.slice(0, 4).map(img => api.imageUrl(props.character.slug, img.name))
+  return images.filter(img => img.status === 'approved')
+})
+
+const heroImage = computed(() => {
+  const first = approvedImages.value[0]
+  return first ? api.imageUrl(props.character.slug, first.name) : ''
+})
+
+const secondaryThumbs = computed(() => {
+  return approvedImages.value.slice(1, 5).map(img => api.imageUrl(props.character.slug, img.name))
 })
 </script>
 
 <style scoped>
 .character-card {
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-primary);
+  border-radius: 10px;
+  overflow: hidden;
   cursor: pointer;
-  transition: border-color 150ms ease, box-shadow 150ms ease;
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 100ms ease;
 }
+
 .character-card:hover {
-  box-shadow: 0 0 0 1px var(--accent-primary);
+  border-color: var(--accent-primary);
+  box-shadow: 0 4px 20px rgba(122, 162, 247, 0.15);
+  transform: translateY(-2px);
 }
-.thumbnail-strip {
+
+.card-ready {
+  border-color: var(--status-success);
+}
+
+/* Hero image area */
+.hero-area {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background: var(--bg-tertiary);
+}
+
+.hero-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.hero-placeholder {
+  width: 100%;
+  height: 100%;
   display: flex;
-  gap: 4px;
-  margin-bottom: 8px;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+}
+
+.hero-letter {
+  font-size: 64px;
+  font-weight: 700;
+  color: var(--text-muted);
+  opacity: 0.4;
+  text-transform: uppercase;
+}
+
+.hero-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.hero-badge {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  backdrop-filter: blur(8px);
+}
+
+.badge-ready {
+  background: rgba(80, 160, 80, 0.85);
+  color: #fff;
+}
+
+.badge-count {
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text-primary);
+}
+
+/* Card body */
+.card-body {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.char-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.3;
+}
+
+/* Secondary thumbnail row */
+.thumb-row {
+  display: flex;
+  gap: 6px;
   align-items: center;
 }
-.thumbnail {
-  width: 48px;
-  height: 48px;
+
+.thumb-secondary {
+  width: 40px;
+  height: 40px;
   object-fit: cover;
-  border-radius: 4px;
+  border-radius: 6px;
   border: 1px solid var(--border-primary);
 }
-.thumbnail-more {
+
+.thumb-more {
   font-size: 11px;
   color: var(--text-muted);
-  padding: 0 6px;
+  padding: 0 4px;
   white-space: nowrap;
 }
-.meta-tag {
+
+/* Progress */
+.progress-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.progress-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.progress-pending {
+  color: var(--text-muted);
+}
+
+.progress-need {
+  color: var(--status-error);
   font-size: 11px;
-  padding: 2px 8px;
+}
+
+.progress-track {
+  height: 6px;
+  background: var(--bg-primary);
   border-radius: 3px;
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-primary);
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--accent-primary);
+  border-radius: 3px;
+  transition: width 300ms ease;
+}
+
+.progress-bar.ready {
+  background: var(--status-success);
+}
+
+/* Actions */
+.action-row {
+  display: flex;
+  gap: 6px;
+}
+
+.action-btn {
+  flex: 1;
+  font-size: 12px;
 }
 </style>

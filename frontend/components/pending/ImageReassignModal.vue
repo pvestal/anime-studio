@@ -1,6 +1,6 @@
 <template>
   <!-- Reassign character modal -->
-  <div v-if="image" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 998; display: flex; align-items: center; justify-content: center;" @click.self="$emit('close')">
+  <div v-if="image" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); z-index: 998; display: flex; align-items: center; justify-content: center;" @click.self="$emit('close')" @keydown.escape.window="$emit('close')">
     <div class="card" style="min-width: 400px; max-width: 500px;">
       <h4 style="font-size: 14px; font-weight: 500; margin-bottom: 8px;">
         Reassign Image

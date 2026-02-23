@@ -35,8 +35,14 @@ _preprocess = None
 _lock = threading.Lock()
 
 
+def _get_device():
+    """Return cuda:0 (NVIDIA) if available, else CPU. CLIP is ~400MB — fits alongside ComfyUI."""
+    import torch
+    return torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+
+
 def _load_clip_model():
-    """Lazy-load CLIP ViT-L-14 on CPU. Thread-safe singleton.
+    """Lazy-load CLIP ViT-L-14 on GPU if available. Thread-safe singleton.
 
     Returns (model, preprocess_fn). Falls back to ViT-B-32 if ViT-L fails.
     """
@@ -63,25 +69,25 @@ def _load_clip_model():
             )
             logger.info("Loaded CLIP ViT-B-32 (512-dim)")
 
-        model = model.eval()
-        if torch.cuda.is_available():
-            # Keep on CPU to avoid contention with ComfyUI
-            pass
+        device = _get_device()
+        model = model.eval().to(device)
+        logger.info(f"CLIP model on {device}")
         _model = model
         _preprocess = preprocess
         return _model, _preprocess
 
 
 def _embed_image(path: Path | str) -> np.ndarray:
-    """Embed a single image -> L2-normalized vector. ~50ms on CPU."""
+    """Embed a single image -> L2-normalized vector."""
     import torch
     from PIL import Image
 
     model, preprocess = _load_clip_model()
+    device = _get_device()
     path = Path(path)
 
     img = Image.open(path).convert("RGB")
-    tensor = preprocess(img).unsqueeze(0)
+    tensor = preprocess(img).unsqueeze(0).to(device)
 
     with torch.no_grad():
         features = model.encode_image(tensor)
@@ -110,7 +116,7 @@ def _embed_images_batch(paths: list[Path], batch_size: int = 16) -> np.ndarray:
                 # Use a zero tensor as placeholder — will get low similarity
                 tensors.append(preprocess(Image.new("RGB", (224, 224))))
 
-        batch = torch.stack(tensors)
+        batch = torch.stack(tensors).to(_get_device())
         with torch.no_grad():
             features = model.encode_image(batch)
             features = features / features.norm(dim=-1, keepdim=True)
@@ -205,9 +211,12 @@ def classify_frame_clip(
 ) -> dict:
     """Classify a single frame against reference embeddings via cosine similarity.
 
+    Multi-character aware: returns ALL characters above threshold, not just the top one.
+    A frame of Mario riding Yoshi returns both.
+
     Returns:
-        {matched_slug, similarity, all_scores, ambiguous,
-         runner_up_slug, runner_up_similarity}
+        {matched_slug (best), matched_slugs (all above threshold), similarity,
+         all_scores, ambiguous, runner_up_slug, runner_up_similarity}
     """
     all_scores: dict[str, float] = {}
 
@@ -219,7 +228,7 @@ def classify_frame_clip(
 
     if not all_scores:
         return {
-            "matched_slug": None, "similarity": 0.0,
+            "matched_slug": None, "matched_slugs": [], "similarity": 0.0,
             "all_scores": {}, "ambiguous": False,
             "runner_up_slug": None, "runner_up_similarity": 0.0,
         }
@@ -230,11 +239,15 @@ def classify_frame_clip(
     runner_slug = ranked[1][0] if len(ranked) > 1 else None
     runner_score = ranked[1][1] if len(ranked) > 1 else 0.0
 
+    # All characters above threshold — multi-character assignment
+    matched_slugs = [slug for slug, score in ranked if score >= MATCH_THRESHOLD]
+
     matched = best_slug if best_score >= MATCH_THRESHOLD else None
     ambiguous = (best_score - runner_score) < AMBIGUITY_MARGIN if matched else False
 
     return {
         "matched_slug": matched,
+        "matched_slugs": matched_slugs,
         "similarity": best_score,
         "all_scores": all_scores,
         "ambiguous": ambiguous,
@@ -398,17 +411,23 @@ def run_clip_pipeline(
     verified_count = sum(1 for c in classifications if c.get("verified"))
     _progress("verifying", f"Done — {verified_count} verified")
 
-    # Count per character
+    # Count per character — use matched_slugs for multi-character frames
     per_character: dict[str, int] = {}
     for c in classifications:
-        slug = c["matched_slug"]
-        if slug:
+        for slug in c.get("matched_slugs", []):
+            per_character[slug] = per_character.get(slug, 0) + 1
+        # Fallback if matched_slugs empty but matched_slug set (rescue/verify)
+        if not c.get("matched_slugs") and c.get("matched_slug"):
+            slug = c["matched_slug"]
             per_character[slug] = per_character.get(slug, 0) + 1
 
-    # Filter to target if specified
+    # Filter to target if specified — match if target in matched_slugs
     target_results = classifications
     if target_slug:
-        target_results = [c for c in classifications if c["matched_slug"] == target_slug]
+        target_results = [
+            c for c in classifications
+            if target_slug in c.get("matched_slugs", []) or c.get("matched_slug") == target_slug
+        ]
 
     # Phase 4: Extract clips (optional)
     clips = []

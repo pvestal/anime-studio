@@ -164,7 +164,7 @@
       <div class="label-row">
         <label class="field-label" style="margin-bottom: 0;">Production Notes</label>
         <EchoAssistButton
-          context-type="description"
+          context-type="production_notes"
           :context-payload="productionNotesEchoPayload"
           :current-value="ws.production_notes"
           compact
@@ -234,6 +234,7 @@ interface EchoPayload {
   project_name?: string
   project_genre?: string
   project_description?: string
+  project_premise?: string
   checkpoint_model?: string
   storyline_title?: string
   storyline_summary?: string
@@ -242,6 +243,8 @@ interface EchoPayload {
 
 interface PreambleEchoPayload {
   project_name?: string
+  project_genre?: string
+  project_premise?: string
   checkpoint_model?: string
 }
 

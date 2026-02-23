@@ -188,11 +188,13 @@ def build_ltx_workflow(
                 "height": height,
                 "length": num_frames,
                 "batch_size": 1,
+                "strength": 1.0,
             },
         }
-        latent_source = [i2v_node, 0]
-        pos_source = [i2v_node, 1]
-        neg_source = [i2v_node, 2]
+        # LTXVImgToVideo outputs: 0=positive(CONDITIONING), 1=negative(CONDITIONING), 2=latent(LATENT)
+        pos_source = [i2v_node, 0]
+        neg_source = [i2v_node, 1]
+        latent_source = [i2v_node, 2]
         nid += 1
     else:
         # Text-to-video mode

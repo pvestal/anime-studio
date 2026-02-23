@@ -1,22 +1,135 @@
 <template>
   <div class="project-tab">
 
-    <!-- Project selector row -->
-    <div class="card" style="margin-bottom: 20px;">
-      <div style="display: flex; gap: 12px; align-items: flex-end;">
-        <div style="flex: 1;">
-          <label class="field-label">Project</label>
-          <select v-model="selectedProjectId" @change="onProjectSelect" class="field-input" style="width: 100%;">
-            <option :value="0">Select a project...</option>
-            <option v-for="p in projectStore.projects" :key="p.id" :value="p.id">
-              {{ p.name }} ({{ p.character_count }} characters)
-            </option>
-          </select>
+    <!-- Project Carousel -->
+    <div class="carousel-container" @keydown="handleCarouselKey">
+      <!-- Prev arrow -->
+      <button
+        class="nav-arrow nav-prev"
+        :disabled="currentSlide === 0"
+        @click="goToSlide(currentSlide - 1)"
+      >&#8249;</button>
+
+      <!-- Slide viewport -->
+      <div class="carousel-viewport">
+        <div
+          class="carousel-track"
+          :style="{ transform: `translateX(-${currentSlide * 100}%)` }"
+        >
+          <!-- Project tiles -->
+          <div
+            v-for="p in projectCards"
+            :key="p.id"
+            class="carousel-slide"
+          >
+            <div
+              :class="['project-tile', { selected: selectedProjectId === p.id }]"
+              @click="selectProject(p.id)"
+            >
+              <div class="tile-top-row">
+                <div class="tile-header">
+                  <h3 class="tile-name">{{ p.name }}</h3>
+                  <div class="tile-meta">
+                    <span v-if="p.genre" class="tile-genre">{{ p.genre }}</span>
+                    <span v-if="p.checkpoint" class="tile-checkpoint">{{ p.checkpoint }}</span>
+                  </div>
+                </div>
+                <button
+                  class="tile-edit-btn"
+                  title="Edit project"
+                  @click.stop="editProjectInline(p.id)"
+                >&#9998;</button>
+              </div>
+
+              <!-- Description preview -->
+              <p v-if="p.description" class="tile-description">{{ p.description }}</p>
+
+              <!-- Stats row -->
+              <div class="tile-stats">
+                <span class="tile-stat">
+                  <span class="tile-stat-val">{{ p.character_count }}</span>
+                  <span class="tile-stat-lbl">Characters</span>
+                </span>
+                <span class="tile-stat">
+                  <span class="tile-stat-val" :style="{ color: p.trainedCount > 0 ? 'var(--status-success)' : 'var(--text-muted)' }">{{ p.trainedCount }}</span>
+                  <span class="tile-stat-lbl">LoRAs</span>
+                </span>
+                <span class="tile-stat">
+                  <span class="tile-stat-val">{{ p.approvedCount }}</span>
+                  <span class="tile-stat-lbl">Approved</span>
+                </span>
+              </div>
+
+              <!-- LoRA Carousel -->
+              <div v-if="p.loras.length > 0" class="lora-section">
+                <div class="lora-section-label">Characters &amp; LoRAs</div>
+                <div class="lora-carousel-wrapper">
+                  <button
+                    v-if="p.loras.length > 5"
+                    class="lora-arrow lora-arrow-left"
+                    @click.stop="scrollLoraCarousel(p.id, -1)"
+                  >&#8249;</button>
+                  <div class="lora-carousel" :ref="el => setCarouselRef(p.id, el)">
+                    <div
+                      v-for="lora in p.loras"
+                      :key="lora.slug"
+                      :class="['lora-chip', lora.trained ? 'lora-trained' : 'lora-untrained']"
+                      :title="lora.trained ? `${lora.filename} (${lora.size_mb} MB)` : 'Not trained'"
+                    >
+                      <div class="lora-thumb-wrapper">
+                        <img
+                          v-if="lora.thumbnail"
+                          :src="lora.thumbnail"
+                          class="lora-thumb"
+                          loading="lazy"
+                          alt=""
+                        />
+                        <span v-else class="lora-thumb-placeholder">{{ lora.name.charAt(0) }}</span>
+                        <span class="lora-status-dot" :class="lora.trained ? 'dot-green' : 'dot-grey'"></span>
+                      </div>
+                      <span class="lora-name">{{ lora.name }}</span>
+                    </div>
+                  </div>
+                  <button
+                    v-if="p.loras.length > 5"
+                    class="lora-arrow lora-arrow-right"
+                    @click.stop="scrollLoraCarousel(p.id, 1)"
+                  >&#8249;</button>
+                </div>
+              </div>
+              <div v-else class="lora-section">
+                <div class="lora-empty">No characters yet</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Add New Project slide -->
+          <div class="carousel-slide">
+            <div class="project-tile add-tile" @click="showNewForm = true">
+              <div class="add-icon">+</div>
+              <div class="add-label">New Project</div>
+            </div>
+          </div>
         </div>
-        <button class="btn" style="white-space: nowrap;" @click="showNewForm = true" v-if="!showNewForm">
-          + New Project
-        </button>
       </div>
+
+      <!-- Next arrow -->
+      <button
+        class="nav-arrow nav-next"
+        :disabled="currentSlide >= totalSlides - 1"
+        @click="goToSlide(currentSlide + 1)"
+      >&#8250;</button>
+    </div>
+
+    <!-- Dot indicators + counter -->
+    <div class="carousel-indicators">
+      <button
+        v-for="(_, idx) in totalSlides"
+        :key="idx"
+        :class="['indicator-dot', { active: idx === currentSlide }]"
+        @click="goToSlide(idx)"
+      ></button>
+      <span class="slide-counter">{{ currentSlide + 1 }} / {{ totalSlides }}</span>
     </div>
 
     <!-- New Project Form -->
@@ -98,7 +211,7 @@
       <div class="collapsible-section" style="margin-bottom: 20px;">
         <button class="collapsible-header" @click="storylineOpen = !storylineOpen">
           <span class="section-heading" style="margin: 0;">Storyline</span>
-          <span class="collapse-indicator">{{ storylineOpen ? '&#9660;' : '&#9654;' }}</span>
+          <span class="collapse-indicator" :class="{ open: storylineOpen }">&#9654;</span>
         </button>
         <div v-if="storylineOpen" style="padding-top: 16px;">
           <StorylinePanel
@@ -116,7 +229,7 @@
       <div class="collapsible-section" style="margin-bottom: 20px;">
         <button class="collapsible-header" @click="worldOpen = !worldOpen">
           <span class="section-heading" style="margin: 0;">World &amp; Art Direction</span>
-          <span class="collapse-indicator">{{ worldOpen ? '&#9660;' : '&#9654;' }}</span>
+          <span class="collapse-indicator" :class="{ open: worldOpen }">&#9654;</span>
         </button>
         <div v-if="worldOpen" style="padding-top: 16px;">
           <WorldSettingsPanel
@@ -174,7 +287,9 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useProjectStore } from '@/stores/project'
 import { useCharactersStore } from '@/stores/characters'
+import { useTrainingStore } from '@/stores/training'
 import type { ProjectCreate, ProjectUpdate, StyleUpdate, StorylineUpsert, WorldSettingsUpsert } from '@/types'
+import { api } from '@/api/client'
 import EchoAssistButton from './EchoAssistButton.vue'
 import NewProjectForm from './project/NewProjectForm.vue'
 import GenerationStylePanel from './project/GenerationStylePanel.vue'
@@ -188,6 +303,7 @@ const emit = defineEmits<{
 
 const projectStore = useProjectStore()
 const charactersStore = useCharactersStore()
+const trainingStore = useTrainingStore()
 
 const showNewForm = ref(false)
 const newFormRef = ref<InstanceType<typeof NewProjectForm> | null>(null)
@@ -197,6 +313,124 @@ const saveMessage = ref('')
 // Collapsible section state
 const storylineOpen = ref(false)
 const worldOpen = ref(false)
+
+// --- Project carousel state ---
+const currentSlide = ref(0)
+const totalSlides = computed(() => projectStore.projects.length + 1) // +1 for "add" tile
+
+function goToSlide(idx: number) {
+  if (idx < 0 || idx >= totalSlides.value) return
+  currentSlide.value = idx
+}
+
+function handleCarouselKey(e: KeyboardEvent) {
+  if (e.key === 'ArrowLeft') goToSlide(currentSlide.value - 1)
+  else if (e.key === 'ArrowRight') goToSlide(currentSlide.value + 1)
+}
+
+// LoRA carousel refs (inner horizontal scroll within each tile)
+const loraCarouselRefs = new Map<number, HTMLElement>()
+
+function setCarouselRef(projectId: number, el: unknown) {
+  if (el instanceof HTMLElement) {
+    loraCarouselRefs.set(projectId, el)
+  }
+}
+
+function scrollLoraCarousel(projectId: number, direction: number) {
+  const el = loraCarouselRefs.get(projectId)
+  if (el) {
+    el.scrollBy({ left: direction * 180, behavior: 'smooth' })
+  }
+}
+
+// Cache of fetched project details for tile display
+const projectDetailCache = ref<Map<number, { genre: string; checkpoint: string; description: string }>>(new Map())
+
+async function fetchAllProjectDetails() {
+  for (const p of projectStore.projects) {
+    if (projectDetailCache.value.has(p.id)) continue
+    try {
+      const resp = await api.getProjectDetail(p.id)
+      const proj = resp.project
+      projectDetailCache.value.set(p.id, {
+        genre: proj.genre || '',
+        checkpoint: proj.style?.checkpoint_model?.replace('.safetensors', '').replace('_fp16', '') || '',
+        description: proj.description || '',
+      })
+    } catch {
+      projectDetailCache.value.set(p.id, { genre: '', checkpoint: '', description: '' })
+    }
+  }
+}
+
+// Build enriched project cards with LoRA info
+const projectCards = computed(() => {
+  return projectStore.projects.map(p => {
+    const projectChars = charactersStore.characters.filter(c => c.project_name === p.name)
+    const loraSet = new Set(trainingStore.loras.map(l => l.slug))
+
+    const loras = projectChars.map(c => {
+      const slug = c.slug || c.name
+      const trained = loraSet.has(slug)
+      const loraFile = trained ? trainingStore.loras.find(l => l.slug === slug) : null
+      // Pick first approved image as thumbnail
+      const dataset = charactersStore.datasets.get(slug) || []
+      const firstApproved = dataset.find(img => img.status === 'approved')
+      const thumbnail = firstApproved ? api.imageUrl(slug, firstApproved.name) : ''
+      return {
+        slug,
+        name: c.name,
+        trained,
+        filename: loraFile?.filename || '',
+        size_mb: loraFile?.size_mb || 0,
+        thumbnail,
+      }
+    })
+
+    const trainedCount = loras.filter(l => l.trained).length
+
+    let approvedCount = 0
+    for (const c of projectChars) {
+      const stats = charactersStore.getCharacterStats(c.slug || c.name)
+      approvedCount += stats.approved
+    }
+
+    const cached = projectDetailCache.value.get(p.id)
+    const genre = cached?.genre || ''
+    const checkpoint = cached?.checkpoint || ''
+    const description = cached?.description || ''
+
+    return {
+      id: p.id,
+      name: p.name,
+      genre,
+      description,
+      character_count: p.character_count,
+      checkpoint,
+      loras,
+      trainedCount,
+      approvedCount,
+    }
+  })
+})
+
+// Select project
+async function selectProject(projectId: number) {
+  if (selectedProjectId.value === projectId) return
+  selectedProjectId.value = projectId
+  showNewForm.value = false
+  await projectStore.fetchProjectDetail(projectId)
+  const proj = projectStore.projects.find(p => p.id === projectId)
+  if (proj) {
+    emit('project-selected', proj.id, proj.name)
+  }
+}
+
+// Edit shortcut — select + scroll to detail
+function editProjectInline(projectId: number) {
+  selectProject(projectId)
+}
 
 // Edit forms (populated from currentProject)
 const editProject = reactive<ProjectUpdate>({
@@ -243,6 +477,7 @@ const echoContext = computed(() => ({
   project_name: editProject.name || projectStore.currentProject?.name || undefined,
   project_genre: editProject.genre || projectStore.currentProject?.genre || undefined,
   project_description: editProject.description || projectStore.currentProject?.description || undefined,
+  project_premise: editProject.premise || projectStore.currentProject?.premise || undefined,
   checkpoint_model: projectStore.currentProject?.style?.checkpoint_model || undefined,
   positive_prompt_template: projectStore.currentProject?.style?.positive_prompt_template || undefined,
   negative_prompt_template: projectStore.currentProject?.style?.negative_prompt_template || undefined,
@@ -434,6 +669,7 @@ const storylineEchoPayload = computed(() => ({
   project_name: projectStore.currentProject?.name || undefined,
   project_genre: sl.genre || projectStore.currentProject?.genre || undefined,
   project_description: projectStore.currentProject?.description || undefined,
+  project_premise: editProject.premise || projectStore.currentProject?.premise || undefined,
   checkpoint_model: projectStore.currentProject?.style?.checkpoint_model || undefined,
   storyline_title: sl.title || undefined,
   storyline_summary: sl.summary || undefined,
@@ -444,6 +680,7 @@ const productionNotesEchoPayload = computed(() => ({
   project_name: projectStore.currentProject?.name || undefined,
   project_genre: sl.genre || projectStore.currentProject?.genre || undefined,
   project_description: projectStore.currentProject?.description || undefined,
+  project_premise: editProject.premise || projectStore.currentProject?.premise || undefined,
   checkpoint_model: projectStore.currentProject?.style?.checkpoint_model || undefined,
   storyline_title: sl.title || undefined,
   storyline_summary: sl.summary || undefined,
@@ -452,6 +689,8 @@ const productionNotesEchoPayload = computed(() => ({
 
 const preambleEchoPayload = computed(() => ({
   project_name: projectStore.currentProject?.name || undefined,
+  project_genre: sl.genre || projectStore.currentProject?.genre || undefined,
+  project_premise: editProject.premise || projectStore.currentProject?.premise || undefined,
   checkpoint_model: projectStore.currentProject?.style?.checkpoint_model || undefined,
 }))
 
@@ -501,25 +740,17 @@ function showSaved() {
   setTimeout(() => { saveMessage.value = '' }, 3000)
 }
 
-async function onProjectSelect() {
-  if (!selectedProjectId.value) {
-    projectStore.currentProject = null
-    return
-  }
-  await projectStore.fetchProjectDetail(selectedProjectId.value)
-  const proj = projectStore.projects.find(p => p.id === selectedProjectId.value)
-  if (proj) {
-    emit('project-selected', proj.id, proj.name)
-  }
-}
-
 async function handleCreateProject(data: ProjectCreate) {
   const projectId = await projectStore.createProject(data)
   if (projectId) {
     selectedProjectId.value = projectId
     await projectStore.fetchProjectDetail(projectId)
+    await fetchAllProjectDetails()
     showNewForm.value = false
     newFormRef.value?.resetForm()
+    // Navigate carousel to the new project
+    const idx = projectStore.projects.findIndex(p => p.id === projectId)
+    if (idx >= 0) currentSlide.value = idx
     const proj = projectStore.projects.find(p => p.id === projectId)
     if (proj) {
       emit('project-selected', proj.id, proj.name)
@@ -545,7 +776,10 @@ onMounted(async () => {
   await Promise.all([
     projectStore.fetchProjects(),
     projectStore.fetchCheckpoints(),
+    trainingStore.fetchLoras(),
   ])
+  // Fetch details for all projects so tiles show genre/checkpoint/description
+  await fetchAllProjectDetails()
 })
 </script>
 
@@ -553,6 +787,401 @@ onMounted(async () => {
 .project-tab {
   padding: 0;
 }
+
+/* --- Project Carousel --- */
+.carousel-container {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 12px;
+  position: relative;
+  outline: none;
+}
+
+.nav-arrow {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  color: var(--text-primary);
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms, color 120ms, opacity 120ms;
+  z-index: 2;
+}
+
+.nav-arrow:hover:not(:disabled) {
+  background: var(--accent-primary);
+  color: #fff;
+  border-color: var(--accent-primary);
+}
+
+.nav-arrow:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.nav-prev { margin-right: 12px; }
+.nav-next { margin-left: 12px; }
+
+.carousel-viewport {
+  flex: 1;
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+.carousel-track {
+  display: flex;
+  transition: transform 350ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.carousel-slide {
+  flex: 0 0 100%;
+  min-width: 0;
+  padding: 0 4px;
+  box-sizing: border-box;
+}
+
+/* --- Project Tile (large) --- */
+.project-tile {
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-primary);
+  border-radius: 10px;
+  padding: 24px 28px;
+  cursor: pointer;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 220px;
+}
+
+.project-tile:hover {
+  border-color: var(--accent-primary);
+  box-shadow: 0 4px 20px rgba(122, 162, 247, 0.12);
+}
+
+.project-tile.selected {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary), 0 6px 24px rgba(122, 162, 247, 0.18);
+}
+
+/* Top row: header + edit */
+.tile-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.tile-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tile-name {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.tile-edit-btn {
+  background: transparent;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 10px;
+  flex-shrink: 0;
+  transition: color 100ms, border-color 100ms;
+}
+
+.tile-edit-btn:hover {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+/* Meta badges */
+.tile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.tile-genre {
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: var(--accent-primary);
+  color: #fff;
+  text-transform: capitalize;
+  font-weight: 500;
+}
+
+.tile-checkpoint {
+  padding: 2px 10px;
+  border-radius: 10px;
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  border: 1px solid var(--border-primary);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Description */
+.tile-description {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Stats row */
+.tile-stats {
+  display: flex;
+  gap: 28px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-primary);
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.tile-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.tile-stat-val {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tile-stat-lbl {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* --- LoRA section inside tile --- */
+.lora-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lora-section-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.lora-carousel-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lora-carousel {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 4px 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.lora-carousel::-webkit-scrollbar {
+  display: none;
+}
+
+.lora-arrow {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lora-arrow:hover {
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.lora-arrow-right {
+  transform: rotate(180deg);
+}
+
+.lora-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 4px;
+  border-radius: 20px;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  border: 1px solid var(--border-primary);
+  transition: background 100ms;
+}
+
+.lora-trained {
+  background: rgba(80, 160, 80, 0.1);
+  border-color: var(--status-success);
+  color: var(--text-primary);
+}
+
+.lora-untrained {
+  background: var(--bg-primary);
+  color: var(--text-muted);
+}
+
+/* Thumbnail avatar */
+.lora-thumb-wrapper {
+  position: relative;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+}
+
+.lora-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+}
+
+.lora-thumb-placeholder {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.lora-status-dot {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-secondary);
+}
+
+.dot-green { background: var(--status-success); }
+.dot-grey { background: var(--text-muted); }
+
+.lora-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.lora-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 4px 0;
+}
+
+/* Add tile */
+.add-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  min-height: 220px;
+  gap: 10px;
+}
+
+.add-tile:hover {
+  background: var(--bg-tertiary);
+}
+
+.add-icon {
+  font-size: 40px;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+.add-label {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+/* --- Dot indicators --- */
+.carousel-indicators {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.indicator-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  padding: 0;
+  transition: background 150ms, border-color 150ms;
+}
+
+.indicator-dot.active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.indicator-dot:hover:not(.active) {
+  border-color: var(--accent-primary);
+}
+
+.slide-counter {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
+/* --- Detail sections (unchanged) --- */
 .section-heading {
   font-size: 13px;
   font-weight: 500;
@@ -660,5 +1289,10 @@ onMounted(async () => {
 .collapse-indicator {
   font-size: 11px;
   color: var(--text-muted);
+  display: inline-block;
+  transition: transform 150ms ease;
+}
+.collapse-indicator.open {
+  transform: rotate(90deg);
 }
 </style>
