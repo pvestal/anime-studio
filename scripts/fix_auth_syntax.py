@@ -7,7 +7,7 @@ import re
 def fix_auth_syntax():
     """Fix all authentication syntax errors"""
 
-    with open('/opt/tower-anime-production/api/main.py', 'r') as f:
+    with open('/opt/anime-studio/api/main.py', 'r') as f:
         content = f.read()
 
     # Fix double closing parentheses
@@ -102,7 +102,7 @@ def fix_auth_syntax():
     # Final cleanup: Fix any remaining duplicate function definitions
     content = re.sub(r'(async def \w+\([^)]*\):)\s*async def \w+\(([^)]*)\):', r'\1', content, flags=re.MULTILINE)
 
-    with open('/opt/tower-anime-production/api/main.py', 'w') as f:
+    with open('/opt/anime-studio/api/main.py', 'w') as f:
         f.write(content)
 
     print("✅ Fixed authentication syntax errors")

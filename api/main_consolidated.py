@@ -88,7 +88,7 @@ async def health_check():
     try:
         return {
             "status": "healthy",
-            "service": "tower-anime-production",
+            "service": "anime-studio",
             "version": "2.0.0",
             "timestamp": datetime.now().isoformat()
         }
@@ -551,7 +551,7 @@ async def download_video(filename: str):
     try:
         # Try multiple possible locations
         possible_paths = [
-            Path(f"/opt/tower-anime-production/outputs/{filename}"),
+            Path(f"/opt/anime-studio/outputs/{filename}"),
             Path(f"/tmp/{filename}"),
             Path(f"/opt/ComfyUI/output/{filename}")
         ]

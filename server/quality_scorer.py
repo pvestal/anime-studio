@@ -3,7 +3,7 @@
 Lightweight image quality scorer for LoRA Studio.
 
 Uses OpenCV for blur, contrast, brightness, and edge analysis.
-Extracted from /opt/tower-anime-production/quality/comfyui_quality_integration.py.
+Extracted from /opt/anime-studio/quality/comfyui_quality_integration.py.
 
 Usage:
     # As a library

@@ -8,7 +8,7 @@ def add_auth_to_endpoints():
     """Add authentication to all endpoints that need it"""
 
     # Read the current main.py
-    with open('/opt/tower-anime-production/api/main.py', 'r') as f:
+    with open('/opt/anime-studio/api/main.py', 'r') as f:
         content = f.read()
 
     # Pattern to find endpoint functions without authentication
@@ -82,7 +82,7 @@ def add_auth_to_endpoints():
     final_content = '\n'.join(result_lines)
 
     # Write back the modified content
-    with open('/opt/tower-anime-production/api/main.py', 'w') as f:
+    with open('/opt/anime-studio/api/main.py', 'w') as f:
         f.write(final_content)
 
     print(f"✅ Added authentication to {changes_made} endpoints")

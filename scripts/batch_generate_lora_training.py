@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, "/opt/tower-anime-production")
+sys.path.insert(0, "/opt/anime-studio")
 
 from packages.core.db import get_char_project_map
 from packages.core.generation import generate_batch
@@ -20,7 +20,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("/opt/tower-anime-production/logs/batch_lora_gen.log"),
+        logging.FileHandler("/opt/anime-studio/logs/batch_lora_gen.log"),
     ],
 )
 logger = logging.getLogger("batch_lora_gen")
@@ -32,7 +32,7 @@ BATCH_SIZE = 10  # Generate in batches of 10 to allow progress tracking
 
 async def count_existing(slug: str) -> dict:
     """Count existing pending + approved images for a character."""
-    approval_file = Path(f"/opt/tower-anime-production/datasets/{slug}/approval_status.json")
+    approval_file = Path(f"/opt/anime-studio/datasets/{slug}/approval_status.json")
     approved = pending = 0
     if approval_file.exists():
         statuses = json.loads(approval_file.read_text())

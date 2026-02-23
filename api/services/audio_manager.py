@@ -11,8 +11,8 @@ from typing import Dict, Any, Optional, List
 logger = logging.getLogger(__name__)
 
 # Audio configuration
-MUSIC_LIBRARY_PATH = os.getenv('MUSIC_LIBRARY_PATH', '/opt/tower-anime-production/media/music')
-SFX_LIBRARY_PATH = os.getenv('SFX_LIBRARY_PATH', '/opt/tower-anime-production/media/sfx')
+MUSIC_LIBRARY_PATH = os.getenv('MUSIC_LIBRARY_PATH', '/opt/anime-studio/media/music')
+SFX_LIBRARY_PATH = os.getenv('SFX_LIBRARY_PATH', '/opt/anime-studio/media/sfx')
 
 
 class AudioManagerService:

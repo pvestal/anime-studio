@@ -75,7 +75,7 @@
 
 ### Production Code
 ```
-/opt/tower-anime-production/production/
+/opt/anime-studio/production/
 ├── real_project_pipeline.py              # ✅ Uses anime_production DB
 ├── tokyo_debt_desire_pipeline.py         # ✅ Content rating support
 ├── character_accurate_pipeline.py        # Character generation
@@ -96,12 +96,12 @@
 
 ### Test Character Generation
 ```bash
-python3 /opt/tower-anime-production/production/real_project_pipeline.py
+python3 /opt/anime-studio/production/real_project_pipeline.py
 ```
 
 ### Test Tokyo Debt Desire Pipeline
 ```bash
-python3 /opt/tower-anime-production/production/tokyo_debt_desire_pipeline.py
+python3 /opt/anime-studio/production/tokyo_debt_desire_pipeline.py
 ```
 
 ### Check Database Connections

@@ -2,7 +2,7 @@
 """Seed the Apache AGE graph from existing relational data.
 
 Usage:
-    cd /opt/tower-anime-production
+    cd /opt/anime-studio
     python -m scripts.seed_graph
 
 Or:

@@ -15,7 +15,7 @@ from psycopg2.extras import RealDictCursor
 
 import sys
 import os
-sys.path.insert(0, '/opt/tower-anime-production')
+sys.path.insert(0, '/opt/anime-studio')
 
 from services.story_engine.story_manager import StoryManager
 
@@ -60,7 +60,7 @@ class RealityFeedWatcher:
         self.project_id = project_id
         self.repos = [
             "/opt/tower-echo-brain",
-            "/opt/tower-anime-production",
+            "/opt/anime-studio",
         ]
 
     def run_full_scan(self, hours_back: int = 24) -> Dict:

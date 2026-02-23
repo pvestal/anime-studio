@@ -36,7 +36,7 @@ else
 fi
 
 # --- edge-tts (fallback TTS, pip install in anime-studio venv) ---
-LORA_VENV="/opt/tower-anime-production/anime-studio/venv"
+LORA_VENV="/opt/anime-studio/anime-studio/venv"
 if [ -f "$LORA_VENV/bin/edge-tts" ]; then
     echo "[edge-tts] Already installed"
 else

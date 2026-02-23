@@ -350,7 +350,7 @@ async def get_upload_thumbnail(upload_id: int):
         return FileResponse(str(file_path))
     else:
         # Return placeholder or generate video thumbnail
-        placeholder_path = "/opt/tower-anime-production/frontend/src/assets/video-placeholder.png"
+        placeholder_path = "/opt/anime-studio/frontend/src/assets/video-placeholder.png"
         if Path(placeholder_path).exists():
             return FileResponse(placeholder_path)
         else:

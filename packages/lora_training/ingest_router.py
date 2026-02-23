@@ -1206,9 +1206,18 @@ async def rebuild_references(project_name: str):
     """
     from packages.visual_pipeline.clip_classifier import build_reference_embeddings
 
+    # Get project slugs from DB (async) so we don't rely on sync cache
+    char_map = await get_char_project_map()
+    project_slugs = [
+        slug for slug, info in char_map.items()
+        if info.get("project_name") == project_name
+    ]
+    if not project_slugs:
+        raise HTTPException(status_code=404, detail=f"No characters for project '{project_name}'")
+
     try:
         refs = await asyncio.to_thread(
-            build_reference_embeddings, project_name, force_rebuild=True,
+            build_reference_embeddings, project_name, project_slugs, True,
         )
         return {
             "status": "rebuilt",

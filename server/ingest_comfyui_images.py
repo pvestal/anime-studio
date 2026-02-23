@@ -20,7 +20,7 @@ from collections import defaultdict
 
 # Configuration
 COMFYUI_OUTPUT = Path("/opt/ComfyUI/output")
-DATASETS_BASE = Path("/opt/tower-anime-production/datasets")
+DATASETS_BASE = Path("/opt/anime-studio/datasets")
 
 DB_CONFIG = {
     "host": "localhost",

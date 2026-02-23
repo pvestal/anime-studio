@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 # Import production workflows
 import sys
-sys.path.append('/opt/tower-anime-production/production/workflows')
+sys.path.append('/opt/anime-studio/production/workflows')
 from ltx_video_2b_production import LTXVideo2BProduction
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

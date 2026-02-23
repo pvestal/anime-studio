@@ -251,7 +251,7 @@ echo "      3. Copy the actual download link"
 echo "      4. Add to this script"
 """
 
-        script_path = Path("/opt/tower-anime-production/production/download_models.sh")
+        script_path = Path("/opt/anime-studio/production/download_models.sh")
         script_path.write_text(script_content)
         script_path.chmod(0o755)
 

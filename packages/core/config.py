@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 # Resolve paths relative to the project root (two levels up from this file)
 _PACKAGE_DIR = Path(__file__).resolve().parent          # packages/core/
 _PACKAGES_DIR = _PACKAGE_DIR.parent                     # packages/
-_PROJECT_DIR = _PACKAGES_DIR.parent                     # /opt/tower-anime-production/
+_PROJECT_DIR = _PACKAGES_DIR.parent                     # /opt/anime-studio/
 _SCRIPT_DIR = _PROJECT_DIR / "server"                    # server/
 BASE_PATH = _PROJECT_DIR / "datasets"
 MOVIES_DIR = BASE_PATH / "_movies"

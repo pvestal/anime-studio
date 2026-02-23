@@ -36,7 +36,7 @@ psql -h 192.168.50.135 -U patrick -d anime_production -c "SELECT version();"
 
 ### 2. Run Complete Test Suite
 ```bash
-cd /opt/tower-anime-production
+cd /opt/anime-studio
 python3 tests/run_neon_tokyo_complete_test_suite.py
 ```
 
@@ -192,7 +192,7 @@ python3 tests/integration/test_frontend_e2e_neon_tokyo.py
 ### Automated Execution
 ```bash
 # Add to crontab for regular testing
-0 2 * * * cd /opt/tower-anime-production && python3 tests/run_neon_tokyo_complete_test_suite.py
+0 2 * * * cd /opt/anime-studio && python3 tests/run_neon_tokyo_complete_test_suite.py
 
 # Run before deployments
 ./tests/run_neon_tokyo_complete_test_suite.py && echo "Tests passed - safe to deploy"
@@ -202,7 +202,7 @@ python3 tests/integration/test_frontend_e2e_neon_tokyo.py
 ```bash
 # Pre-push hook example
 #!/bin/bash
-cd /opt/tower-anime-production
+cd /opt/anime-studio
 python3 tests/integration/test_neon_tokyo_nights_lifecycle.py
 if [ $? -ne 0 ]; then
     echo "Integration tests failed - push blocked"

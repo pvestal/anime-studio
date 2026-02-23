@@ -17,7 +17,7 @@ import sys
 import os
 
 # Add parent directory to path for imports
-sys.path.append('/opt/tower-anime-production')
+sys.path.append('/opt/anime-studio')
 from lora_training_pipeline import LoRATrainingPipeline
 
 # Configure logging

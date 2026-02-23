@@ -11,7 +11,7 @@ Usage:
         --job-id train_mario_20260212_120000 \
         --character-slug mario \
         --checkpoint /opt/ComfyUI/models/checkpoints/realistic_vision_v51.safetensors \
-        --dataset-dir /opt/tower-anime-production/datasets/mario \
+        --dataset-dir /opt/anime-studio/datasets/mario \
         --output /opt/ComfyUI/models/loras/mario_lora_v2.safetensors \
         --epochs 20 --learning-rate 1e-4 --resolution 512
 """

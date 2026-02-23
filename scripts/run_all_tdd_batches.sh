@@ -3,7 +3,7 @@
 # Recovers orphaned images between batches
 set -e
 
-cd /opt/tower-anime-production
+cd /opt/anime-studio
 source venv/bin/activate
 
 echo "============================================"

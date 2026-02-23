@@ -6,7 +6,7 @@
 ## ⚡ Generate 121-Frame Video (3 minutes)
 
 ```bash
-cd /opt/tower-anime-production
+cd /opt/anime-studio
 python3 production/workflows/ltx_video_2b_production.py
 ```
 
@@ -28,7 +28,7 @@ ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_
 
 ### ✅ Clean Structure (38 files vs 113 before)
 ```
-/opt/tower-anime-production/
+/opt/anime-studio/
 ├── production/
 │   ├── workflows/ltx_video_2b_production.py  # ✅ WORKS - 121 frames
 │   ├── pipeline/story_to_video.py            # ✅ WORKS - full pipeline

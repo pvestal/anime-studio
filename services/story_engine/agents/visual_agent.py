@@ -13,7 +13,7 @@ import uuid
 
 import sys
 import os
-sys.path.insert(0, '/opt/tower-anime-production')
+sys.path.insert(0, '/opt/anime-studio')
 
 from services.story_engine.story_manager import StoryManager
 from services.story_engine.vector_store import StoryVectorStore
@@ -432,7 +432,7 @@ class VisualAgent:
         """Download file from ComfyUI output folder."""
         try:
             # Create output directory
-            output_dir = f"/opt/tower-anime-production/generated_assets/visuals"
+            output_dir = f"/opt/anime-studio/generated_assets/visuals"
             os.makedirs(output_dir, exist_ok=True)
 
             # Download file
