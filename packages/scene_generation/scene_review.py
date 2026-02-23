@@ -142,14 +142,47 @@ async def review_video(body: VideoReviewRequest):
                 """, char_slug, project_id, engine, body.feedback or "Rejected via video review")
 
         action = "approved" if body.approved else "rejected"
+        assembly_triggered = False
+
+        # If approved, check if all shots in the scene are now approved → auto-assemble
+        if body.approved:
+            assembly_triggered = await _try_assemble_scene(conn, shot["scene_id"])
+
         return {
             "message": f"Shot {action}",
             "shot_id": body.shot_id,
             "review_status": "approved" if body.approved else "rejected",
             "engine_blacklisted": body.reject_engine and not body.approved,
+            "assembly_triggered": assembly_triggered,
         }
     finally:
         await conn.close()
+
+
+async def _try_assemble_scene(conn, scene_id) -> bool:
+    """Check if all shots in a scene are approved. If so, trigger assembly.
+
+    Returns True if assembly was triggered.
+    """
+    counts = await conn.fetchrow("""
+        SELECT COUNT(*) as total,
+               COUNT(*) FILTER (WHERE review_status = 'approved') as approved
+        FROM shots WHERE scene_id = $1 AND status != 'failed'
+    """, scene_id)
+
+    if counts["approved"] < counts["total"] or counts["total"] == 0:
+        return False
+
+    logger.info(
+        f"All {counts['total']} shots approved for scene {scene_id} — triggering assembly"
+    )
+    try:
+        from .builder import _assemble_scene
+        await _assemble_scene(conn, scene_id)
+        return True
+    except Exception as e:
+        logger.error(f"Auto-assembly after approval failed: {e}")
+        return False
 
 
 @router.post("/scenes/batch-review-video")
@@ -170,11 +203,22 @@ async def batch_review_video(body: BatchVideoReviewRequest):
             if "UPDATE 1" in result:
                 updated += 1
 
+        # After batch approval, check each affected scene for auto-assembly
+        assemblies = []
+        if body.approved:
+            scene_ids = await conn.fetch("""
+                SELECT DISTINCT scene_id FROM shots WHERE id = ANY($1::uuid[])
+            """, shot_ids)
+            for row in scene_ids:
+                if await _try_assemble_scene(conn, row["scene_id"]):
+                    assemblies.append(str(row["scene_id"]))
+
         return {
             "message": f"Batch {status}: {updated}/{len(shot_ids)} shots",
             "updated": updated,
             "total": len(shot_ids),
             "review_status": status,
+            "assemblies_triggered": assemblies,
         }
     finally:
         await conn.close()

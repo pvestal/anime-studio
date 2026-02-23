@@ -63,6 +63,153 @@ _QUALITY_GATES = [
 _MAX_RETRIES = len(_QUALITY_GATES)
 _SHOT_QUALITY_THRESHOLD = _QUALITY_GATES[-1]["threshold"]  # absolute floor
 
+# Video shot auto-review thresholds (loaded from DB, fallback to these)
+_DEFAULT_VIDEO_AUTO_APPROVE = 0.65
+_DEFAULT_VIDEO_AUTO_REJECT = 0.35
+
+
+async def _auto_review_shot(conn, quality_score: float) -> str:
+    """Determine review_status for a shot based on quality gates from DB.
+
+    Returns: 'approved', 'rejected', or 'pending_review'.
+    """
+    try:
+        approve_row = await conn.fetchrow(
+            "SELECT threshold_value FROM quality_gates "
+            "WHERE gate_name = 'auto_approve_threshold' AND is_active = true"
+        )
+        reject_row = await conn.fetchrow(
+            "SELECT threshold_value FROM quality_gates "
+            "WHERE gate_name = 'auto_reject_threshold' AND is_active = true"
+        )
+        # Video thresholds are lower than image thresholds — video is harder
+        # Use 80% of image thresholds as video thresholds
+        approve_thresh = (approve_row["threshold_value"] * 0.8) if approve_row else _DEFAULT_VIDEO_AUTO_APPROVE
+        reject_thresh = (reject_row["threshold_value"] * 0.8) if reject_row else _DEFAULT_VIDEO_AUTO_REJECT
+    except Exception:
+        approve_thresh = _DEFAULT_VIDEO_AUTO_APPROVE
+        reject_thresh = _DEFAULT_VIDEO_AUTO_REJECT
+
+    if quality_score >= approve_thresh:
+        return "approved"
+    elif quality_score < reject_thresh:
+        return "rejected"
+    return "pending_review"
+
+
+async def _assemble_scene(conn, scene_id, video_paths: list[str] | None = None, shots=None):
+    """Assemble approved shot videos into final scene with transitions + audio.
+
+    Called after all shots are approved (either auto or manual).
+    If video_paths/shots not provided, fetches approved shots from DB.
+    """
+    scene_video_path = str(SCENE_OUTPUT_DIR / f"scene_{scene_id}.mp4")
+    try:
+        # Fetch shots + video paths from DB if not provided
+        if shots is None or video_paths is None:
+            shots = await conn.fetch(
+                "SELECT * FROM shots WHERE scene_id = $1 AND review_status = 'approved' "
+                "ORDER BY shot_number", scene_id,
+            )
+            video_paths = [s["output_video_path"] for s in shots if s["output_video_path"]]
+
+        if not video_paths:
+            logger.warning(f"Scene {scene_id}: no approved videos to assemble")
+            return
+
+        transitions = []
+        for shot in (shots[1:] if len(shots) > 1 else []):
+            t_type = shot["transition_type"] if "transition_type" in shot.keys() else "dissolve"
+            t_dur = shot["transition_duration"] if "transition_duration" in shot.keys() else 0.3
+            transitions.append({
+                "type": t_type or "dissolve",
+                "duration": float(t_dur or 0.3),
+            })
+        await concat_videos(video_paths, scene_video_path, transitions=transitions)
+
+        # Optional post-processing
+        scene_meta = await conn.fetchrow(
+            "SELECT post_interpolate_fps, post_upscale_factor FROM scenes WHERE id = $1",
+            scene_id,
+        )
+        if scene_meta:
+            interp_fps = scene_meta["post_interpolate_fps"]
+            if interp_fps and interp_fps > 30:
+                interp_path = scene_video_path.rsplit(".", 1)[0] + f"_{interp_fps}fps.mp4"
+                result_path = await interpolate_video(
+                    scene_video_path, interp_path, target_fps=interp_fps
+                )
+                if result_path != scene_video_path:
+                    os.replace(result_path, scene_video_path)
+
+            upscale_factor = scene_meta["post_upscale_factor"]
+            if upscale_factor and upscale_factor > 1:
+                upscale_path = scene_video_path.rsplit(".", 1)[0] + f"_{upscale_factor}x.mp4"
+                result_path = await upscale_video(
+                    scene_video_path, upscale_path, scale_factor=upscale_factor
+                )
+                if result_path != scene_video_path:
+                    os.replace(result_path, scene_video_path)
+
+        # Apply audio (dialogue + music) — non-fatal wrapper
+        await apply_scene_audio(conn, scene_id, scene_video_path)
+
+        # Get duration
+        probe = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+            "-of", "csv=p=0", scene_video_path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await probe.communicate()
+        duration = float(stdout.decode().strip()) if stdout.decode().strip() else None
+
+        await conn.execute("""
+            UPDATE scenes SET generation_status = 'completed', final_video_path = $2,
+                   actual_duration_seconds = $3, current_generating_shot_id = NULL
+            WHERE id = $1
+        """, scene_id, scene_video_path, duration)
+
+        logger.info(f"Scene {scene_id}: assembled {len(video_paths)} shots → {scene_video_path} ({duration:.1f}s)")
+    except Exception as e:
+        logger.error(f"Scene assembly failed: {e}")
+        await conn.execute(
+            "UPDATE scenes SET generation_status = 'assembly_failed', current_generating_shot_id = NULL WHERE id = $1",
+            scene_id,
+        )
+
+
+async def assemble_approved_scene(scene_id) -> dict:
+    """Public entry point — assemble a scene if all shots are approved.
+
+    Called by the review endpoint when the last shot gets approved.
+    Returns status dict.
+    """
+    conn = await connect_direct()
+    try:
+        counts = await conn.fetchrow("""
+            SELECT COUNT(*) as total,
+                   COUNT(*) FILTER (WHERE review_status = 'approved') as approved,
+                   COUNT(*) FILTER (WHERE output_video_path IS NOT NULL) as with_video
+            FROM shots WHERE scene_id = $1
+        """, scene_id)
+
+        if counts["approved"] < counts["total"]:
+            return {
+                "assembled": False,
+                "reason": f"{counts['approved']}/{counts['total']} shots approved",
+            }
+
+        if counts["with_video"] < counts["total"]:
+            return {
+                "assembled": False,
+                "reason": f"{counts['with_video']}/{counts['total']} shots have video",
+            }
+
+        await _assemble_scene(conn, scene_id)
+        return {"assembled": True, "scene_id": str(scene_id)}
+    finally:
+        await conn.close()
+
 
 async def copy_to_comfyui_input(image_path: str) -> str:
     """Copy source image to ComfyUI input dir, return the filename."""
@@ -190,7 +337,9 @@ async def _generate_scene_impl(scene_id: str):
                 completed_videos.append(best_video)
                 prev_last_frame = best_last_frame
                 shot_status = "completed" if shot_accepted else "accepted_best"
-                review_status = "approved" if best_quality >= 0.75 else "pending_review"
+
+                # Auto-approve/reject based on quality gates from DB
+                review_status = await _auto_review_shot(conn, best_quality)
                 await conn.execute("""
                     UPDATE shots SET status = $2, output_video_path = $3,
                            last_frame_path = $4, generation_time_seconds = $5,
@@ -198,6 +347,9 @@ async def _generate_scene_impl(scene_id: str):
                     WHERE id = $1
                 """, shot_id, shot_status, best_video, best_last_frame,
                     gen_time, best_quality, review_status)
+                logger.info(
+                    f"Shot {shot_id}: quality={best_quality:.2f} → {review_status}"
+                )
             else:
                 await conn.execute(
                     "UPDATE shots SET status = 'failed', error_message = 'All attempts failed' WHERE id = $1",
@@ -209,68 +361,46 @@ async def _generate_scene_impl(scene_id: str):
                 scene_id, completed_count,
             )
 
-        # Assemble final video with crossfade transitions
+        # Check if all shots are approved — only then assemble
+        all_approved = False
         if completed_videos:
-            scene_video_path = str(SCENE_OUTPUT_DIR / f"scene_{scene_id}.mp4")
-            try:
-                # Read transition settings from completed shots
-                transitions = []
-                for shot in shots[1:]:  # transitions between pairs, so skip first
-                    transitions.append({
-                        "type": shot.get("transition_type", "dissolve") or "dissolve",
-                        "duration": float(shot.get("transition_duration", 0.3) or 0.3),
-                    })
-                await concat_videos(completed_videos, scene_video_path, transitions=transitions)
+            review_counts = await conn.fetchrow("""
+                SELECT COUNT(*) as total,
+                       COUNT(*) FILTER (WHERE review_status = 'approved') as approved,
+                       COUNT(*) FILTER (WHERE review_status = 'rejected') as rejected,
+                       COUNT(*) FILTER (WHERE review_status = 'pending_review') as pending
+                FROM shots WHERE scene_id = $1
+            """, scene_id)
 
-                # Optional post-processing: frame interpolation then upscaling
-                scene_meta = await conn.fetchrow(
-                    "SELECT post_interpolate_fps, post_upscale_factor FROM scenes WHERE id = $1",
-                    scene_id,
+            all_approved = (
+                review_counts["approved"] == review_counts["total"]
+                and review_counts["total"] > 0
+            )
+
+            if review_counts["pending"] > 0:
+                logger.info(
+                    f"Scene {scene_id}: {review_counts['pending']} shots awaiting review — "
+                    f"assembly deferred until all approved"
                 )
-                if scene_meta:
-                    interp_fps = scene_meta["post_interpolate_fps"]
-                    if interp_fps and interp_fps > 30:
-                        interp_path = scene_video_path.rsplit(".", 1)[0] + f"_{interp_fps}fps.mp4"
-                        result_path = await interpolate_video(
-                            scene_video_path, interp_path, target_fps=interp_fps
-                        )
-                        if result_path != scene_video_path:
-                            os.replace(result_path, scene_video_path)
-
-                    upscale_factor = scene_meta["post_upscale_factor"]
-                    if upscale_factor and upscale_factor > 1:
-                        upscale_path = scene_video_path.rsplit(".", 1)[0] + f"_{upscale_factor}x.mp4"
-                        result_path = await upscale_video(
-                            scene_video_path, upscale_path, scale_factor=upscale_factor
-                        )
-                        if result_path != scene_video_path:
-                            os.replace(result_path, scene_video_path)
-
-                # Apply audio (dialogue + music) — non-fatal wrapper
-                await apply_scene_audio(conn, scene_id, scene_video_path)
-
-                # Get duration
-                probe = await asyncio.create_subprocess_exec(
-                    "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-                    "-of", "csv=p=0", scene_video_path,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, _ = await probe.communicate()
-                duration = float(stdout.decode().strip()) if stdout.decode().strip() else None
-
-                final_status = "completed" if completed_count == len(shots) else "partial"
                 await conn.execute("""
-                    UPDATE scenes SET generation_status = $2, final_video_path = $3,
-                           actual_duration_seconds = $4, current_generating_shot_id = NULL
+                    UPDATE scenes SET generation_status = 'awaiting_review',
+                           current_generating_shot_id = NULL
                     WHERE id = $1
-                """, scene_id, final_status, scene_video_path, duration)
-            except Exception as e:
-                logger.error(f"Scene assembly failed: {e}")
-                await conn.execute(
-                    "UPDATE scenes SET generation_status = 'partial', current_generating_shot_id = NULL WHERE id = $1",
-                    scene_id,
+                """, scene_id)
+            elif review_counts["rejected"] > 0 and not all_approved:
+                logger.info(
+                    f"Scene {scene_id}: {review_counts['rejected']} shots rejected — "
+                    f"scene needs regeneration of rejected shots"
                 )
-        else:
+                await conn.execute("""
+                    UPDATE scenes SET generation_status = 'needs_regen',
+                           current_generating_shot_id = NULL
+                    WHERE id = $1
+                """, scene_id)
+
+        if all_approved:
+            await _assemble_scene(conn, scene_id, completed_videos, shots)
+        elif not completed_videos:
             await conn.execute(
                 "UPDATE scenes SET generation_status = 'failed', current_generating_shot_id = NULL WHERE id = $1",
                 scene_id,
