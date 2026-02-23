@@ -164,7 +164,7 @@ async def execute_video_generation(job_id: str, request: VideoGenerationRequest)
 
         # Use the database workflow directly
         import sys
-        sys.path.append('/opt/tower-anime-production')
+        sys.path.append('/opt/anime-studio')
         from use_database_workflow import use_database_workflow
 
         # Get the actual workflow to use

@@ -7,10 +7,10 @@ import logging
 from typing import Dict, Optional
 
 # Fix Python path for imports
-sys.path.insert(0, '/opt/tower-anime-production')
-sys.path.append('/opt/tower-anime-production/pipeline')
-sys.path.append('/opt/tower-anime-production/quality')
-sys.path.append('/opt/tower-anime-production/services')
+sys.path.insert(0, '/opt/anime-studio')
+sys.path.append('/opt/anime-studio/pipeline')
+sys.path.append('/opt/anime-studio/quality')
+sys.path.append('/opt/anime-studio/services')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

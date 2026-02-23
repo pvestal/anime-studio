@@ -1,6 +1,6 @@
 """Learning system — SQL-based pattern analysis from generation_history/rejections/approvals.
 
-Adapted from /opt/tower-anime-production/quality/learning_system.py (800 LOC standalone)
+Adapted from /opt/anime-studio/quality/learning_system.py (800 LOC standalone)
 into a streamlined module that uses our asyncpg pool and new Phase 1 tables.
 
 No sklearn/numpy dependency — pattern analysis done via SQL aggregation.

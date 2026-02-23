@@ -12,7 +12,7 @@ from pathlib import Path
 from datetime import datetime
 
 # Add parent directory to path for imports
-sys.path.append('/opt/tower-anime-production')
+sys.path.append('/opt/anime-studio')
 from lora_training_pipeline import LoRATrainingPipeline
 
 async def list_characters(pipeline):
@@ -208,7 +208,7 @@ async def check_status(pipeline):
             print(f"⚠️  Storage: {path} (missing, will be created)")
 
     # Check Kohya training scripts
-    kohya_script = Path("/opt/tower-anime-production/training/kohya_real/train_network.py")
+    kohya_script = Path("/opt/anime-studio/training/kohya_real/train_network.py")
     if kohya_script.exists():
         print("✅ Kohya Scripts: Available")
     else:

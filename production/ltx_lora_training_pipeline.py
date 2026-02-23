@@ -304,7 +304,7 @@ VRAM OPTIMIZATION TIPS:
     print(timeline)
 
     # Save timeline
-    timeline_path = Path("/opt/tower-anime-production/production/LTX_TRAINING_TIMELINE.md")
+    timeline_path = Path("/opt/anime-studio/production/LTX_TRAINING_TIMELINE.md")
     with open(timeline_path, 'w') as f:
         f.write(timeline)
 
@@ -334,7 +334,7 @@ async def main():
     logger.info("\n3. Run training script:")
     logger.info(f"   bash {script_path}")
     logger.info("\n4. Test trained LoRA:")
-    logger.info("   python3 /opt/tower-anime-production/production/ltx_lora_training_pipeline.py --test")
+    logger.info("   python3 /opt/anime-studio/production/ltx_lora_training_pipeline.py --test")
 
     # Check if we have training data ready
     train_path = trainer.training_dir / "action_martial_arts/images"

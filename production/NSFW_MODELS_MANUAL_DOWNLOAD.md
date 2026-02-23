@@ -48,5 +48,5 @@
 ## After Download
 Run the test pipeline:
 ```bash
-python3 /opt/tower-anime-production/production/nsfw_test.py
+python3 /opt/anime-studio/production/nsfw_test.py
 ```

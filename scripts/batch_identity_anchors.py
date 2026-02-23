@@ -6,7 +6,7 @@ These lock in the LoRA's understanding of each character's core appearance
 without distracting poses or expressions. Essential foundation images.
 
 Usage:
-    cd /opt/tower-anime-production
+    cd /opt/anime-studio
     source venv/bin/activate
     python3 scripts/batch_identity_anchors.py [--dry-run] [--character SLUG]
 """

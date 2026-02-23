@@ -12,7 +12,7 @@ import tempfile
 import uuid
 
 import sys
-sys.path.insert(0, '/opt/tower-anime-production')
+sys.path.insert(0, '/opt/anime-studio')
 
 from services.story_engine.story_manager import StoryManager
 

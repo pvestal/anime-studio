@@ -6,7 +6,7 @@ capturing each character's UNIQUE emotional arc during intimate scenes.
 These teach the LoRA how each character specifically expresses arousal/climax.
 
 Usage:
-    cd /opt/tower-anime-production
+    cd /opt/anime-studio
     source venv/bin/activate
     python3 scripts/batch_expression_progression.py [--dry-run] [--character SLUG]
 """

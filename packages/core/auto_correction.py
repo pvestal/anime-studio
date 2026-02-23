@@ -1,6 +1,6 @@
 """Auto-correction system — 7 fix strategies for failed generations.
 
-Adapted from /opt/tower-anime-production/quality/auto_correction_system.py (700 LOC)
+Adapted from /opt/anime-studio/quality/auto_correction_system.py (700 LOC)
 into an async module using our asyncpg pool and workflow builder patterns.
 
 Fix strategies map rejection categories to targeted workflow modifications:

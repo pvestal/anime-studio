@@ -420,7 +420,7 @@ def main():
     logger.info("\n3. Run the training:")
     logger.info(f"   bash {script_path}")
     logger.info("\n4. Test the trained LoRA:")
-    logger.info("   python3 /opt/tower-anime-production/production/train_cowgirl_lora.py --test")
+    logger.info("   python3 /opt/anime-studio/production/train_cowgirl_lora.py --test")
     logger.info("\n⏱️ Estimated training time: 2-3 hours on RTX 3060")
     logger.info("💾 Output: /mnt/1TB-storage/models/loras/cowgirl_riding_lora_v1.safetensors")
 

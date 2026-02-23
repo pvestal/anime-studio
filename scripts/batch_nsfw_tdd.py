@@ -5,7 +5,7 @@ Generates 10 scene-based NSFW images per character using PonyXL V6,
 with poses/actions derived from each character's defined scenes.
 
 Usage:
-    cd /opt/tower-anime-production
+    cd /opt/anime-studio
     source venv/bin/activate
     python scripts/batch_nsfw_tdd.py [--dry-run] [--character SLUG]
 """

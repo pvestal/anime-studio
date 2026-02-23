@@ -105,7 +105,7 @@ VHS_VideoCombine → MP4 output
 
 ```bash
 # Run production workflow
-cd /opt/tower-anime-production
+cd /opt/anime-studio
 python3 production/workflows/ltx_video_2b_production.py
 
 # Run complete pipeline

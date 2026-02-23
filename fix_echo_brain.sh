@@ -21,16 +21,16 @@ echo "2. Updating Echo Brain to use better model..."
 cat > /tmp/update_echo_config.py << 'EOF'
 #!/usr/bin/env python3
 import sys
-sys.path.append('/opt/tower-anime-production/services')
+sys.path.append('/opt/anime-studio/services')
 
 # Update the echo_brain_integration.py to use better model
-with open('/opt/tower-anime-production/services/echo_brain_integration.py', 'r') as f:
+with open('/opt/anime-studio/services/echo_brain_integration.py', 'r') as f:
     content = f.read()
 
 # Replace tinyllama with qwen2.5-coder
 content = content.replace('model: str = "tinyllama:latest"', 'model: str = "qwen2.5-coder:7b"')
 
-with open('/opt/tower-anime-production/services/echo_brain_integration.py', 'w') as f:
+with open('/opt/anime-studio/services/echo_brain_integration.py', 'w') as f:
     f.write(content)
 
 print("✅ Updated Echo Brain to use qwen2.5-coder:7b")

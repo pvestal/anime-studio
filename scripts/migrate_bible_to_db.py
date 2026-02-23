@@ -2,7 +2,7 @@
 """
 Migrate bible.json files into world_settings and enhanced storyline DB tables.
 
-Reads from /opt/tower-anime-production/workflows/projects/*/bible.json
+Reads from /opt/anime-studio/workflows/projects/*/bible.json
 and populates world_settings rows for matching projects in the DB.
 
 Run once after schema migration. Bible files stay as reference docs.
@@ -18,7 +18,7 @@ import psycopg2
 import psycopg2.extras
 
 
-BIBLE_GLOB = "/opt/tower-anime-production/workflows/projects/*/bible.json"
+BIBLE_GLOB = "/opt/anime-studio/workflows/projects/*/bible.json"
 
 
 def get_db_connection():

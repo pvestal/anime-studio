@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 class CharacterDatasetManager:
     def __init__(self):
-        self.base_path = Path("/opt/tower-anime-production")
+        self.base_path = Path("/opt/anime-studio")
         self.datasets_path = self.base_path / "datasets"
         self.models_path = self.base_path / "models"
         self.configs_path = self.base_path / "configs"
@@ -155,7 +155,7 @@ import json
 CHARACTER_NAME = "{character_name}"
 SAFE_NAME = "{safe_name}"
 DATASET_PATH = "{character_dir}"
-OUTPUT_PATH = "/opt/tower-anime-production/models/{safe_name}_lora"
+OUTPUT_PATH = "/opt/anime-studio/models/{safe_name}_lora"
 
 # Training parameters
 RESOLUTION = {config['training_config']['resolution']}

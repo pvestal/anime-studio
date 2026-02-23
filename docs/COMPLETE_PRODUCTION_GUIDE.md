@@ -7,7 +7,7 @@
 
 ### Run Complete Episode Production
 ```bash
-cd /opt/tower-anime-production
+cd /opt/anime-studio
 python3 production/integrated_anime_pipeline.py
 ```
 
@@ -44,7 +44,7 @@ Scene Compilation → Final Episode
 ```
 
 ### ❌ AnimateDiff (DEPRECATED)
-- **Status**: Archived in `/opt/tower-anime-production/archive/deprecated_animatediff/`
+- **Status**: Archived in `/opt/anime-studio/archive/deprecated_animatediff/`
 - **Reason**: Limited to 16 frames, 2 seconds, 512x288 resolution
 - **Replacement**: LTX Video 2B for all new workflows
 

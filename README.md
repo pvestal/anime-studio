@@ -266,7 +266,7 @@ For each episode:
 
 ```bash
 # Frontend
-cd /opt/tower-anime-production
+cd /opt/anime-studio
 npm install
 npm run dev    # Dev server with HMR
 npm run build  # Production build to dist/

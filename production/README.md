@@ -6,7 +6,7 @@ This directory contains ONLY proven, production-ready workflows.
 
 ### Generate 121-frame video (LTX Video 2B)
 ```bash
-cd /opt/tower-anime-production
+cd /opt/anime-studio
 python3 production/workflows/ltx_video_2b_production.py
 ```
 

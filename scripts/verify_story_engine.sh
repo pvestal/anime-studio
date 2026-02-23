@@ -1,5 +1,5 @@
 #!/bin/bash
-# /opt/tower-anime-production/scripts/verify_story_engine.sh
+# /opt/anime-studio/scripts/verify_story_engine.sh
 
 echo "=== STORY ENGINE VERIFICATION ==="
 
@@ -38,7 +38,7 @@ FROM projects p WHERE p.name = 'Echo Chamber';
 
 # 4. Vector search works
 echo -e "\n--- Semantic Search Test ---"
-cd /opt/tower-anime-production && python3 -c "
+cd /opt/anime-studio && python3 -c "
 from services.story_engine.vector_store import StoryVectorStore
 store = StoryVectorStore()
 results = store.search('debugging late at night alone', project_id=43, limit=3)

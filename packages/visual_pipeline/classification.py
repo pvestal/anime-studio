@@ -114,12 +114,12 @@ def load_project_bible(project_name: str) -> dict | None:
     # Check multiple possible paths
     search_paths = [
         _SCRIPT_DIR.parent / "workflows" / "projects" / slug / "bible.json",
-        Path("/opt/tower-anime-production/workflows/projects") / slug / "bible.json",
+        Path("/opt/anime-studio/workflows/projects") / slug / "bible.json",
     ]
 
     # Also try partial slug matches (e.g., "mario_galaxy" for "Super Mario Galaxy Anime Adventure")
     for base in [_SCRIPT_DIR.parent / "workflows" / "projects",
-                 Path("/opt/tower-anime-production/workflows/projects")]:
+                 Path("/opt/anime-studio/workflows/projects")]:
         if base.is_dir():
             for d in base.iterdir():
                 if d.is_dir() and d.name in slug:

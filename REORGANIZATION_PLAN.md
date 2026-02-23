@@ -10,7 +10,7 @@
 ## Proposed Structure
 
 ```
-/opt/tower-anime-production/
+/opt/anime-studio/
 ├── README.md                    # Main project overview
 ├── QUICK_START.md              # How to get started
 ├── requirements.txt            # Dependencies

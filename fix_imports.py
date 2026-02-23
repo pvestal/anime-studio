@@ -34,7 +34,7 @@ def fix_imports(filepath):
     return False
 
 # Fix all Python files in api directory
-api_dir = '/opt/tower-anime-production/api'
+api_dir = '/opt/anime-studio/api'
 fixed_count = 0
 
 for root, dirs, files in os.walk(api_dir):

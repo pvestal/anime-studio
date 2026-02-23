@@ -140,8 +140,8 @@ def get_cors_origins() -> list:
 CORS_ORIGINS = get_cors_origins()
 
 # Static Files Configuration
-STATIC_DIR = "/opt/tower-anime-production/static"
-MEDIA_DIR = "/opt/tower-anime-production/media"
+STATIC_DIR = "/opt/anime-studio/static"
+MEDIA_DIR = "/opt/anime-studio/media"
 
 # Network Configuration
 BIND_HOST = os.getenv('BIND_HOST', '0.0.0.0')  # Bind to all interfaces by default
