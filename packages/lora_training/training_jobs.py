@@ -1,5 +1,6 @@
 """Training job management -- start, stop, status, progress, LoRA listing, gap analysis, feedback."""
 
+import asyncio
 import json
 import logging
 import math
@@ -26,6 +27,9 @@ from .feedback import (
 
 logger = logging.getLogger(__name__)
 jobs_router = APIRouter()
+
+# Server-side training lock — only ONE training process at a time on the GPU
+_training_lock = asyncio.Lock()
 @jobs_router.get("/jobs")
 async def get_training_jobs_endpoint():
     """Get all training jobs."""
@@ -35,158 +39,173 @@ async def get_training_jobs_endpoint():
 
 @jobs_router.post("/start")
 async def start_training(training: TrainingRequest):
-    """Start a LoRA training job for a character."""
-    safe_name = re.sub(r'[^a-z0-9_-]', '', training.character_name.lower().replace(' ', '_'))
-    dataset_path = BASE_PATH / safe_name
-    approval_file = dataset_path / "approval_status.json"
+    """Start a LoRA training job for a character.
 
-    if not dataset_path.exists():
-        raise HTTPException(status_code=404, detail="Character not found")
-
-    approved_count = 0
-    if approval_file.exists():
-        with open(approval_file) as f:
-            statuses = json.load(f)
-            approved_count = sum(1 for s in statuses.values() if s == "approved")
-
-    MIN_TRAINING_IMAGES = 100
-    if approved_count < MIN_TRAINING_IMAGES:
+    Uses an asyncio lock to guarantee only ONE training process runs at a time.
+    Concurrent calls will get a 409 immediately (no queueing/waiting).
+    """
+    # Fast rejection — if lock is held, another train is already starting
+    if _training_lock.locked():
         raise HTTPException(
-            status_code=400,
-            detail=f"Need at least {MIN_TRAINING_IMAGES} approved images (have {approved_count})"
+            status_code=409,
+            detail="Another training job is currently starting — wait for it to launch before queueing the next one"
         )
 
-    char_map = await get_char_project_map()
-    db_info = char_map.get(safe_name, {})
-    checkpoint_name = db_info.get("checkpoint_model")
-    if not checkpoint_name:
-        raise HTTPException(status_code=400, detail="No checkpoint model configured for this character's project")
+    async with _training_lock:
+        safe_name = re.sub(r'[^a-z0-9_-]', '', training.character_name.lower().replace(' ', '_'))
+        dataset_path = BASE_PATH / safe_name
+        approval_file = dataset_path / "approval_status.json"
 
-    checkpoint_path = Path("/opt/ComfyUI/models/checkpoints") / checkpoint_name
-    if not checkpoint_path.exists():
-        raise HTTPException(status_code=400, detail=f"Checkpoint not found: {checkpoint_name}")
+        if not dataset_path.exists():
+            raise HTTPException(status_code=404, detail="Character not found")
 
-    gpu_ready, gpu_msg = ensure_gpu_ready("lora_training")
-    if not gpu_ready:
-        raise HTTPException(status_code=503, detail=f"GPU not available: {gpu_msg}")
+        approved_count = 0
+        if approval_file.exists():
+            with open(approval_file) as f:
+                statuses = json.load(f)
+                approved_count = sum(1 for s in statuses.values() if s == "approved")
 
-    # Auto-detect architecture and prediction type from model profile
-    from packages.core.model_profiles import get_model_profile
-    _profile = get_model_profile(checkpoint_name)
-    is_sdxl = _profile["architecture"] == "sdxl"
-    model_type = _profile["architecture"]
-    prediction_type = _profile.get("prediction_type", "epsilon")
+        MIN_TRAINING_IMAGES = 100
+        if approved_count < MIN_TRAINING_IMAGES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Need at least {MIN_TRAINING_IMAGES} approved images (have {approved_count})"
+            )
 
-    # Set architecture-appropriate defaults
-    if is_sdxl:
-        resolution = training.resolution if training.resolution != 512 else 1024
-        lora_rank = training.lora_rank or 64
-        lora_suffix = "_xl_lora"
-    else:
-        resolution = training.resolution
-        lora_rank = training.lora_rank or 32
-        lora_suffix = "_lora"
+        char_map = await get_char_project_map()
+        db_info = char_map.get(safe_name, {})
+        checkpoint_name = db_info.get("checkpoint_model")
+        if not checkpoint_name:
+            raise HTTPException(status_code=400, detail="No checkpoint model configured for this character's project")
 
-    job_id = f"train_{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    output_path = Path("/opt/ComfyUI/models/loras") / f"{safe_name}{lora_suffix}.safetensors"
+        checkpoint_path = Path("/opt/ComfyUI/models/checkpoints") / checkpoint_name
+        if not checkpoint_path.exists():
+            raise HTTPException(status_code=400, detail=f"Checkpoint not found: {checkpoint_name}")
 
-    job = {
-        "job_id": job_id,
-        "character_name": training.character_name,
-        "character_slug": safe_name,
-        "status": "queued",
-        "approved_images": approved_count,
-        "epochs": training.epochs,
-        "learning_rate": training.learning_rate,
-        "resolution": resolution,
-        "lora_rank": lora_rank,
-        "model_type": model_type,
-        "prediction_type": prediction_type,
-        "checkpoint": checkpoint_name,
-        "output_path": str(output_path),
-        "created_at": datetime.now().isoformat(),
-    }
-
-    jobs = load_training_jobs()
-    for existing in jobs:
-        if existing.get("status") == "running":
-            pid = existing.get("pid")
-            if pid:
-                try:
-                    os.kill(pid, 0)
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Training already in progress for {existing.get('character_name', 'unknown')} (job {existing['job_id']})"
-                    )
-                except (OSError, ProcessLookupError):
+        # Check for ANY running training process (by PID, not just job file)
+        jobs = load_training_jobs()
+        for existing in jobs:
+            if existing.get("status") == "running":
+                pid = existing.get("pid")
+                if pid:
+                    try:
+                        os.kill(pid, 0)  # Check if process is alive
+                        raise HTTPException(
+                            status_code=409,
+                            detail=f"Training already in progress for {existing.get('character_name', 'unknown')} "
+                                   f"(job {existing['job_id']}, pid {pid}). "
+                                   f"Only one training job can run at a time."
+                        )
+                    except (OSError, ProcessLookupError):
+                        existing["status"] = "failed"
+                        existing["error"] = "Process died without updating status (detected at training start)"
+                        existing["failed_at"] = datetime.now().isoformat()
+                        save_training_jobs(jobs)
+                        jobs = load_training_jobs()
+                else:
                     existing["status"] = "failed"
-                    existing["error"] = "Process died without updating status (detected at training start)"
+                    existing["error"] = "Process died without updating status (no PID recorded)"
                     existing["failed_at"] = datetime.now().isoformat()
                     save_training_jobs(jobs)
                     jobs = load_training_jobs()
-            else:
-                existing["status"] = "failed"
-                existing["error"] = "Process died without updating status (no PID recorded)"
-                existing["failed_at"] = datetime.now().isoformat()
-                save_training_jobs(jobs)
-                jobs = load_training_jobs()
 
-    jobs.append(job)
-    save_training_jobs(jobs)
+        gpu_ready, gpu_msg = ensure_gpu_ready("lora_training")
+        if not gpu_ready:
+            raise HTTPException(status_code=503, detail=f"GPU not available: {gpu_msg}")
 
-    train_script = _SCRIPT_DIR / "train_lora.py"
-    log_dir = _PROJECT_DIR / "logs"
-    log_dir.mkdir(exist_ok=True)
-    log_file = log_dir / f"{job_id}.log"
+        # Auto-detect architecture and prediction type from model profile
+        from packages.core.model_profiles import get_model_profile
+        _profile = get_model_profile(checkpoint_name)
+        is_sdxl = _profile["architecture"] == "sdxl"
+        model_type = _profile["architecture"]
+        prediction_type = _profile.get("prediction_type", "epsilon")
 
-    cmd = [
-        "/usr/bin/python3", str(train_script),
-        f"--job-id={job_id}",
-        f"--character-slug={safe_name}",
-        f"--checkpoint={checkpoint_path}",
-        f"--dataset-dir={dataset_path}",
-        f"--output={output_path}",
-        f"--epochs={training.epochs}",
-        f"--learning-rate={training.learning_rate}",
-        f"--resolution={resolution}",
-        f"--lora-rank={lora_rank}",
-        f"--model-type={model_type}",
-        f"--prediction-type={prediction_type}",
-    ]
+        # Set architecture-appropriate defaults
+        if is_sdxl:
+            resolution = training.resolution if training.resolution != 512 else 1024
+            lora_rank = training.lora_rank or 64
+            lora_suffix = "_xl_lora"
+        else:
+            resolution = training.resolution
+            lora_rank = training.lora_rank or 32
+            lora_suffix = "_lora"
 
-    log_fh = open(log_file, "w")
-    proc = subprocess.Popen(
-        cmd,
-        stdout=log_fh,
-        stderr=subprocess.STDOUT,
-        cwd=str(_SCRIPT_DIR),
-    )
-    log_fh.close()
+        job_id = f"train_{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        output_path = Path("/opt/ComfyUI/models/loras") / f"{safe_name}{lora_suffix}.safetensors"
 
-    jobs = load_training_jobs()
-    for j in jobs:
-        if j["job_id"] == job_id:
-            j["pid"] = proc.pid
-            break
-    save_training_jobs(jobs)
+        job = {
+            "job_id": job_id,
+            "character_name": training.character_name,
+            "character_slug": safe_name,
+            "status": "queued",
+            "approved_images": approved_count,
+            "epochs": training.epochs,
+            "learning_rate": training.learning_rate,
+            "resolution": resolution,
+            "lora_rank": lora_rank,
+            "model_type": model_type,
+            "prediction_type": prediction_type,
+            "checkpoint": checkpoint_name,
+            "output_path": str(output_path),
+            "created_at": datetime.now().isoformat(),
+        }
 
-    logger.info(
-        f"Training launched: {job_id} (pid={proc.pid}) for {training.character_name} "
-        f"({approved_count} images, {model_type}, rank={lora_rank}, res={resolution})"
-    )
-    return {
-        "message": "Training job started",
-        "job_id": job_id,
-        "approved_images": approved_count,
-        "checkpoint": checkpoint_name,
-        "model_type": model_type,
-        "prediction_type": prediction_type,
-        "lora_rank": lora_rank,
-        "resolution": resolution,
-        "output": str(output_path),
-        "log_file": str(log_file),
-        "gpu": gpu_msg,
-    }
+        jobs.append(job)
+        save_training_jobs(jobs)
+
+        train_script = _SCRIPT_DIR / "train_lora.py"
+        log_dir = _PROJECT_DIR / "logs"
+        log_dir.mkdir(exist_ok=True)
+        log_file = log_dir / f"{job_id}.log"
+
+        cmd = [
+            "/usr/bin/python3", str(train_script),
+            f"--job-id={job_id}",
+            f"--character-slug={safe_name}",
+            f"--checkpoint={checkpoint_path}",
+            f"--dataset-dir={dataset_path}",
+            f"--output={output_path}",
+            f"--epochs={training.epochs}",
+            f"--learning-rate={training.learning_rate}",
+            f"--resolution={resolution}",
+            f"--lora-rank={lora_rank}",
+            f"--model-type={model_type}",
+            f"--prediction-type={prediction_type}",
+        ]
+
+        log_fh = open(log_file, "w")
+        proc = subprocess.Popen(
+            cmd,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+            cwd=str(_SCRIPT_DIR),
+        )
+        log_fh.close()
+
+        jobs = load_training_jobs()
+        for j in jobs:
+            if j["job_id"] == job_id:
+                j["pid"] = proc.pid
+                break
+        save_training_jobs(jobs)
+
+        logger.info(
+            f"Training launched: {job_id} (pid={proc.pid}) for {training.character_name} "
+            f"({approved_count} images, {model_type}, rank={lora_rank}, res={resolution})"
+        )
+        return {
+            "message": "Training job started",
+            "job_id": job_id,
+            "approved_images": approved_count,
+            "checkpoint": checkpoint_name,
+            "model_type": model_type,
+            "prediction_type": prediction_type,
+            "lora_rank": lora_rank,
+            "resolution": resolution,
+            "output": str(output_path),
+            "log_file": str(log_file),
+            "gpu": gpu_msg,
+        }
 
 
 @jobs_router.get("/jobs/{job_id}")
@@ -363,6 +382,12 @@ async def list_trained_loras():
                 "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
                 "job_id": related_job["job_id"] if related_job else None,
                 "job_status": related_job["status"] if related_job else None,
+                "checkpoint": related_job.get("checkpoint") if related_job else None,
+                "trained_epochs": related_job.get("epoch") or related_job.get("total_epochs") if related_job else None,
+                "final_loss": related_job.get("loss") or related_job.get("final_loss") if related_job else None,
+                "best_loss": related_job.get("best_loss") if related_job else None,
+                "resolution": related_job.get("resolution") if related_job else None,
+                "lora_rank": related_job.get("lora_rank") if related_job else None,
             })
     return {"loras": loras}
 

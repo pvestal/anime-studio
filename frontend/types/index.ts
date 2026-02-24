@@ -1,5 +1,24 @@
 // Types matching actual API responses from LoRA Studio v3.0 (packages/)
 
+export interface AppearanceData {
+  species?: string
+  body_type?: string
+  key_colors?: Record<string, string>
+  key_features?: string[]
+  common_errors?: string[]
+  reference_character?: string
+  style?: string
+  hair?: { color?: string; style?: string; length?: string }
+  eyes?: { color?: string; shape?: string; special?: string }
+  skin?: { tone?: string; markings?: string }
+  face?: { shape?: string; features?: string }
+  body?: { build?: string; height?: string; bust?: string; waist?: string; hips?: string }
+  clothing?: { default_outfit?: string; style?: string }
+  weapons?: Array<{ name?: string; type?: string; description?: string }>
+  accessories?: string[]
+  sexual?: { orientation?: string; preferences?: string; physical_traits?: string }
+}
+
 export interface Character {
   name: string
   slug: string
@@ -12,6 +31,24 @@ export interface Character {
   cfg_scale: number | null
   steps: number | null
   resolution: string
+  generation_checkpoints: Array<{ checkpoint: string; count: number }>
+  // Full profile fields (populated by getCharacterDetail)
+  id?: number
+  project_id?: number
+  description?: string | null
+  personality?: string | null
+  background?: string | null
+  age?: number | null
+  role?: string | null
+  character_role?: string | null
+  personality_tags?: string[] | null
+  traits?: Record<string, any> | null
+  appearance_data?: AppearanceData | null
+  relationships?: Record<string, any> | null
+  voice_profile?: Record<string, any> | null
+  lora_trigger?: string | null
+  lora_path?: string | null
+  updated_at?: string | null
 }
 
 export interface DatasetImage {
@@ -20,6 +57,7 @@ export interface DatasetImage {
   status: 'pending' | 'approved' | 'rejected'
   prompt: string
   created_at: string
+  checkpoint_model: string | null
 }
 
 export interface PendingImage {
@@ -78,6 +116,12 @@ export interface LoraFile {
   created_at: string
   job_id: string | null
   job_status: string | null
+  checkpoint: string | null
+  trained_epochs: number | null
+  final_loss: number | null
+  best_loss: number | null
+  resolution: number | null
+  lora_rank: number | null
 }
 
 export interface ApprovalRequest {
@@ -97,7 +141,18 @@ export interface TrainingRequest {
 }
 
 export interface CharacterUpdate {
-  design_prompt: string
+  design_prompt?: string
+  description?: string | null
+  personality?: string | null
+  background?: string | null
+  age?: number | null
+  role?: string | null
+  character_role?: string | null
+  personality_tags?: string[] | null
+  traits?: Record<string, any> | null
+  appearance_data?: AppearanceData | null
+  relationships?: Record<string, any> | null
+  voice_profile?: Record<string, any> | null
 }
 
 export interface CharacterCreate {
@@ -256,7 +311,7 @@ export interface Storyline {
   tone: string | null
   themes: string[] | null
   humor_style: string | null
-  story_arcs: string[] | null
+  story_arcs: any[] | null
 }
 
 export interface WorldSettings {
@@ -328,7 +383,7 @@ export interface StorylineUpsert {
   tone?: string
   themes?: string[]
   humor_style?: string
-  story_arcs?: string[]
+  story_arcs?: any[]
 }
 
 export interface WorldSettingsUpsert {
@@ -388,7 +443,7 @@ export interface StyleCheckpointStats {
 // --- Echo Brain Narrator Assist ---
 
 export interface NarrateRequest {
-  context_type: 'storyline' | 'description' | 'positive_template' | 'negative_template' | 'design_prompt' | 'prompt_override' | 'concept' | 'scene_location' | 'scene_mood' | 'motion_prompt' | 'production_notes'
+  context_type: 'storyline' | 'description' | 'positive_template' | 'negative_template' | 'design_prompt' | 'prompt_override' | 'concept' | 'scene_location' | 'scene_mood' | 'motion_prompt' | 'production_notes' | 'character_profile'
   project_name?: string
   project_genre?: string
   project_description?: string
@@ -414,6 +469,7 @@ export interface NarrateResponse {
   sources: string[]
   execution_time_ms: number
   context_type: string
+  fields?: Record<string, any>
 }
 
 // --- Content Reconstruction Pipeline ---

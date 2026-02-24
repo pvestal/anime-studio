@@ -31,6 +31,9 @@ export interface DatasetCharacterStats {
   rejected: number
   total: number
   approval_rate: number
+  model_breakdown: Record<string, number>
+  dominant_model: string | null
+  is_mixed_models: boolean
 }
 
 export interface DatasetStatsResponse {

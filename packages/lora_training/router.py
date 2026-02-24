@@ -56,12 +56,21 @@ async def get_dataset_info(character_name: str):
         prompt = ""
         if caption_file.exists():
             prompt = caption_file.read_text().strip()
+        meta_file = img.with_suffix(".meta.json")
+        checkpoint_model = None
+        if meta_file.exists():
+            try:
+                with open(meta_file) as mf:
+                    checkpoint_model = json.load(mf).get("checkpoint_model")
+            except Exception:
+                pass
         images.append({
             "id": f"{safe_name}/{img.name}",
             "name": img.name,
             "status": status,
             "prompt": prompt,
             "created_at": datetime.fromtimestamp(img.stat().st_ctime).isoformat(),
+            "checkpoint_model": checkpoint_model,
         })
 
     return {"character": character_name, "images": images}
@@ -280,10 +289,22 @@ async def dataset_stats(project_name: str = None):
         approved = 0
         pending = 0
         rejected = 0
+        model_counts: dict[str, int] = {}  # checkpoint → count of approved images
         for img in image_files:
             status = approval_status.get(img.name, "pending")
             if status == "approved":
                 approved += 1
+                # Track which checkpoint model generated each approved image
+                meta_file = img.with_suffix(".meta.json")
+                if meta_file.exists():
+                    try:
+                        with open(meta_file) as mf:
+                            ck = json.load(mf).get("checkpoint_model")
+                            model_counts[ck or "unknown"] = model_counts.get(ck or "unknown", 0) + 1
+                    except Exception:
+                        model_counts["unknown"] = model_counts.get("unknown", 0) + 1
+                else:
+                    model_counts["no_meta"] = model_counts.get("no_meta", 0) + 1
             elif status == "rejected":
                 rejected += 1
             else:
@@ -292,6 +313,10 @@ async def dataset_stats(project_name: str = None):
         total = approved + pending + rejected
         if total == 0:
             continue
+
+        # Determine dominant model and flag mixed datasets
+        dominant_model = max(model_counts, key=model_counts.get) if model_counts else None
+        is_mixed = len([m for m in model_counts if m not in ("unknown", "no_meta")]) > 1
 
         characters.append({
             "slug": slug,
@@ -302,6 +327,9 @@ async def dataset_stats(project_name: str = None):
             "rejected": rejected,
             "total": total,
             "approval_rate": round(approved / total, 3) if total else 0,
+            "model_breakdown": model_counts,
+            "dominant_model": dominant_model,
+            "is_mixed_models": is_mixed,
         })
 
         totals["approved"] += approved
