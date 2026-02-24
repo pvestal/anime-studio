@@ -3,17 +3,28 @@ import { createRouter, createWebHistory } from 'vue-router'
 const routes = [
   {
     path: '/',
-    redirect: '/project',
+    redirect: '/story',
   },
+  // ===== Primary routes (creative pipeline order) =====
   {
-    path: '/project',
-    name: 'Project',
+    path: '/story',
+    name: 'Story',
     component: () => import('@/components/ProjectTab.vue'),
   },
   {
-    path: '/characters',
-    name: 'Characters',
-    component: () => import('@/components/CharactersTab.vue'),
+    path: '/cast',
+    name: 'Cast',
+    component: () => import('@/components/CastTab.vue'),
+  },
+  {
+    path: '/script',
+    name: 'Script',
+    component: () => import('@/components/ScriptTab.vue'),
+  },
+  {
+    path: '/produce',
+    name: 'Produce',
+    component: () => import('@/components/ProduceTab.vue'),
   },
   {
     path: '/review',
@@ -21,33 +32,27 @@ const routes = [
     component: () => import('@/components/ReviewTab.vue'),
   },
   {
-    path: '/production',
-    name: 'Production',
-    component: () => import('@/components/ProductionTab.vue'),
+    path: '/publish',
+    name: 'Publish',
+    component: () => import('@/components/PublishTab.vue'),
   },
-  {
-    path: '/voice',
-    name: 'Voice',
-    component: () => import('@/components/VoiceTab.vue'),
-  },
-  {
-    path: '/analytics',
-    name: 'Analytics',
-    component: () => import('@/components/AnalyticsTab.vue'),
-  },
-  // Legacy redirects
-  { path: '/story', redirect: '/project' },
-  { path: '/create', redirect: '/characters' },
-  { path: '/generate', redirect: '/characters' },
+  // ===== Legacy redirects =====
+  { path: '/project', redirect: '/story' },
+  { path: '/characters', redirect: '/cast' },
+  { path: '/create', redirect: '/cast' },
+  { path: '/generate', redirect: '/cast' },
+  { path: '/ingest', redirect: '/cast' },
+  { path: '/voice', redirect: '/cast' },
+  { path: '/voices', redirect: '/cast' },
+  { path: '/production', redirect: '/produce' },
+  { path: '/train', redirect: '/produce' },
+  { path: '/scenes', redirect: '/script' },
+  { path: '/analytics', redirect: '/produce' },
+  { path: '/dashboard', redirect: '/produce' },
+  { path: '/echo', redirect: '/produce' },
   { path: '/approve', redirect: '/review' },
   { path: '/library', redirect: '/review' },
   { path: '/gallery', redirect: '/review' },
-  { path: '/train', redirect: '/production' },
-  { path: '/scenes', redirect: '/production' },
-  { path: '/dashboard', redirect: '/analytics' },
-  { path: '/echo', redirect: '/analytics' },
-  { path: '/ingest', redirect: '/characters' },
-  { path: '/voices', redirect: '/voice' },
 ]
 
 export const router = createRouter({
