@@ -1226,3 +1226,91 @@ export interface WanGenerateResponse {
   resolution: string
   prefix: string
 }
+
+// --- Production Pipeline (Produce Tab) ---
+
+export interface GpuStatus {
+  nvidia: { total_mb: number; used_mb: number; free_mb: number; gpu_name: string } | null
+  amd: { total_mb: number; used_mb: number; free_mb: number; gpu_name: string } | null
+  ollama: { loaded_models: Array<{ name: string; size_mb: number; vram_mb: number }>; total_vram_mb: number }
+  comfyui: { queue_running: number; queue_pending: number }
+}
+
+export interface ProjectSummary {
+  id: number
+  name: string
+  default_style: string
+  character_count: number
+}
+
+export interface ModelBreakdown {
+  [checkpoint: string]: number
+}
+
+export interface CharDetail {
+  slug: string
+  name: string
+  approved: number
+  loraStatus: 'lora-trained' | 'lora-training' | 'lora-ready' | 'lora-none'
+  modelBreakdown: ModelBreakdown
+  dominantModel: string | null
+  isMixedModels: boolean
+  loraCheckpoint: string | null
+  loraLoss: number | null
+  loraEpochs: number | null
+  loraModelMismatch: boolean
+  approvalRate?: number
+  driftStatus?: 'ok' | 'warn' | 'critical' | null
+}
+
+export interface StageInfo {
+  label: string
+  summary: string
+  pct: number
+}
+
+export interface ProjectCard {
+  id: number
+  name: string
+  defaultStyle: string
+  charCount: number
+  loraCount: number
+  characters: CharDetail[]
+  charsNeedingLora: CharDetail[]
+  charsWithMixedModels: CharDetail[]
+  charsWithLoraMismatch: CharDetail[]
+  scenes: BuilderScene[]
+  totalShots: number
+  completedShots: number
+  episodes: Episode[]
+  stages: StageInfo[]
+  nextAction: string
+  warnings: string[]
+}
+
+export interface ProjectQualityData {
+  driftAlerts: DriftAlert[]
+  trendData: QualityTrendPoint[]
+  checkpointRankings: CheckpointRanking[]
+  datasetStats: DatasetCharacterStats | null
+  pipelineEntries: PipelineEntry[]
+}
+
+export interface DatasetCharacterStats {
+  slug: string
+  name: string
+  project_name: string
+  approved: number
+  pending: number
+  rejected: number
+  total: number
+  approval_rate: number
+  model_breakdown: Record<string, number>
+  dominant_model: string | null
+  is_mixed_models: boolean
+}
+
+export interface DatasetStatsResponse {
+  characters: DatasetCharacterStats[]
+  totals: { approved: number; pending: number; rejected: number; total: number }
+}

@@ -288,6 +288,11 @@ import ConfirmDialog from './training/ConfirmDialog.vue'
 import type { ConfirmDialogData } from './training/ConfirmDialog.vue'
 import ProductionReadiness from './training/ProductionReadiness.vue'
 
+const props = defineProps<{
+  initialProject?: string
+  initialCharacter?: string
+}>()
+
 const trainingStore = useTrainingStore()
 const charactersStore = useCharactersStore()
 const expandedLog = ref<string | null>(null)
@@ -313,6 +318,13 @@ const projectNames = computed(() => {
 onMounted(async () => {
   trainingStore.fetchTrainingJobs()
   trainingStore.fetchLoras()
+  // Pre-filter from props if provided
+  if (props.initialProject) {
+    selectedProject.value = props.initialProject
+  }
+  if (props.initialCharacter) {
+    activeFilter.value = 'all'
+  }
   // Set default project after characters load
   if (!selectedProject.value && projectNames.value.length > 0) {
     selectedProject.value = projectNames.value[0]
@@ -320,7 +332,7 @@ onMounted(async () => {
   // Watch for characters loading to set default
   const stop = watch(projectNames, (names) => {
     if (!selectedProject.value && names.length > 0) {
-      selectedProject.value = names[0]
+      selectedProject.value = props.initialProject || names[0]
       stop()
     }
   })

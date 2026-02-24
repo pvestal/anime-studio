@@ -16,30 +16,16 @@ import type {
   ReadinessResponse,
   OrchestratorStatus,
   PipelineStatus,
+  DatasetCharacterStats,
+  DatasetStatsResponse,
 } from '@/types'
 import { createRequest } from './base'
 
+// Re-export for backwards compatibility
+export type { DatasetCharacterStats, DatasetStatsResponse }
+
 const request = createRequest('/api/system')
 const trainingRequest = createRequest('/api/training')
-
-export interface DatasetCharacterStats {
-  slug: string
-  name: string
-  project_name: string
-  approved: number
-  pending: number
-  rejected: number
-  total: number
-  approval_rate: number
-  model_breakdown: Record<string, number>
-  dominant_model: string | null
-  is_mixed_models: boolean
-}
-
-export interface DatasetStatsResponse {
-  characters: DatasetCharacterStats[]
-  totals: { approved: number; pending: number; rejected: number; total: number }
-}
 
 export const learningApi = {
   // --- Dataset Stats (from training router — /api/training/dataset-stats) ---
