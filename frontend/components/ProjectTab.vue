@@ -493,7 +493,7 @@ const sl = reactive<{
   tone: string
   humor_style: string
   themes: string[]
-  story_arcs: string[]
+  story_arcs: any[]
 }>({
   title: '',
   summary: '',

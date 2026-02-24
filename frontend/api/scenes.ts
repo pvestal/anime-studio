@@ -110,6 +110,7 @@ export const scenesApi = {
       time_of_day: string; mood: string; characters: string[]
       suggested_shots: Array<{
         shot_type: string; description: string; motion_prompt: string; duration_seconds: number
+        dialogue_character?: string; dialogue_text?: string
       }>
     }>
     count: number

@@ -289,6 +289,17 @@ async def _generate_scene_impl(scene_id: str):
 
         for shot in shots:
             shot_id = shot["id"]
+
+            # Skip already-completed shots (e.g., after a service restart)
+            if (shot["status"] in ("completed", "accepted_best")
+                    and shot["output_video_path"]
+                    and Path(shot["output_video_path"]).exists()):
+                completed_videos.append(shot["output_video_path"])
+                completed_count += 1
+                prev_last_frame = shot["last_frame_path"]
+                logger.info(f"Shot {shot_id}: already completed, skipping")
+                continue
+
             shot_accepted = False
             best_video = None
             best_quality = 0.0

@@ -17,7 +17,7 @@
           :context-payload="storylineEchoPayload"
           :current-value="sl.summary"
           compact
-          @accept="sl.summary = $event.suggestion"
+          @accept="applyEchoSuggestion($event)"
         />
       </div>
       <textarea v-model="sl.summary" rows="4" placeholder="Story summary..." class="field-input field-textarea"></textarea>
@@ -64,21 +64,37 @@
       </div>
     </div>
 
-    <!-- Story Arcs (tag chips) -->
+    <!-- Story Arcs -->
     <div class="field-group">
-      <label class="field-label">Story Arcs</label>
-      <div class="tag-input-wrapper">
-        <span v-for="(tag, i) in sl.story_arcs" :key="'arc-' + i" class="tag-chip">
-          {{ tag }}
-          <button class="tag-remove" @click="removeTag(sl.story_arcs, i)">&times;</button>
-        </span>
-        <input
-          v-model="storyArcsInput"
-          type="text"
-          placeholder="Type + Enter to add"
-          class="tag-inline-input"
-          @keydown.enter.prevent="addTag(sl.story_arcs, storyArcsInput); storyArcsInput = ''"
-        />
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+        <label class="field-label" style="margin-bottom: 0;">Story Arcs</label>
+        <button class="btn" style="font-size: 10px; padding: 2px 8px;" @click="addArc">+ Add Arc</button>
+      </div>
+      <div v-if="!sl.story_arcs || sl.story_arcs.length === 0" style="font-size: 12px; color: var(--text-muted); padding: 8px;">
+        No story arcs defined yet.
+      </div>
+      <div v-for="(arc, i) in sl.story_arcs" :key="'arc-' + i" class="arc-card">
+        <div style="display: flex; gap: 8px; align-items: flex-start;">
+          <div style="flex: 1;">
+            <input
+              :value="arcName(arc)"
+              @input="updateArcField(i, 'arc_name', ($event.target as HTMLInputElement).value)"
+              type="text"
+              placeholder="Arc name"
+              class="field-input"
+              style="font-weight: 500; margin-bottom: 4px;"
+            />
+            <input
+              :value="arcDescription(arc)"
+              @input="updateArcField(i, 'description', ($event.target as HTMLInputElement).value)"
+              type="text"
+              placeholder="Brief description of this arc..."
+              class="field-input"
+              style="font-size: 12px;"
+            />
+          </div>
+          <button class="tag-remove" style="margin-top: 4px; font-size: 16px;" @click="removeTag(sl.story_arcs, i)">&times;</button>
+        </div>
       </div>
     </div>
 
@@ -101,6 +117,12 @@
 import { ref } from 'vue'
 import EchoAssistButton from '../EchoAssistButton.vue'
 
+interface StoryArc {
+  arc_name: string
+  description?: string
+  episodes?: string
+}
+
 interface StorylineForm {
   title: string
   summary: string
@@ -110,7 +132,7 @@ interface StorylineForm {
   tone: string
   humor_style: string
   themes: string[]
-  story_arcs: string[]
+  story_arcs: (string | StoryArc)[]
 }
 
 interface EchoPayload {
@@ -124,7 +146,7 @@ interface EchoPayload {
   storyline_theme?: string
 }
 
-defineProps<{
+const props = defineProps<{
   sl: StorylineForm
   storylineEchoPayload: EchoPayload
   dirty: boolean
@@ -138,7 +160,30 @@ defineEmits<{
 
 // Tag input temporaries
 const themesInput = ref('')
-const storyArcsInput = ref('')
+
+// Apply Echo Brain structured suggestion — populates all matching fields
+function applyEchoSuggestion(event: { suggestion: string; contextType: string; fields?: Record<string, any> }) {
+  const f = event.fields
+  if (f) {
+    if (f.summary) props.sl.summary = f.summary
+    if (f.theme) props.sl.theme = f.theme
+    if (f.tone) props.sl.tone = f.tone
+    if (f.target_audience) props.sl.target_audience = f.target_audience
+    if (f.humor_style) props.sl.humor_style = f.humor_style
+    if (Array.isArray(f.themes) && f.themes.length > 0) {
+      props.sl.themes.splice(0, props.sl.themes.length, ...f.themes)
+    }
+    if (Array.isArray(f.story_arcs) && f.story_arcs.length > 0) {
+      const arcs = f.story_arcs.map((a: any) =>
+        typeof a === 'string' ? { arc_name: a, description: '' } : a
+      )
+      props.sl.story_arcs.splice(0, props.sl.story_arcs.length, ...arcs)
+    }
+  } else {
+    // Fallback: plain text goes into summary
+    props.sl.summary = event.suggestion
+  }
+}
 
 function addTag(arr: string[], value: string) {
   const v = value.trim()
@@ -147,8 +192,36 @@ function addTag(arr: string[], value: string) {
   }
 }
 
-function removeTag(arr: string[], index: number) {
+function removeTag(arr: unknown[], index: number) {
   arr.splice(index, 1)
+}
+
+// Story arc helpers
+function arcName(arc: string | StoryArc): string {
+  return typeof arc === 'string' ? arc : arc.arc_name || ''
+}
+
+function arcDescription(arc: string | StoryArc): string {
+  return typeof arc === 'string' ? '' : arc.description || ''
+}
+
+function addArc() {
+  if (!props.sl.story_arcs) {
+    (props.sl as any).story_arcs = []
+  }
+  props.sl.story_arcs.push({ arc_name: '', description: '' })
+}
+
+function updateArcField(index: number, field: string, value: string) {
+  const arc = props.sl.story_arcs[index]
+  if (typeof arc === 'string') {
+    // Upgrade string to object
+    const obj: StoryArc = { arc_name: arc, description: '' }
+    ;(obj as any)[field] = value
+    props.sl.story_arcs[index] = obj
+  } else {
+    ;(arc as any)[field] = value
+  }
 }
 </script>
 
@@ -271,6 +344,15 @@ function removeTag(arr: string[], index: number) {
   font-size: 12px;
   padding: 2px 4px;
   font-family: inherit;
+}
+
+.arc-card {
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-left: 3px solid var(--accent-primary);
+  border-radius: 4px;
 }
 
 /* Save row */

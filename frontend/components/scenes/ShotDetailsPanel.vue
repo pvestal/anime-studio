@@ -155,9 +155,20 @@
       </div>
     </div>
 
-    <!-- Dialogue -->
-    <div class="field-group" style="border-top: 1px solid var(--border-primary); padding-top: 10px; margin-top: 6px;">
-      <label class="field-label">Dialogue</label>
+    <!-- Dialogue (promoted — always visible when characters present) -->
+    <div class="dialogue-section">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+        <label class="field-label" style="margin-bottom: 0; font-weight: 500; color: var(--accent-primary);">Dialogue</label>
+        <button
+          v-if="characters.length > 0"
+          class="btn"
+          style="font-size: 10px; padding: 2px 8px; color: var(--accent-primary);"
+          :disabled="autoDialogueBusy"
+          @click="$emit('auto-dialogue')"
+        >
+          {{ autoDialogueBusy ? 'Writing...' : 'Auto-Write' }}
+        </button>
+      </div>
       <select
         :value="shot.dialogue_character_slug || ''"
         @change="updateField('dialogue_character_slug', ($event.target as HTMLSelectElement).value || null)"
@@ -175,7 +186,7 @@
         v-if="shot.dialogue_character_slug"
         :value="shot.dialogue_text"
         @input="updateField('dialogue_text', ($event.target as HTMLTextAreaElement).value)"
-        rows="2"
+        rows="3"
         placeholder="What does this character say?"
         class="field-input field-textarea"
       ></textarea>
@@ -209,12 +220,14 @@ const props = defineProps<{
   shotVideoSrc: string
   sourceImageUrl: (path: string) => string
   characters: { slug: string; name: string }[]
+  autoDialogueBusy?: boolean
 }>()
 
 const emit = defineEmits<{
   remove: []
   'browse-image': []
   'update-field': [field: string, value: unknown]
+  'auto-dialogue': []
 }>()
 
 const shotTypes = ['establishing', 'wide', 'medium', 'close-up', 'extreme_close-up', 'action']
@@ -307,5 +320,17 @@ function updateField(field: string, value: unknown) {
   background: rgba(122, 162, 247, 0.15);
   border-color: var(--accent-primary);
   color: var(--accent-primary);
+}
+.dialogue-section {
+  border-top: 2px solid var(--accent-primary);
+  padding-top: 10px;
+  margin-top: 8px;
+  background: rgba(122, 162, 247, 0.04);
+  margin-left: -12px;
+  margin-right: -12px;
+  padding-left: 12px;
+  padding-right: 12px;
+  padding-bottom: 8px;
+  border-radius: 0 0 4px 4px;
 }
 </style>

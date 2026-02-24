@@ -24,8 +24,8 @@
       >{{ generatingTraining ? 'Generating...' : 'Train for Scenes' }}</button>
     </div>
 
-    <!-- Sub-view toggle (Scenes / Episodes) -->
-    <div v-if="currentView === 'library' && selectedProjectId" style="display: flex; gap: 4px; margin-bottom: 16px;">
+    <!-- Sub-view toggle (Scenes / Episodes) — hidden when episodes extracted to Publish tab -->
+    <div v-if="currentView === 'library' && selectedProjectId && !hideEpisodes" style="display: flex; gap: 4px; margin-bottom: 16px;">
       <button
         :class="['btn', librarySubView === 'scenes' ? 'btn-primary' : '']"
         style="font-size: 12px; padding: 4px 14px;"
@@ -164,6 +164,12 @@ import SceneEditorView from './scenes/SceneEditorView.vue'
 import GenerationMonitorView from './scenes/GenerationMonitorView.vue'
 import ImagePickerModal from './scenes/ImagePickerModal.vue'
 import EpisodeView from './scenes/EpisodeView.vue'
+
+const props = withDefaults(defineProps<{
+  hideEpisodes?: boolean
+}>(), {
+  hideEpisodes: false,
+})
 
 const router = useRouter()
 const projectStore = useProjectStore()
@@ -724,9 +730,25 @@ async function generateFromStory() {
         mood: generated.mood,
         target_duration_seconds: generated.suggested_shots.reduce((sum: number, s: { duration_seconds: number }) => sum + (s.duration_seconds || 3), 0),
       })
-      // Create shots for this scene
+      // Create shots for this scene (with dialogue if AI provided it)
+      // Build character name→slug map from project characters
+      const charSlugMap: Record<string, string> = {}
+      for (const c of projectCharacters.value) {
+        charSlugMap[c.name.toLowerCase()] = c.slug
+        charSlugMap[c.slug] = c.slug
+      }
       for (let i = 0; i < generated.suggested_shots.length; i++) {
         const shot = generated.suggested_shots[i]
+        // Resolve dialogue character to slug
+        let dialogueSlug: string | undefined
+        if (shot.dialogue_character) {
+          const key = shot.dialogue_character.toLowerCase().replace(/\s+/g, '_')
+          dialogueSlug = charSlugMap[key] || charSlugMap[shot.dialogue_character.toLowerCase()]
+        }
+        // Resolve characters_present from scene-level characters list
+        const charsPresent = (generated.characters || [])
+          .map((name: string) => charSlugMap[name.toLowerCase()] || charSlugMap[name.toLowerCase().replace(/\s+/g, '_')])
+          .filter(Boolean)
         await api.createShot(sceneResult.id, {
           shot_number: i + 1,
           source_image_path: '',
@@ -734,6 +756,9 @@ async function generateFromStory() {
           camera_angle: 'eye-level',
           duration_seconds: shot.duration_seconds || 3,
           motion_prompt: shot.motion_prompt || shot.description || '',
+          characters_present: charsPresent.length > 0 ? charsPresent : undefined,
+          dialogue_text: shot.dialogue_text || undefined,
+          dialogue_character_slug: dialogueSlug || undefined,
         })
       }
     }

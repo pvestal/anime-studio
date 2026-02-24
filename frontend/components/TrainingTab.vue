@@ -325,8 +325,8 @@ onMounted(async () => {
     }
   })
   pollTimer = setInterval(() => {
-    trainingStore.fetchTrainingJobs()
-    trainingStore.fetchLoras()
+    trainingStore.fetchTrainingJobs(true)
+    trainingStore.fetchLoras(true)
     if (expandedLog.value) fetchLog(expandedLog.value)
   }, 5000)
 })

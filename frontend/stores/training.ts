@@ -11,17 +11,23 @@ export const useTrainingStore = defineStore('training', () => {
   const error = ref<string | null>(null)
 
   // Actions
-  async function fetchTrainingJobs() {
-    loading.value = true
-    error.value = null
+  async function fetchTrainingJobs(silent = false) {
+    if (!silent) {
+      loading.value = true
+      error.value = null
+    }
 
     try {
       const response = await api.getTrainingJobs()
       jobs.value = response.training_jobs
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to fetch training jobs'
+      if (!silent) {
+        error.value = err instanceof Error ? err.message : 'Failed to fetch training jobs'
+      }
     } finally {
-      loading.value = false
+      if (!silent) {
+        loading.value = false
+      }
     }
   }
 
@@ -108,12 +114,14 @@ export const useTrainingStore = defineStore('training', () => {
     }
   }
 
-  async function fetchLoras() {
+  async function fetchLoras(silent = false) {
     try {
       const response = await api.getTrainedLoras()
       loras.value = response.loras
     } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to fetch LoRAs'
+      if (!silent) {
+        error.value = err instanceof Error ? err.message : 'Failed to fetch LoRAs'
+      }
     }
   }
 

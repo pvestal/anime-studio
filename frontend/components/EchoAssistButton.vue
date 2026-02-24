@@ -54,7 +54,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  accept: [payload: { suggestion: string; contextType: string }]
+  accept: [payload: { suggestion: string; contextType: string; fields?: Record<string, any> }]
   dismiss: []
   error: [payload: { message: string }]
 }>()
@@ -62,6 +62,7 @@ const emit = defineEmits<{
 const loading = ref(false)
 const showPanel = ref(false)
 const suggestion = ref('')
+const fields = ref<Record<string, any> | undefined>(undefined)
 const errorMsg = ref('')
 const executionTime = ref(0)
 
@@ -79,6 +80,7 @@ async function requestSuggestion() {
   try {
     const result = await api.echoNarrate(payload)
     suggestion.value = result.suggestion
+    fields.value = result.fields
     executionTime.value = result.execution_time_ms
     showPanel.value = true
   } catch (err: any) {
@@ -91,9 +93,10 @@ async function requestSuggestion() {
 }
 
 function accept() {
-  emit('accept', { suggestion: suggestion.value, contextType: props.contextType })
+  emit('accept', { suggestion: suggestion.value, contextType: props.contextType, fields: fields.value })
   showPanel.value = false
   suggestion.value = ''
+  fields.value = undefined
 }
 
 function dismiss() {

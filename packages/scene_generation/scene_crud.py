@@ -767,6 +767,138 @@ async def get_approved_images_for_scene(
     return {"characters": results}
 
 
+# --- Batch Dialogue Generation ---
+
+@router.post("/scenes/{scene_id}/generate-dialogue")
+async def generate_dialogue_for_scene(scene_id: str):
+    """Auto-generate dialogue for all shots in a scene that have characters but no dialogue."""
+    from packages.voice_pipeline.synthesis import generate_dialogue_from_story
+    sid = uuid.UUID(scene_id)
+    conn = await connect_direct()
+    try:
+        scene = await conn.fetchrow(
+            "SELECT title, description, mood FROM scenes WHERE id = $1", sid)
+        if not scene:
+            raise HTTPException(status_code=404, detail="Scene not found")
+
+        shots = await conn.fetch(
+            "SELECT id, shot_number, characters_present, dialogue_text, "
+            "dialogue_character_slug, motion_prompt "
+            "FROM shots WHERE scene_id = $1 ORDER BY shot_number", sid)
+
+        if not shots:
+            return {"scene_id": scene_id, "generated": 0, "dialogue": []}
+
+        # Gather all characters present across shots
+        all_chars = set()
+        for sh in shots:
+            if sh["characters_present"]:
+                for c in sh["characters_present"]:
+                    all_chars.add(c)
+
+        if not all_chars:
+            return {"scene_id": scene_id, "generated": 0, "dialogue": [],
+                    "message": "No characters present in any shots"}
+
+        # Generate dialogue for the whole scene
+        desc = f"{scene['title'] or 'Untitled'}: {scene['description'] or ''}"
+        if scene["mood"]:
+            desc += f" (mood: {scene['mood']})"
+        dialogue_lines = await generate_dialogue_from_story(
+            scene_id, desc, list(all_chars))
+
+        if not dialogue_lines:
+            return {"scene_id": scene_id, "generated": 0, "dialogue": [],
+                    "message": "AI returned no dialogue"}
+
+        # Assign dialogue to shots that have matching characters
+        generated = 0
+        results = []
+        line_idx = 0
+        for sh in shots:
+            # Skip shots that already have dialogue
+            if sh["dialogue_text"]:
+                continue
+            chars_present = sh["characters_present"] or []
+            if not chars_present:
+                continue
+            # Find a dialogue line for a character in this shot
+            while line_idx < len(dialogue_lines):
+                line = dialogue_lines[line_idx]
+                line_idx += 1
+                slug = line["character_slug"]
+                if slug in chars_present:
+                    await conn.execute(
+                        "UPDATE shots SET dialogue_text = $2, dialogue_character_slug = $3 "
+                        "WHERE id = $1",
+                        sh["id"], line["text"], slug)
+                    generated += 1
+                    results.append({
+                        "shot_id": str(sh["id"]),
+                        "shot_number": sh["shot_number"],
+                        "character_slug": slug,
+                        "character_name": line.get("character_name", slug),
+                        "text": line["text"],
+                    })
+                    break
+
+        return {"scene_id": scene_id, "generated": generated, "dialogue": results}
+    finally:
+        await conn.close()
+
+
+@router.post("/scenes/generate-all")
+async def generate_all_scenes(project_id: int):
+    """Queue generation for all scenes that have shots but no final video."""
+    conn = await connect_direct()
+    try:
+        rows = await conn.fetch("""
+            SELECT s.id, s.title, s.generation_status,
+                   (SELECT COUNT(*) FROM shots WHERE scene_id = s.id) as shot_count
+            FROM scenes s
+            WHERE s.project_id = $1
+              AND s.generation_status NOT IN ('generating', 'completed')
+            ORDER BY s.scene_number NULLS LAST, s.created_at
+        """, project_id)
+
+        eligible = [r for r in rows if r["shot_count"] > 0]
+        if not eligible:
+            return {"message": "No scenes to generate", "queued": 0}
+
+        queued = []
+        for scene_row in eligible:
+            scene_id = str(scene_row["id"])
+            sid = scene_row["id"]
+            if scene_id in _scene_generation_tasks:
+                task = _scene_generation_tasks[scene_id]
+                if not task.done():
+                    continue
+
+            await conn.execute(
+                "UPDATE shots SET status = 'pending', error_message = NULL "
+                "WHERE scene_id = $1", sid)
+            await conn.execute(
+                "UPDATE scenes SET completed_shots = 0, "
+                "current_generating_shot_id = NULL WHERE id = $1", sid)
+
+            async def _guarded_generate(scene_uuid):
+                async with _scene_gen_semaphore:
+                    await generate_scene(scene_uuid)
+
+            task = asyncio.create_task(_guarded_generate(sid))
+            _scene_generation_tasks[scene_id] = task
+            queued.append({"scene_id": scene_id, "title": scene_row["title"],
+                          "shot_count": scene_row["shot_count"]})
+
+        return {
+            "message": f"Queued {len(queued)} scenes for generation",
+            "queued": len(queued),
+            "scenes": queued,
+        }
+    finally:
+        await conn.close()
+
+
 class SelectEngineRequest(BaseModel):
     video_engine: str
     lora_name: str | None = None

@@ -24,8 +24,11 @@ For each scene, provide:
   - description: What this shot shows
   - motion_prompt: FramePack motion description (what moves/happens in the shot)
   - duration_seconds: 2-5
+  - dialogue_character: Character name who speaks in this shot (null if no dialogue)
+  - dialogue_text: What the character says (null if no dialogue)
 
 Create 3-8 scenes that tell the story naturally. Each scene should have 2-5 shots.
+Include dialogue where it fits the story — not every shot needs dialogue.
 
 Respond with ONLY valid JSON array. No markdown, no explanation.
 
@@ -154,6 +157,8 @@ async def generate_scenes_from_story(project_id: int) -> list[dict]:
                 shot.setdefault("description", "")
                 shot.setdefault("motion_prompt", shot.get("description", ""))
                 shot.setdefault("duration_seconds", 3)
+                shot.setdefault("dialogue_character", None)
+                shot.setdefault("dialogue_text", None)
 
         logger.info(f"Generated {len(scenes)} scenes from storyline for project {project_id}")
         return scenes

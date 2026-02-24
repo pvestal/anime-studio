@@ -192,9 +192,13 @@ def _build_narrate_prompt(body: NarrateRequest) -> str:
         context = ". ".join(parts)
         prompt = (
             f"{context}.\n\n"
-            f"Based on the premise above, write a 2-3 paragraph storyline summary that captures "
-            f"the central conflict, key characters, and narrative arc. Be specific to this project — "
-            f"do not write generic filler."
+            f"Based on the premise above, return a JSON object with these fields:\n"
+            f"- \"summary\": 2-3 paragraph storyline summary capturing central conflict, key characters, narrative arc\n"
+            f"- \"theme\": one-line theme (e.g. \"redemption through sacrifice\")\n"
+            f"- \"tone\": 1-3 words for tone (e.g. \"dark, gritty\")\n"
+            f"- \"target_audience\": target audience (e.g. \"young adults\")\n"
+            f"- \"story_arcs\": array of {{\"arc_name\": \"...\", \"description\": \"...\"}} objects (2-4 arcs)\n\n"
+            f"Be specific to this project — do not write generic filler. Return ONLY valid JSON, no extra text."
         )
         if cv:
             prompt += f"\n\nCurrent summary to improve: '{cv}'"
@@ -296,6 +300,42 @@ def _build_narrate_prompt(body: NarrateRequest) -> str:
             + (f"Current: '{cv}'. " if cv else "")
             + "Return ONLY a brief motion description for video generation (e.g. 'character slowly turns head, hair billowing in wind')."
         )
+    elif ct == "character_profile":
+        parts = [f"Character: '{body.character_name or 'unnamed'}'"]
+        parts.append(f"Project: '{body.project_name or 'unnamed'}' ({body.project_genre or 'unspecified genre'})")
+        if body.project_premise:
+            parts.append(f"Premise: {body.project_premise}")
+        if body.design_prompt:
+            parts.append(f"Current design prompt: {body.design_prompt}")
+        context = ". ".join(parts)
+        return (
+            f"{context}.\n\n"
+            "Generate a comprehensive character bible as a JSON object with ALL of these fields:\n"
+            '- "description": 2-3 sentence character summary\n'
+            '- "personality": personality description in 2-3 sentences\n'
+            '- "background": backstory in 2-3 sentences\n'
+            '- "age": integer age\n'
+            '- "character_role": one of protagonist/antagonist/supporting/mentor/comic_relief\n'
+            '- "personality_tags": array of 3-6 personality trait words\n'
+            '- "design_prompt": visual-only Stable Diffusion prompt with appearance tags (NO narrative text)\n'
+            '- "species": what type of creature/being\n'
+            '- "body_type": physical build description\n'
+            '- "key_colors": object mapping body parts to colors (e.g. {"hair": "red", "eyes": "green"})\n'
+            '- "key_features": array of 4-6 critical identifying visual features\n'
+            '- "common_errors": array of known generation failure modes\n'
+            '- "hair": {"color": "...", "style": "...", "length": "..."}\n'
+            '- "eyes": {"color": "...", "shape": "...", "special": "..."}\n'
+            '- "skin": {"tone": "...", "markings": "..."}\n'
+            '- "face": {"shape": "...", "features": "..."}\n'
+            '- "body": {"build": "...", "height": "...", "bust": "...", "waist": "...", "hips": "..."}\n'
+            '- "clothing": {"default_outfit": "...", "style": "..."}\n'
+            '- "weapons": array of {"name": "...", "type": "...", "description": "..."}\n'
+            '- "accessories": array of accessory strings\n'
+            '- "sexual": {"orientation": "...", "preferences": "...", "physical_traits": "..."}\n\n'
+            "Be specific to this character and project. The design_prompt must be VISUAL ONLY — "
+            "suitable for Stable Diffusion image generation. Do NOT put narrative backstory in design_prompt.\n"
+            "Return ONLY valid JSON, no extra text."
+        )
     else:
         return f"Provide a suggestion for: {cv or body.project_name or 'general content'}"
 
@@ -321,13 +361,36 @@ async def echo_narrate(body: NarrateRequest):
         sources = data.get("sources", [])
         confidence = data.get("confidence", 0.0)
 
+        # Try to parse structured fields from JSON responses (e.g. storyline)
+        fields = None
+        if body.context_type in ("storyline", "concept", "character_profile"):
+            try:
+                # Strip markdown code fences if present
+                cleaned = suggestion.strip()
+                if cleaned.startswith("```"):
+                    cleaned = cleaned.split("\n", 1)[-1]
+                    if cleaned.endswith("```"):
+                        cleaned = cleaned[:-3]
+                    cleaned = cleaned.strip()
+                parsed = json.loads(cleaned)
+                if isinstance(parsed, dict):
+                    fields = parsed
+                    # Use summary as the display suggestion if available
+                    if "summary" in parsed:
+                        suggestion = parsed["summary"]
+            except (json.JSONDecodeError, ValueError):
+                pass  # Not JSON — return raw text as suggestion
+
         elapsed_ms = int((_time.time() - start) * 1000)
-        return {
+        result = {
             "suggestion": suggestion,
             "confidence": confidence,
             "sources": sources,
             "execution_time_ms": elapsed_ms,
             "context_type": body.context_type,
         }
+        if fields:
+            result["fields"] = fields
+        return result
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Echo Brain narration unavailable: {e}")

@@ -2,7 +2,8 @@
   <div>
     <h2 style="font-size: 18px; font-weight: 500; margin-bottom: 8px;">Voice Pipeline</h2>
     <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 24px;">
-      Extract, diarize, review, and train character voices for scene dialogue.
+      Give each character their own voice: extract audio from reference clips, identify who's speaking,
+      review samples, train voice clones, and test synthesis.
     </p>
 
     <!-- Project selector -->

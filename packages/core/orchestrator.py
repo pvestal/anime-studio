@@ -71,7 +71,9 @@ logger = logging.getLogger(__name__)
 
 _enabled = False
 _tick_interval = 60        # seconds between ticks
+_graph_sync_interval = 1800  # 30 min between graph syncs
 _tick_task = None           # asyncio.Task for the background loop
+_graph_sync_task = None     # asyncio.Task for periodic graph sync
 _training_target = 100     # approved images needed to advance past training_data
 _active_work: dict[str, asyncio.Task] = {}  # tracks running work tasks
 
@@ -284,13 +286,37 @@ async def _tick_loop():
         await asyncio.sleep(_tick_interval)
 
 
+async def _graph_sync_loop():
+    """Background loop that runs graph full_sync() every _graph_sync_interval seconds.
+
+    Non-fatal — if graph sync fails, it logs and retries next interval.
+    Runs regardless of orchestrator enabled state (graph data is useful even when paused).
+    """
+    # Initial delay to let the app finish starting
+    await asyncio.sleep(30)
+    while True:
+        try:
+            from .graph_sync import full_sync
+            result = full_sync()
+            if asyncio.iscoroutine(result):
+                result = await result
+            logger.info(f"Periodic graph sync complete: {result}")
+        except Exception as e:
+            logger.warning(f"Periodic graph sync failed (non-fatal): {e}")
+        await asyncio.sleep(_graph_sync_interval)
+
+
 async def start_tick_loop():
-    """Start the background tick loop. Called once at app startup."""
-    global _tick_task
+    """Start the background tick loop and graph sync loop. Called once at app startup."""
+    global _tick_task, _graph_sync_task
     if _tick_task is not None and not _tick_task.done():
         return
     _tick_task = asyncio.create_task(_tick_loop())
-    logger.info(f"Orchestrator tick loop started (interval={_tick_interval}s, enabled={_enabled})")
+    _graph_sync_task = asyncio.create_task(_graph_sync_loop())
+    logger.info(
+        f"Orchestrator tick loop started (interval={_tick_interval}s, enabled={_enabled}), "
+        f"graph sync loop started (interval={_graph_sync_interval}s)"
+    )
 
 
 # ── Status / Summary ──────────────────────────────────────────────────

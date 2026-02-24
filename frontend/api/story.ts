@@ -6,6 +6,7 @@ import type {
   Character,
   CharacterCreate,
   CharacterUpdate,
+  AppearanceData,
   Project,
   ProjectCreate,
   ProjectUpdate,
@@ -35,7 +36,11 @@ export const storyApi = {
     })
   },
 
-  async updateCharacter(slug: string, update: CharacterUpdate): Promise<{ message: string; design_prompt: string }> {
+  async getCharacterDetail(slug: string): Promise<Character> {
+    return request(`/characters/${encodeURIComponent(slug)}/detail`)
+  },
+
+  async updateCharacter(slug: string, update: CharacterUpdate): Promise<{ message: string; updated_fields: string[] }> {
     return request(`/characters/${encodeURIComponent(slug)}`, {
       method: 'PATCH',
       body: JSON.stringify(update),
