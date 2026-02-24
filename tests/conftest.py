@@ -274,7 +274,7 @@ async def app_client(patch_get_pool):
     The DB pool is mocked — no real database needed.
     """
     import httpx
-    from src.app import app
+    from server.app import app
 
     # Skip startup event (it tries to connect to real DB)
     app.router.on_startup.clear()

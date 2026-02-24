@@ -13,7 +13,7 @@
       <button class="btn" @click="$emit('refresh')" :disabled="loading">Refresh</button>
     </div>
 
-    <!-- Model filter chips -->
+    <!-- Model filter chips — only shown when multiple checkpoints exist in current view -->
     <div v-if="modelNames.length > 1" class="model-filter-row">
       <span class="model-label">Model:</span>
       <button
@@ -21,7 +21,7 @@
         :class="{ active: !localFilterModel }"
         @click="localFilterModel = ''"
       >
-        All ({{ totalCharacters }})
+        All ({{ projectFilteredCharacters.length }})
       </button>
       <button
         v-for="m in modelNames"
@@ -57,7 +57,11 @@ const emit = defineEmits<{
 
 const localFilterProject = computed({
   get: () => props.filterProject,
-  set: (v: string) => emit('update:filterProject', v),
+  set: (v: string) => {
+    emit('update:filterProject', v)
+    // Clear model filter when project changes — pills will recompute
+    if (props.filterModel) emit('update:filterModel', '')
+  },
 })
 
 const localFilterCharacter = computed({
@@ -70,8 +74,6 @@ const localFilterModel = computed({
   set: (v: string) => emit('update:filterModel', v),
 })
 
-const totalCharacters = computed(() => props.characters.length)
-
 const projectNames = computed(() => {
   const names = new Set<string>()
   for (const c of props.characters) {
@@ -80,11 +82,26 @@ const projectNames = computed(() => {
   return [...names].sort()
 })
 
+// Characters filtered by project only (before model filter) — pills are scoped to this
+const projectFilteredCharacters = computed(() => {
+  if (!props.filterProject) return props.characters
+  return props.characters.filter(c => c.project_name === props.filterProject)
+})
+
 const modelNames = computed(() => {
   const counts: Record<string, number> = {}
-  for (const c of props.characters) {
-    const model = c.checkpoint_model || 'unknown'
-    counts[model] = (counts[model] || 0) + 1
+  for (const c of projectFilteredCharacters.value) {
+    const checkpoints = c.generation_checkpoints
+    if (checkpoints && checkpoints.length > 0) {
+      const seen = new Set<string>()
+      for (const gc of checkpoints) {
+        if (!seen.has(gc.checkpoint)) {
+          counts[gc.checkpoint] = (counts[gc.checkpoint] || 0) + 1
+          seen.add(gc.checkpoint)
+        }
+      }
+    }
+    // No fallback — only show pills for checkpoints with actual generation history
   }
   return Object.entries(counts)
     .sort((a, b) => b[1] - a[1])

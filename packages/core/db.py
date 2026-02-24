@@ -123,6 +123,7 @@ async def get_char_project_map() -> dict:
             JOIN projects p ON c.project_id = p.id
             LEFT JOIN generation_styles gs ON gs.style_name = p.default_style
             LEFT JOIN world_settings ws ON ws.project_id = p.id
+            WHERE COALESCE(c.archived, false) = false
         """)
         await conn.close()
 

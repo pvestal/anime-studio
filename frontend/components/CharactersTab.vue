@@ -5,8 +5,8 @@
       {{ trainingMessage }}
     </div>
 
-    <!-- Sub-tab toggle -->
-    <div style="display: flex; gap: 4px; margin-bottom: 20px;">
+    <!-- Sub-tab toggle (hidden when driven by CastTab) -->
+    <div v-if="!hideSubTabs" style="display: flex; gap: 4px; margin-bottom: 20px;">
       <button
         :class="['sub-tab', activeSubTab === 'characters' ? 'sub-tab-active' : '']"
         @click="activeSubTab = 'characters'"
@@ -286,27 +286,9 @@
     <!-- ========== CHARACTERS SUB-TAB ========== -->
     <template v-if="activeSubTab === 'characters'">
 
-    <!-- Stats bar + New Character button -->
-    <div style="display: flex; gap: 16px; margin-bottom: 24px; align-items: stretch;">
-      <div class="card" style="flex: 1; text-align: center;">
-        <div style="font-size: 28px; font-weight: 600; color: var(--accent-primary);">
-          {{ readyCount }}
-        </div>
-        <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase;">Ready to Train</div>
-      </div>
-      <div class="card" style="flex: 1; text-align: center;">
-        <div style="font-size: 28px; font-weight: 600; color: var(--status-warning);">
-          {{ needsMoreCount }}
-        </div>
-        <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase;">Need More Approvals</div>
-      </div>
-      <div class="card" style="flex: 1; text-align: center;">
-        <div style="font-size: 28px; font-weight: 600; color: var(--status-success);">
-          {{ approvedCount }}
-        </div>
-        <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase;">Total Approved</div>
-      </div>
-      <button class="btn" style="align-self: center; white-space: nowrap; padding: 10px 20px; font-size: 14px; color: var(--accent-primary); border-color: var(--accent-primary);" @click="openNewCharForm" v-if="!showNewCharForm">
+    <!-- New Character button -->
+    <div v-if="!showNewCharForm" style="margin-bottom: 24px;">
+      <button class="btn" style="white-space: nowrap; padding: 10px 20px; font-size: 14px; color: var(--accent-primary); border-color: var(--accent-primary);" @click="openNewCharForm">
         + New Character
       </button>
     </div>
@@ -417,6 +399,7 @@
             :generating-slug="generatingSlug"
             :training-loading="trainingStore.loading"
             :dataset-images="getDatasetImages(character.slug)"
+            :filter-model="filterModel"
             @start-edit="startEdit"
             @cancel-edit="cancelEdit"
             @save-prompt="onSavePrompt"
@@ -467,12 +450,20 @@ import CharacterDetailPanel from './characters/CharacterDetailPanel.vue'
 import EchoAssistButton from './EchoAssistButton.vue'
 import CreateTab from './CreateTab.vue'
 
+const props = withDefaults(defineProps<{
+  hideSubTabs?: boolean
+  initialSubTab?: 'characters' | 'ingest' | 'workbench'
+}>(), {
+  hideSubTabs: false,
+  initialSubTab: 'characters',
+})
+
 const MIN_TRAINING_IMAGES = 100
 
 const charactersStore = useCharactersStore()
 const trainingStore = useTrainingStore()
 const projectStore = useProjectStore()
-const activeSubTab = ref<'characters' | 'ingest' | 'workbench'>('characters')
+const activeSubTab = ref<'characters' | 'ingest' | 'workbench'>(props.initialSubTab)
 const filterProject = ref('')
 const filterCharacter = ref('')
 const filterModel = ref('')
@@ -741,7 +732,11 @@ const projectGroups = computed(() => {
     const proj = c.project_name || 'Unknown'
     if (filterProject.value && proj !== filterProject.value) continue
     if (filterCharacter.value && c.name !== filterCharacter.value) continue
-    if (filterModel.value && (c.checkpoint_model || 'unknown') !== filterModel.value) continue
+    if (filterModel.value) {
+      const hasModel = c.generation_checkpoints?.some(gc => gc.checkpoint === filterModel.value)
+        || (!c.generation_checkpoints?.length && (c.checkpoint_model || 'unknown') === filterModel.value)
+      if (!hasModel) continue
+    }
     if (!groups[proj]) {
       groups[proj] = {
         characters: [],

@@ -142,6 +142,18 @@ async def run_migrations():
                 END $$
             """)
 
+        # Scene generated music columns (ACE-Step pipeline)
+        for col, coltype in [
+            ("generated_music_path", "TEXT"),
+            ("generated_music_task_id", "VARCHAR(255)"),
+        ]:
+            await conn.execute(f"""
+                DO $$ BEGIN
+                    ALTER TABLE scenes ADD COLUMN {col} {coltype};
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$
+            """)
+
         # Scene dialogue audio path
         for col, coltype in [
             ("dialogue_audio_path", "TEXT"),

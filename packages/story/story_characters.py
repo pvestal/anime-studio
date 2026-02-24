@@ -67,6 +67,30 @@ _NARRATION_PROMPT = (
 async def get_characters():
     """Get list of characters with datasets, including project info from DB."""
     char_map = await get_char_project_map()
+
+    # Fetch per-character generation history checkpoints
+    gen_checkpoints: dict[str, list[dict]] = {}
+    try:
+        conn = await connect_direct()
+        gen_rows = await conn.fetch("""
+            SELECT character_slug, checkpoint_model, COUNT(*) as count
+            FROM generation_history
+            WHERE checkpoint_model IS NOT NULL AND checkpoint_model != ''
+            GROUP BY character_slug, checkpoint_model
+            ORDER BY character_slug, count DESC
+        """)
+        await conn.close()
+        for row in gen_rows:
+            slug = row["character_slug"]
+            if slug not in gen_checkpoints:
+                gen_checkpoints[slug] = []
+            gen_checkpoints[slug].append({
+                "checkpoint": row["checkpoint_model"],
+                "count": row["count"],
+            })
+    except Exception as e:
+        logger.warning(f"Failed to fetch generation checkpoints: {e}")
+
     characters = []
     for slug, d in sorted(char_map.items(), key=lambda x: x[0]):
         img = BASE_PATH / slug / "images"
@@ -77,6 +101,7 @@ async def get_characters():
             "project_name": d.get("project_name", ""), "design_prompt": d.get("design_prompt", ""),
             "default_style": d.get("default_style", ""), "checkpoint_model": d.get("checkpoint_model", ""),
             "cfg_scale": d.get("cfg_scale"), "steps": d.get("steps"), "resolution": d.get("resolution", ""),
+            "generation_checkpoints": gen_checkpoints.get(slug, []),
         })
     return {"characters": characters}
 
@@ -128,28 +153,185 @@ async def create_character(character: CharacterCreate):
     return {"message": f"Character '{character.name}' created", "slug": safe_name, "id": char_id}
 
 
+@router.get("/characters/{character_slug}/detail")
+async def get_character_detail(character_slug: str):
+    """Get full character profile with all columns."""
+    try:
+        conn = await connect_direct()
+        row = await conn.fetchrow("""
+            SELECT c.id, c.name, c.description, c.design_prompt, c.traits, c.age,
+                   c.appearance_data, c.personality, c.background, c.role,
+                   c.character_role, c.personality_tags, c.relationships,
+                   c.voice_profile, c.lora_trigger, c.lora_path,
+                   c.created_at, c.updated_at, c.project_id,
+                   p.name AS project_name
+            FROM characters c
+            LEFT JOIN projects p ON p.id = c.project_id
+            WHERE REGEXP_REPLACE(LOWER(REPLACE(c.name,' ','_')),'[^a-z0-9_-]','','g')=$1
+              AND c.project_id IS NOT NULL
+            ORDER BY LENGTH(COALESCE(c.design_prompt,'')) DESC LIMIT 1
+        """, character_slug)
+        await conn.close()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Character '{character_slug}' not found")
+
+        def _parse_jsonb(val):
+            if val is None:
+                return None
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except (json.JSONDecodeError, ValueError):
+                    return val
+            return val
+
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "slug": character_slug,
+            "project_id": row["project_id"],
+            "project_name": row["project_name"],
+            "description": row["description"],
+            "design_prompt": row["design_prompt"],
+            "age": row["age"],
+            "role": row["role"],
+            "character_role": row["character_role"],
+            "personality": row["personality"],
+            "background": row["background"],
+            "personality_tags": row["personality_tags"],
+            "traits": _parse_jsonb(row["traits"]),
+            "appearance_data": _parse_jsonb(row["appearance_data"]),
+            "relationships": _parse_jsonb(row["relationships"]),
+            "voice_profile": _parse_jsonb(row["voice_profile"]),
+            "lora_trigger": row["lora_trigger"],
+            "lora_path": row["lora_path"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get character detail {character_slug}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+_PATCH_ALLOWED = {
+    "design_prompt": "text",
+    "description": "text",
+    "personality": "text",
+    "background": "text",
+    "role": "text",
+    "character_role": "text",
+    "age": "int",
+    "personality_tags": "text[]",
+    "traits": "jsonb",
+    "appearance_data": "jsonb",
+    "relationships": "jsonb",
+    "voice_profile": "jsonb",
+    "archived": "bool",
+}
+
+
 @router.patch("/characters/{character_slug}")
 async def update_character(character_slug: str, body: dict):
-    """Update a character's design_prompt."""
-    design_prompt = body.get("design_prompt")
-    if design_prompt is None:
-        raise HTTPException(status_code=400, detail="design_prompt is required")
+    """Update character fields. Accepts any combination of allowed fields."""
+    updates = {k: v for k, v in body.items() if k in _PATCH_ALLOWED}
+    if not updates:
+        raise HTTPException(status_code=400, detail=f"No valid fields provided. Allowed: {list(_PATCH_ALLOWED.keys())}")
+
     try:
         conn = await connect_direct()
         row = await conn.fetchrow(_SLUG_SQL, character_slug)
         if not row:
             await conn.close()
             raise HTTPException(status_code=404, detail=f"Character '{character_slug}' not found")
-        await conn.execute("UPDATE characters SET design_prompt=$1 WHERE id=$2", design_prompt.strip(), row["id"])
+
+        set_parts = []
+        params = []
+        idx = 1
+        for field, value in updates.items():
+            ftype = _PATCH_ALLOWED[field]
+            if ftype == "text":
+                set_parts.append(f"{field}=${idx}")
+                params.append(value.strip() if isinstance(value, str) else value)
+            elif ftype == "int":
+                set_parts.append(f"{field}=${idx}")
+                params.append(int(value) if value is not None else None)
+            elif ftype == "bool":
+                set_parts.append(f"{field}=${idx}")
+                params.append(bool(value))
+            elif ftype == "jsonb":
+                set_parts.append(f"{field}=${idx}::jsonb")
+                params.append(json.dumps(value) if value is not None else None)
+            elif ftype == "text[]":
+                set_parts.append(f"{field}=${idx}::text[]")
+                params.append(value)
+            idx += 1
+
+        set_parts.append(f"updated_at=NOW()")
+        sql = f"UPDATE characters SET {', '.join(set_parts)} WHERE id=${idx}"
+        params.append(row["id"])
+
+        await conn.execute(sql, *params)
         await conn.close()
         invalidate_char_cache()
-        logger.info(f"Updated design_prompt for {row['name']} (id={row['id']})")
-        return {"message": f"Updated design_prompt for {row['name']}", "character_id": row["id"],
-                "character_name": row["name"], "design_prompt": design_prompt.strip()}
+        logger.info(f"Updated {list(updates.keys())} for {row['name']} (id={row['id']})")
+        return {
+            "message": f"Updated {list(updates.keys())} for {row['name']}",
+            "character_id": row["id"],
+            "character_name": row["name"],
+            "updated_fields": list(updates.keys()),
+        }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to update character {character_slug}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/characters/{character_slug}/archive")
+async def archive_character(character_slug: str, body: dict = {}):
+    """Archive or unarchive a character. Body: {"archived": true/false}"""
+    archived = body.get("archived", True)
+    try:
+        conn = await connect_direct()
+        row = await conn.fetchrow(_SLUG_SQL, character_slug)
+        if not row:
+            await conn.close()
+            raise HTTPException(status_code=404, detail=f"Character '{character_slug}' not found")
+        await conn.execute("UPDATE characters SET archived=$1, updated_at=NOW() WHERE id=$2",
+                           bool(archived), row["id"])
+        await conn.close()
+        invalidate_char_cache()
+        action = "archived" if archived else "unarchived"
+        logger.info(f"{action} character {row['name']} (id={row['id']})")
+        return {"message": f"Character '{row['name']}' {action}", "archived": bool(archived)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to archive character {character_slug}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/characters/archived")
+async def get_archived_characters():
+    """List archived characters."""
+    try:
+        conn = await connect_direct()
+        rows = await conn.fetch("""
+            SELECT c.name,
+                   REGEXP_REPLACE(LOWER(REPLACE(c.name, ' ', '_')), '[^a-z0-9_-]', '', 'g') as slug,
+                   p.name as project_name, c.id
+            FROM characters c
+            JOIN projects p ON c.project_id = p.id
+            WHERE c.archived = true
+            ORDER BY p.name, c.name
+        """)
+        await conn.close()
+        return {"characters": [{"id": r["id"], "name": r["name"], "slug": r["slug"],
+                                "project_name": r["project_name"]} for r in rows]}
+    except Exception as e:
+        logger.error(f"Failed to list archived characters: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

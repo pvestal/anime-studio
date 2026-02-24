@@ -1,7 +1,7 @@
 """Pydantic models — all request/response schemas for the API."""
 
-from pydantic import BaseModel
-from typing import Dict, List, Optional
+from pydantic import BaseModel, field_validator
+from typing import Any, Dict, List, Optional, Union
 
 
 class ImageApproval(BaseModel):
@@ -148,7 +148,18 @@ class StorylineUpsert(BaseModel):
     tone: Optional[str] = None
     themes: Optional[List[str]] = None
     humor_style: Optional[str] = None
-    story_arcs: Optional[List[str]] = None
+    story_arcs: Optional[List[Any]] = None
+
+    @field_validator("story_arcs", mode="before")
+    @classmethod
+    def normalize_story_arcs(cls, v: Any) -> Any:
+        """Accept both plain strings and structured {arc_name, description, ...} objects."""
+        if v is None:
+            return v
+        if not isinstance(v, list):
+            return v
+        # Pass through as-is — DB column is JSONB, accepts both string[] and object[]
+        return v
 
 
 class WorldSettingsUpsert(BaseModel):

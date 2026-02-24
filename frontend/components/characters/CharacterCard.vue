@@ -19,7 +19,10 @@
 
       <!-- Overlay badges -->
       <div class="hero-overlay">
-        <span v-if="characterStats.canTrain" class="hero-badge badge-ready">Ready</span>
+        <span v-if="filterModel" class="hero-badge badge-model">
+          {{ approvedImages.length }} {{ shortModelName }}
+        </span>
+        <span v-else-if="characterStats.canTrain" class="hero-badge badge-ready">Ready</span>
         <span v-else class="hero-badge badge-count">{{ characterStats.approved }}/{{ minTrainingImages }}</span>
       </div>
     </div>
@@ -117,6 +120,7 @@ const props = defineProps<{
   generatingSlug: string | null
   trainingLoading: boolean
   datasetImages?: DatasetImage[]
+  filterModel?: string
 }>()
 
 defineEmits<{
@@ -130,7 +134,16 @@ defineEmits<{
 
 const approvedImages = computed(() => {
   const images = props.datasetImages || []
-  return images.filter(img => img.status === 'approved')
+  let approved = images.filter(img => img.status === 'approved')
+  if (props.filterModel) {
+    approved = approved.filter(img => img.checkpoint_model === props.filterModel)
+  }
+  return approved
+})
+
+const shortModelName = computed(() => {
+  if (!props.filterModel) return ''
+  return props.filterModel.replace('.safetensors', '').replace(/_/g, ' ')
 })
 
 const heroImage = computed(() => {
@@ -220,6 +233,14 @@ const secondaryThumbs = computed(() => {
 .badge-count {
   background: rgba(0, 0, 0, 0.6);
   color: var(--text-primary);
+}
+
+.badge-model {
+  background: rgba(160, 120, 80, 0.85);
+  color: #fff;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Card body */
