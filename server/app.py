@@ -92,6 +92,10 @@ async def startup():
     orchestrator.register_orchestrator_handlers()
     await orchestrator.start_tick_loop()
 
+    # Recover any shots stuck in 'generating' from before this restart
+    from packages.scene_generation.builder import recover_interrupted_generations
+    await recover_interrupted_generations()
+
     logger.info("Tower Anime Studio v3.5 started — 8 packages + graph + orchestrator mounted")
 
 

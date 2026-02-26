@@ -207,6 +207,73 @@ async def poll_comfyui_completion(prompt_id: str, timeout_seconds: int = 1800) -
     return {"status": "timeout", "output_files": []}
 
 
+async def recover_interrupted_generations():
+    """On startup, find shots stuck in 'generating' and re-queue their scenes.
+
+    Orderly: waits for ComfyUI, resets stuck shots to pending,
+    then re-triggers scene generation one at a time via existing lock.
+    """
+    conn = await connect_direct()
+    try:
+        # 1. Find all stuck shots (status = 'generating')
+        stuck = await conn.fetch("""
+            SELECT sh.id, sh.scene_id, s.title, s.project_id
+            FROM shots sh
+            JOIN scenes s ON sh.scene_id = s.id
+            WHERE sh.status = 'generating'
+        """)
+        if not stuck:
+            logger.info("Recovery: no stuck shots found")
+            return
+
+        logger.warning(f"Recovery: found {len(stuck)} stuck shot(s) in 'generating' state")
+
+        # 2. Collect unique scene IDs (preserve order)
+        scene_ids = list(dict.fromkeys(row["scene_id"] for row in stuck))
+
+        # 3. Reset stuck shots to pending
+        reset_count = await conn.execute("""
+            UPDATE shots SET status = 'pending', error_message = 'reset by startup recovery'
+            WHERE status = 'generating'
+        """)
+        logger.info(f"Recovery: reset {reset_count} shot(s) to pending")
+
+        # 4. Reset their scenes' generation_status and current_generating_shot_id
+        for sid in scene_ids:
+            await conn.execute("""
+                UPDATE scenes SET generation_status = 'pending',
+                       current_generating_shot_id = NULL
+                WHERE id = $1 AND generation_status = 'generating'
+            """, sid)
+
+        # 5. Wait for ComfyUI to be reachable before re-queuing
+        import urllib.request
+        comfyui_ready = False
+        for attempt in range(30):  # up to 30 x 2s = 60s
+            try:
+                req = urllib.request.Request(f"{COMFYUI_URL}/system_stats")
+                urllib.request.urlopen(req, timeout=5)
+                comfyui_ready = True
+                break
+            except Exception:
+                await asyncio.sleep(2)
+
+        if not comfyui_ready:
+            logger.error("Recovery: ComfyUI not reachable after 60s, skipping re-queue")
+            return
+
+        # 6. Re-queue each scene via existing generate_scene() (uses _scene_generation_lock)
+        for sid in scene_ids:
+            scene_title = next((r["title"] for r in stuck if r["scene_id"] == sid), "?")
+            logger.info(f"Recovery: re-queuing scene '{scene_title}' ({sid})")
+            task = asyncio.create_task(generate_scene(str(sid)))
+            _scene_generation_tasks[str(sid)] = task
+
+        logger.info(f"Recovery: re-queued {len(scene_ids)} scene(s) for generation")
+    finally:
+        await conn.close()
+
+
 async def generate_scene(scene_id: str):
     """Background task: generate all shots sequentially with continuity chaining.
 
