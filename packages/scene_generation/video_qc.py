@@ -218,10 +218,11 @@ async def run_qc_loop(
             thresholds.append(round(t, 2))
 
     # Current prompt/negative — will be modified across attempts
-    current_prompt = shot_data["motion_prompt"] or shot_data.get("generation_prompt") or ""
+    motion_prompt = shot_data["motion_prompt"] or shot_data.get("generation_prompt") or ""
     current_negative = "low quality, blurry, distorted, watermark"
     shot_engine = shot_data.get("video_engine") or "framepack"
-    shot_steps = shot_data.get("steps") or 25
+    shot_steps = shot_data.get("steps") or 30
+    shot_guidance = shot_data.get("guidance_scale") or 6.0
     shot_seconds = float(shot_data.get("duration_seconds") or 3)
     shot_use_f1 = shot_data.get("use_f1") or False
     original_seed = shot_data.get("seed")
@@ -231,6 +232,28 @@ async def run_qc_loop(
     chars = shot_data.get("characters_present")
     if chars and isinstance(chars, list) and len(chars) > 0:
         character_slug = chars[0]
+
+    # Build identity-anchored prompt for FramePack I2V
+    # FramePack preserves character likeness best when the text prompt
+    # reinforces the source image's character description
+    current_prompt = motion_prompt
+    if character_slug and shot_engine in ("framepack", "framepack_f1"):
+        try:
+            char_row = await conn.fetchrow(
+                "SELECT design_prompt FROM characters "
+                "WHERE REGEXP_REPLACE(LOWER(REPLACE(name, ' ', '_')), '[^a-z0-9_-]', '', 'g') = $1",
+                character_slug,
+            )
+            if char_row and char_row["design_prompt"]:
+                design = char_row["design_prompt"].strip().rstrip(",. ")
+                current_prompt = (
+                    f"{design}, {motion_prompt}, consistent character appearance"
+                )
+                logger.info(
+                    f"Shot {shot_id}: identity-anchored prompt for '{character_slug}'"
+                )
+        except Exception as e:
+            logger.warning(f"Shot {shot_id}: design_prompt lookup failed: {e}")
 
     best_video = None
     best_quality = 0.0
@@ -288,6 +311,8 @@ async def run_qc_loop(
             else:
                 # framepack or framepack_f1
                 use_f1 = shot_engine == "framepack_f1" or shot_use_f1
+                # Lower guidance on retry to lean harder on the source image
+                retry_guidance = shot_guidance if attempt == 0 else max(5.0, shot_guidance - 1.0)
                 workflow_data, sampler_node_id, prefix = build_framepack_workflow(
                     prompt_text=current_prompt,
                     image_path=image_filename,
@@ -297,6 +322,7 @@ async def run_qc_loop(
                     seed=shot_seed,
                     negative_text=current_negative,
                     gpu_memory_preservation=6.0,
+                    guidance_scale=retry_guidance,
                 )
                 comfyui_prompt_id = _submit_comfyui_workflow(workflow_data["prompt"])
 
@@ -385,6 +411,10 @@ async def run_qc_loop(
                     review.get("per_frame", []),
                     review_status,
                 )
+                await _record_source_image_effectiveness(
+                    conn, shot_data, shot_quality,
+                    review.get("category_averages", {}),
+                )
 
                 return {
                     "accepted": True,
@@ -463,6 +493,9 @@ async def run_qc_loop(
         await _store_qc_review_data(
             conn, shot_id, best_issues, {}, [], review_status,
         )
+        await _record_source_image_effectiveness(
+            conn, shot_data, best_quality, {},
+        )
 
     return {
         "accepted": best_quality >= min_threshold,
@@ -502,6 +535,51 @@ async def _store_qc_review_data(
         )
     except Exception as e:
         logger.warning(f"Failed to store QC review data for shot {shot_id}: {e}")
+
+
+async def _record_source_image_effectiveness(
+    conn,
+    shot_data: dict,
+    quality_score: float,
+    category_averages: dict,
+):
+    """Record how well a source image performed for video generation.
+
+    Writes to source_image_effectiveness table so future image selection
+    can factor in historical video quality.
+    """
+    source_path = shot_data.get("source_image_path")
+    if not source_path:
+        return
+
+    # Extract character slug and image name from path like "slug/images/filename.png"
+    parts = source_path.replace("\\", "/").split("/")
+    if len(parts) >= 3 and parts[-2] == "images":
+        character_slug = parts[-3] if len(parts) >= 3 else parts[0]
+        image_name = parts[-1]
+    elif len(parts) >= 1:
+        character_slug = (shot_data.get("characters_present") or [None])[0] if isinstance(shot_data.get("characters_present"), list) else None
+        image_name = parts[-1]
+    else:
+        return
+
+    if not character_slug:
+        return
+
+    video_engine = shot_data.get("video_engine") or "framepack"
+    char_match = category_averages.get("character_match")
+    style_match = category_averages.get("style_match")
+
+    try:
+        await conn.execute("""
+            INSERT INTO source_image_effectiveness
+                (character_slug, image_name, shot_id, video_quality_score,
+                 character_match, style_match, video_engine)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+        """, character_slug, image_name, shot_data["id"],
+            quality_score, char_match, style_match, video_engine)
+    except Exception as e:
+        logger.warning(f"Failed to record source image effectiveness: {e}")
 
 
 async def check_engine_blacklist(

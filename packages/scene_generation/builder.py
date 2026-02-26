@@ -19,6 +19,7 @@ from packages.core.audit import log_decision
 from .framepack import build_framepack_workflow, _submit_comfyui_workflow
 from .ltx_video import build_ltx_workflow, _submit_comfyui_workflow as _submit_ltx_workflow
 from .wan_video import build_wan_t2v_workflow, _submit_comfyui_workflow as _submit_wan_workflow
+from .image_recommender import recommend_for_scene, batch_read_metadata
 
 # Re-export from sub-modules so existing imports keep working
 from .scene_video_utils import (  # noqa: F401
@@ -53,48 +54,6 @@ _scene_generation_tasks: dict[str, asyncio.Task] = {}
 # Semaphore: only 1 scene generates at a time (GPU memory constraint)
 _scene_generation_lock = asyncio.Semaphore(1)
 
-# Progressive quality gate thresholds
-# Each retry loosens the gate so we don't loop forever
-_QUALITY_GATES = [
-    {"threshold": 0.6, "label": "high"},     # Attempt 1: aim high
-    {"threshold": 0.45, "label": "medium"},   # Attempt 2: acceptable
-    {"threshold": 0.3, "label": "low"},       # Attempt 3: minimum viable
-]
-_MAX_RETRIES = len(_QUALITY_GATES)
-_SHOT_QUALITY_THRESHOLD = _QUALITY_GATES[-1]["threshold"]  # absolute floor
-
-# Video shot auto-review thresholds (loaded from DB, fallback to these)
-_DEFAULT_VIDEO_AUTO_APPROVE = 0.65
-_DEFAULT_VIDEO_AUTO_REJECT = 0.35
-
-
-async def _auto_review_shot(conn, quality_score: float) -> str:
-    """Determine review_status for a shot based on quality gates from DB.
-
-    Returns: 'approved', 'rejected', or 'pending_review'.
-    """
-    try:
-        approve_row = await conn.fetchrow(
-            "SELECT threshold_value FROM quality_gates "
-            "WHERE gate_name = 'auto_approve_threshold' AND is_active = true"
-        )
-        reject_row = await conn.fetchrow(
-            "SELECT threshold_value FROM quality_gates "
-            "WHERE gate_name = 'auto_reject_threshold' AND is_active = true"
-        )
-        # Video thresholds are lower than image thresholds — video is harder
-        # Use 80% of image thresholds as video thresholds
-        approve_thresh = (approve_row["threshold_value"] * 0.8) if approve_row else _DEFAULT_VIDEO_AUTO_APPROVE
-        reject_thresh = (reject_row["threshold_value"] * 0.8) if reject_row else _DEFAULT_VIDEO_AUTO_REJECT
-    except Exception:
-        approve_thresh = _DEFAULT_VIDEO_AUTO_APPROVE
-        reject_thresh = _DEFAULT_VIDEO_AUTO_REJECT
-
-    if quality_score >= approve_thresh:
-        return "approved"
-    elif quality_score < reject_thresh:
-        return "rejected"
-    return "pending_review"
 
 
 async def _assemble_scene(conn, scene_id, video_paths: list[str] | None = None, shots=None):
@@ -261,6 +220,186 @@ async def generate_scene(scene_id: str):
         _scene_generation_lock.release()
 
 
+async def ensure_source_images(conn, scene_id: str, shots: list) -> int:
+    """Auto-assign best source images to shots that have NULL source_image_path.
+
+    Uses the image recommender to score and rank approved images per character.
+    Skips shots using text-only engines (wan).
+
+    Returns the number of shots that were auto-assigned.
+    """
+    null_shots = [
+        s for s in shots
+        if not s["source_image_path"]
+        and (s.get("video_engine") or "framepack") != "wan"
+    ]
+    if not null_shots:
+        return 0
+
+    # Build approved image map from approval_status.json
+    all_slugs: set[str] = set()
+    for shot in null_shots:
+        chars = shot.get("characters_present")
+        if chars and isinstance(chars, list):
+            all_slugs.update(chars)
+
+    if not all_slugs:
+        logger.warning(f"Scene {scene_id}: shots need source images but no characters_present set")
+        return 0
+
+    approved: dict[str, list[str]] = {}
+    for slug in all_slugs:
+        approval_file = BASE_PATH / slug / "approval_status.json"
+        images_dir = BASE_PATH / slug / "images"
+        if not images_dir.exists():
+            continue
+        if approval_file.exists():
+            try:
+                with open(approval_file) as f:
+                    statuses = json.load(f)
+                imgs = [
+                    name for name, st in statuses.items()
+                    if (st == "approved" or (isinstance(st, dict) and st.get("status") == "approved"))
+                    and (images_dir / name).exists()
+                ]
+                if imgs:
+                    approved[slug] = sorted(imgs)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(f"Failed to read approval_status.json for {slug}: {e}")
+
+    if not approved:
+        # Mark all null shots as failed — no images available
+        for shot in null_shots:
+            await conn.execute(
+                "UPDATE shots SET status = 'failed', "
+                "error_message = 'No approved images available for auto-assignment' "
+                "WHERE id = $1", shot["id"],
+            )
+        logger.error(f"Scene {scene_id}: no approved images for any character — {len(null_shots)} shots failed")
+        return 0
+
+    # Batch-fetch video effectiveness scores (one query per character, not per image)
+    video_scores: dict[str, dict[str, float]] = {}
+    for slug in all_slugs:
+        try:
+            rows = await conn.fetch(
+                "SELECT image_name, AVG(video_quality_score) as avg_score "
+                "FROM source_image_effectiveness "
+                "WHERE character_slug = $1 AND video_quality_score IS NOT NULL "
+                "GROUP BY image_name",
+                slug,
+            )
+            if rows:
+                video_scores[slug] = {r["image_name"]: float(r["avg_score"]) for r in rows}
+        except Exception as e:
+            logger.debug(f"Video effectiveness lookup for {slug}: {e}")
+
+    # Build shot dicts for recommender (include motion_prompt for description matching)
+    shot_list = [{
+        "id": str(s["id"]),
+        "shot_number": s["shot_number"],
+        "shot_type": s["shot_type"],
+        "camera_angle": s["camera_angle"],
+        "characters_present": s["characters_present"] or [],
+        "source_image_path": s["source_image_path"],
+        "motion_prompt": s.get("motion_prompt"),
+    } for s in shots]  # Pass ALL shots for diversity tracking
+
+    recommendations = recommend_for_scene(
+        BASE_PATH, shot_list, approved, top_n=1, video_scores=video_scores,
+    )
+
+    assigned_count = 0
+    for rec in recommendations:
+        shot_id = rec["shot_id"]
+        # Only assign to shots that actually need it
+        if rec["current_source"]:
+            continue
+        top_recs = rec.get("recommendations", [])
+        if not top_recs:
+            # No recommendation available for this shot's character
+            await conn.execute(
+                "UPDATE shots SET status = 'failed', "
+                "error_message = 'No approved images for character(s) in this shot' "
+                "WHERE id = $1", shot_id,
+            )
+            continue
+
+        best = top_recs[0]
+        image_path = f"{best['slug']}/images/{best['image_name']}"
+
+        await conn.execute(
+            "UPDATE shots SET source_image_path = $2, source_image_auto_assigned = TRUE WHERE id = $1",
+            shot_id, image_path,
+        )
+        assigned_count += 1
+
+        await log_decision(
+            decision_type="source_image_auto_assign",
+            input_context={
+                "shot_id": str(shot_id),
+                "scene_id": str(scene_id),
+                "character_slug": best["slug"],
+                "image_name": best["image_name"],
+                "score": best["score"],
+                "reason": best["reason"],
+            },
+            decision_made="auto_assigned",
+            confidence_score=best["score"],
+            reasoning=f"Auto-assigned {best['image_name']} (score={best['score']:.3f}, {best['reason']})",
+        )
+        logger.info(
+            f"Shot {shot_id}: auto-assigned {image_path} "
+            f"(score={best['score']:.3f}, {best['reason']})"
+        )
+
+    if assigned_count:
+        logger.info(f"Scene {scene_id}: auto-assigned source images for {assigned_count}/{len(null_shots)} shots")
+
+    return assigned_count
+
+
+async def _get_continuity_frame(conn, project_id: int, character_slug: str, current_scene_id) -> str | None:
+    """Look up the most recent generated frame for this character from a prior scene.
+
+    Returns the frame path if it exists and the file is on disk, else None.
+    Only returns frames from OTHER scenes (not the current one) to avoid
+    self-referencing within the same scene's shot loop.
+    """
+    row = await conn.fetchrow("""
+        SELECT frame_path FROM character_continuity_frames
+        WHERE project_id = $1 AND character_slug = $2 AND scene_id != $3
+    """, project_id, character_slug, current_scene_id)
+    if row and row["frame_path"] and Path(row["frame_path"]).exists():
+        return row["frame_path"]
+    return None
+
+
+async def _save_continuity_frame(
+    conn, project_id: int, character_slug: str,
+    scene_id, shot_id, frame_path: str,
+    scene_number: int | None = None, shot_number: int | None = None,
+):
+    """Save/update the most recent frame for a character in this project.
+
+    Uses UPSERT — one row per (project_id, character_slug), always the latest.
+    """
+    await conn.execute("""
+        INSERT INTO character_continuity_frames
+            (project_id, character_slug, scene_id, shot_id, frame_path,
+             scene_number, shot_number, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+        ON CONFLICT (project_id, character_slug) DO UPDATE SET
+            scene_id = EXCLUDED.scene_id,
+            shot_id = EXCLUDED.shot_id,
+            frame_path = EXCLUDED.frame_path,
+            scene_number = EXCLUDED.scene_number,
+            shot_number = EXCLUDED.shot_number,
+            created_at = now()
+    """, project_id, character_slug, scene_id, shot_id, frame_path,
+         scene_number, shot_number)
+
+
 async def _generate_scene_impl(scene_id: str):
     """Inner implementation — do not call directly, use generate_scene()."""
     import time as _time
@@ -278,14 +417,31 @@ async def _generate_scene_impl(scene_id: str):
             )
             return
 
+        # Get project_id and scene_number for continuity tracking
+        scene_row = await conn.fetchrow(
+            "SELECT project_id, scene_number FROM scenes WHERE id = $1", scene_id
+        )
+        project_id = scene_row["project_id"] if scene_row else None
+        scene_number = scene_row["scene_number"] if scene_row else None
+
         await conn.execute(
             "UPDATE scenes SET generation_status = 'generating', total_shots = $2 WHERE id = $1",
             scene_id, len(shots),
         )
 
+        # Auto-assign source images for shots that don't have one
+        auto_assigned = await ensure_source_images(conn, scene_id, shots)
+        if auto_assigned:
+            # Re-fetch shots to get updated source_image_path values
+            shots = await conn.fetch(
+                "SELECT * FROM shots WHERE scene_id = $1 ORDER BY shot_number",
+                scene_id,
+            )
+
         completed_videos = []
         completed_count = 0
         prev_last_frame = None
+        prev_character = None
 
         for shot in shots:
             shot_id = shot["id"]
@@ -297,13 +453,21 @@ async def _generate_scene_impl(scene_id: str):
                 completed_videos.append(shot["output_video_path"])
                 completed_count += 1
                 prev_last_frame = shot["last_frame_path"]
+                skip_chars = shot.get("characters_present")
+                prev_character = skip_chars[0] if skip_chars and isinstance(skip_chars, list) else None
+                # Backfill continuity frame from already-completed shots
+                if prev_character and prev_last_frame and project_id:
+                    try:
+                        await _save_continuity_frame(
+                            conn, project_id, prev_character,
+                            scene_id, shot_id, prev_last_frame,
+                            scene_number=scene_number,
+                            shot_number=shot.get("shot_number"),
+                        )
+                    except Exception:
+                        pass
                 logger.info(f"Shot {shot_id}: already completed, skipping")
                 continue
-
-            shot_accepted = False
-            best_video = None
-            best_quality = 0.0
-            best_last_frame = None
 
             await conn.execute(
                 "UPDATE shots SET status = 'generating' WHERE id = $1", shot_id
@@ -313,58 +477,209 @@ async def _generate_scene_impl(scene_id: str):
                 scene_id, shot_id,
             )
 
-            # QC loop: multi-frame review with prompt refinement
+            # Single-pass generation — no QC vision review, all shots go to manual review
             try:
-                from .video_qc import run_qc_loop
+                from .video_qc import check_engine_blacklist
+                from .framepack import build_framepack_workflow, _submit_comfyui_workflow
+                from .ltx_video import build_ltx_workflow, _submit_comfyui_workflow as _submit_ltx_workflow
+                from .wan_video import build_wan_t2v_workflow, _submit_comfyui_workflow as _submit_wan_workflow
+                import time as _time_inner
 
-                # Pass previous shot's last frame for continuity chaining
                 shot_dict = dict(shot)
-                shot_dict["_prev_last_frame"] = prev_last_frame
+                shot_engine = shot_dict.get("video_engine") or "framepack"
+                character_slug = None
+                chars = shot_dict.get("characters_present")
+                if chars and isinstance(chars, list) and len(chars) > 0:
+                    character_slug = chars[0]
 
-                qc_result = await run_qc_loop(
-                    shot_data=shot_dict,
-                    conn=conn,
-                    max_attempts=_MAX_RETRIES,
-                    accept_threshold=_QUALITY_GATES[0]["threshold"],
-                    min_threshold=_QUALITY_GATES[-1]["threshold"],
+                # Engine blacklist check
+                if character_slug:
+                    project_id = None
+                    try:
+                        scene_row = await conn.fetchrow("SELECT project_id FROM scenes WHERE id = $1", scene_id)
+                        if scene_row:
+                            project_id = scene_row["project_id"]
+                    except Exception:
+                        pass
+                    bl = await check_engine_blacklist(conn, character_slug, project_id, shot_engine)
+                    if bl:
+                        logger.warning(f"Shot {shot_id}: engine '{shot_engine}' blacklisted for '{character_slug}'")
+                        await conn.execute(
+                            "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
+                            shot_id, f"Engine '{shot_engine}' blacklisted: {bl.get('reason', '')}",
+                        )
+                        continue
+
+                # Build identity-anchored prompt
+                motion_prompt = shot_dict["motion_prompt"] or shot_dict.get("generation_prompt") or ""
+                current_prompt = motion_prompt
+                if character_slug and shot_engine in ("framepack", "framepack_f1"):
+                    try:
+                        char_row = await conn.fetchrow(
+                            "SELECT design_prompt FROM characters "
+                            "WHERE REGEXP_REPLACE(LOWER(REPLACE(name, ' ', '_')), '[^a-z0-9_-]', '', 'g') = $1",
+                            character_slug,
+                        )
+                        if char_row and char_row["design_prompt"]:
+                            design = char_row["design_prompt"].strip().rstrip(",. ")
+                            current_prompt = f"{design}, {motion_prompt}, consistent character appearance"
+                            logger.info(f"Shot {shot_id}: identity-anchored prompt for '{character_slug}'")
+                    except Exception as e:
+                        logger.warning(f"Shot {shot_id}: design_prompt lookup failed: {e}")
+
+                current_negative = "low quality, blurry, distorted, watermark"
+                shot_steps = shot_dict.get("steps") or 25
+                shot_guidance = shot_dict.get("guidance_scale") or 6.0
+                shot_seconds = float(shot_dict.get("duration_seconds") or 3)
+                shot_use_f1 = shot_dict.get("use_f1") or False
+                shot_seed = shot_dict.get("seed")
+
+                # Determine first frame source — priority order:
+                # 1. Previous shot's last frame (same character, same scene) — intra-scene continuity
+                # 2. Cross-scene continuity frame (same character, prior scene) — inter-scene continuity
+                # 3. Auto-assigned source image from approved pool — cold start
+                same_char_prev_shot = (
+                    prev_last_frame
+                    and prev_character
+                    and character_slug == prev_character
+                    and Path(prev_last_frame).exists()
+                )
+                if same_char_prev_shot:
+                    # Priority 1: chain from previous shot in this scene
+                    first_frame_path = prev_last_frame
+                    image_filename = await copy_to_comfyui_input(first_frame_path)
+                    logger.info(f"Shot {shot_id}: continuity chain from previous shot (same character: {character_slug})")
+                else:
+                    # Priority 2: check for cross-scene continuity frame
+                    cross_scene_frame = None
+                    if character_slug and project_id:
+                        cross_scene_frame = await _get_continuity_frame(
+                            conn, project_id, character_slug, scene_id
+                        )
+
+                    if cross_scene_frame:
+                        first_frame_path = cross_scene_frame
+                        image_filename = await copy_to_comfyui_input(first_frame_path)
+                        logger.info(
+                            f"Shot {shot_id}: cross-scene continuity frame for '{character_slug}' "
+                            f"(from prior scene)"
+                        )
+                    else:
+                        # Priority 3: fall back to auto-assigned source image
+                        source_path = shot_dict.get("source_image_path")
+                        if not source_path:
+                            logger.error(f"Shot {shot_id}: no source image and no continuity frame available")
+                            await conn.execute(
+                                "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
+                                shot_id, "No source image available (auto-assignment failed or no characters_present)")
+                            continue
+                        image_filename = await copy_to_comfyui_input(source_path)
+                        first_frame_path = str(BASE_PATH / source_path) if not Path(source_path).is_absolute() else source_path
+                        if prev_character and character_slug != prev_character:
+                            logger.info(f"Shot {shot_id}: character switch {prev_character} → {character_slug}, using source image")
+
+                attempt_start = _time_inner.time()
+
+                # Dispatch to video engine
+                if shot_engine == "wan":
+                    fps = 16
+                    num_frames = max(9, int(shot_seconds * fps) + 1)
+                    workflow, prefix = build_wan_t2v_workflow(
+                        prompt_text=current_prompt, num_frames=num_frames, fps=fps,
+                        steps=shot_steps, seed=shot_seed, use_gguf=True,
+                    )
+                    comfyui_prompt_id = _submit_wan_workflow(workflow)
+                elif shot_engine == "ltx":
+                    fps = 24
+                    num_frames = max(9, int(shot_seconds * fps) + 1)
+                    workflow, prefix = build_ltx_workflow(
+                        prompt_text=current_prompt,
+                        image_path=image_filename if image_filename else None,
+                        num_frames=num_frames, fps=fps, steps=shot_steps,
+                        seed=shot_seed,
+                        lora_name=shot_dict.get("lora_name"),
+                        lora_strength=shot_dict.get("lora_strength", 0.8),
+                    )
+                    comfyui_prompt_id = _submit_ltx_workflow(workflow)
+                else:
+                    use_f1 = shot_engine == "framepack_f1" or shot_use_f1
+                    workflow_data, sampler_node_id, prefix = build_framepack_workflow(
+                        prompt_text=current_prompt, image_path=image_filename,
+                        total_seconds=shot_seconds, steps=shot_steps, use_f1=use_f1,
+                        seed=shot_seed, negative_text=current_negative,
+                        gpu_memory_preservation=6.0, guidance_scale=shot_guidance,
+                    )
+                    comfyui_prompt_id = _submit_comfyui_workflow(workflow_data["prompt"])
+
+                await conn.execute(
+                    "UPDATE shots SET comfyui_prompt_id = $2, first_frame_path = $3 WHERE id = $1",
+                    shot_id, comfyui_prompt_id, first_frame_path,
                 )
 
-                best_video = qc_result.get("video_path")
-                best_last_frame = qc_result.get("last_frame_path")
-                best_quality = qc_result.get("quality_score", 0.0)
-                shot_accepted = qc_result.get("accepted", False)
-                gen_time = qc_result.get("generation_time", 0.0)
+                result = await poll_comfyui_completion(comfyui_prompt_id)
+                gen_time = _time_inner.time() - attempt_start
+
+                if result["status"] != "completed" or not result["output_files"]:
+                    await conn.execute(
+                        "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
+                        shot_id, f"ComfyUI {result['status']}",
+                    )
+                    continue
+
+                video_filename = result["output_files"][0]
+                video_path = str(COMFYUI_OUTPUT_DIR / video_filename)
+                last_frame = await extract_last_frame(video_path)
+
+                # Record source image effectiveness for the feedback loop
+                source_path = shot_dict.get("source_image_path")
+                if source_path:
+                    parts = source_path.replace("\\", "/").split("/")
+                    if len(parts) >= 3 and parts[-2] == "images":
+                        eff_slug = parts[0] if len(parts) == 3 else parts[-3]
+                        try:
+                            await conn.execute("""
+                                INSERT INTO source_image_effectiveness
+                                    (character_slug, image_name, shot_id, video_quality_score, video_engine)
+                                VALUES ($1, $2, $3, NULL, $4)
+                            """, eff_slug, parts[-1], shot_id, shot_engine)
+                        except Exception:
+                            pass
+
+                completed_count += 1
+                completed_videos.append(video_path)
+                prev_last_frame = last_frame
+                prev_character = character_slug
+
+                await conn.execute("""
+                    UPDATE shots SET status = 'completed', output_video_path = $2,
+                           last_frame_path = $3, generation_time_seconds = $4,
+                           review_status = 'pending_review'
+                    WHERE id = $1
+                """, shot_id, video_path, last_frame, gen_time)
+
+                # Save continuity frame for cross-scene reuse
+                if character_slug and last_frame and project_id:
+                    try:
+                        await _save_continuity_frame(
+                            conn, project_id, character_slug,
+                            scene_id, shot_id, last_frame,
+                            scene_number=scene_number,
+                            shot_number=shot_dict.get("shot_number"),
+                        )
+                        logger.info(
+                            f"Shot {shot_id}: saved continuity frame for '{character_slug}' "
+                            f"(scene {scene_number})"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Shot {shot_id}: failed to save continuity frame: {e}")
+
+                logger.info(f"Shot {shot_id}: generated in {gen_time:.0f}s → pending_review")
 
             except Exception as e:
-                logger.error(f"Shot {shot_id} QC loop failed: {e}")
+                logger.error(f"Shot {shot_id} generation failed: {e}")
                 await conn.execute(
                     "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
                     shot_id, str(e)[:500],
-                )
-
-            # Use best result even if no attempt fully passed
-            if best_video:
-                completed_count += 1
-                completed_videos.append(best_video)
-                prev_last_frame = best_last_frame
-                shot_status = "completed" if shot_accepted else "accepted_best"
-
-                # Auto-approve/reject based on quality gates from DB
-                review_status = await _auto_review_shot(conn, best_quality)
-                await conn.execute("""
-                    UPDATE shots SET status = $2, output_video_path = $3,
-                           last_frame_path = $4, generation_time_seconds = $5,
-                           quality_score = $6, review_status = $7
-                    WHERE id = $1
-                """, shot_id, shot_status, best_video, best_last_frame,
-                    gen_time, best_quality, review_status)
-                logger.info(
-                    f"Shot {shot_id}: quality={best_quality:.2f} → {review_status}"
-                )
-            else:
-                await conn.execute(
-                    "UPDATE shots SET status = 'failed', error_message = 'All attempts failed' WHERE id = $1",
-                    shot_id,
                 )
 
             await conn.execute(

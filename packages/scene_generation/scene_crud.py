@@ -48,7 +48,8 @@ async def list_scenes(project_id: int):
                    actual_duration_seconds, total_shots, completed_shots,
                    final_video_path, created_at,
                    audio_track_id, audio_track_name, audio_track_artist,
-                   audio_preview_url, audio_fade_in, audio_fade_out, audio_start_offset
+                   audio_preview_url, audio_fade_in, audio_fade_out, audio_start_offset,
+                   audio_auto_duck, audio_generation_mode, audio_source_playlist_id
             FROM scenes WHERE project_id = $1
             ORDER BY scene_number NULLS LAST, created_at
         """, project_id)
@@ -78,6 +79,9 @@ async def list_scenes(project_id: int):
                     "fade_in": r["audio_fade_in"],
                     "fade_out": r["audio_fade_out"],
                     "start_offset": r["audio_start_offset"],
+                    "auto_duck": r["audio_auto_duck"] or False,
+                    "generation_mode": r["audio_generation_mode"],
+                    "source_playlist_id": r["audio_source_playlist_id"],
                 }
             scenes.append(scene_data)
         return {"scenes": scenes}
@@ -90,19 +94,22 @@ async def create_scene(body: SceneCreateRequest):
     """Create a new scene."""
     conn = await connect_direct()
     try:
-        max_num = await conn.fetchval(
-            "SELECT COALESCE(MAX(scene_number), 0) FROM scenes WHERE project_id = $1",
-            body.project_id)
-        row = await conn.fetchrow("""
-            INSERT INTO scenes (project_id, title, description, location, time_of_day,
-                                weather, mood, target_duration_seconds, scene_number, generation_status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft')
-            RETURNING id, created_at
-        """, body.project_id, body.title, body.description, body.location,
-            body.time_of_day, body.weather, body.mood, body.target_duration_seconds,
-            (max_num or 0) + 1)
+        async with conn.transaction():
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", body.project_id)
+            max_num = await conn.fetchval(
+                "SELECT COALESCE(MAX(scene_number), 0) FROM scenes WHERE project_id = $1",
+                body.project_id)
+            scene_num = (max_num or 0) + 1
+            row = await conn.fetchrow("""
+                INSERT INTO scenes (project_id, title, description, location, time_of_day,
+                                    weather, mood, target_duration_seconds, scene_number, generation_status)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft')
+                RETURNING id, created_at
+            """, body.project_id, body.title, body.description, body.location,
+                body.time_of_day, body.weather, body.mood, body.target_duration_seconds,
+                scene_num)
         return {
-            "id": str(row["id"]), "scene_number": (max_num or 0) + 1,
+            "id": str(row["id"]), "scene_number": scene_num,
             "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         }
     finally:
@@ -110,24 +117,26 @@ async def create_scene(body: SceneCreateRequest):
 
 
 @router.post("/scenes/generate-from-story")
-async def generate_scenes_from_story_endpoint(project_id: int):
+async def generate_scenes_from_story_endpoint(project_id: int, episode_id: str | None = None):
     """Auto-generate scene breakdowns from project storyline using AI.
 
     Persists generated scenes AND their shots to the database.
+    If episode_id is provided, generates scenes for that specific episode and
+    links them via episode_scenes junction table.
     """
     from .story_to_scenes import generate_scenes_from_story
     try:
-        scenes = await generate_scenes_from_story(project_id)
+        scenes = await generate_scenes_from_story(project_id, episode_id=episode_id)
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=502, detail=f"AI returned invalid JSON: {e}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Story-to-scenes generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Story-to-scenes generation failed: {type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}" or "Unknown error")
 
     # Persist scenes + shots to DB
-    saved = await _persist_scenes_and_shots(project_id, scenes)
+    saved = await _persist_scenes_and_shots(project_id, scenes, episode_id=episode_id)
     return {"project_id": project_id, "scenes": saved, "count": len(saved)}
 
 
@@ -138,9 +147,12 @@ def _name_to_slug(name: str) -> str:
 
 
 async def _persist_scenes_and_shots(
-    project_id: int, scenes: list[dict]
+    project_id: int, scenes: list[dict], episode_id: str | None = None,
 ) -> list[dict]:
     """Insert AI-generated scenes and their suggested_shots into the DB.
+
+    Uses advisory lock for atomic scene numbering.
+    If episode_id is provided, links scenes to episode via episode_scenes table.
 
     Returns list of saved scenes with their DB ids and shot ids.
     """
@@ -151,58 +163,87 @@ async def _persist_scenes_and_shots(
             "SELECT name FROM characters WHERE project_id = $1", project_id)
         char_slug_map = {c["name"].lower(): _name_to_slug(c["name"]) for c in chars}
 
-        max_num = await conn.fetchval(
-            "SELECT COALESCE(MAX(scene_number), 0) FROM scenes WHERE project_id = $1",
-            project_id)
+        ep_uuid = None
+        if episode_id:
+            ep_uuid = uuid.UUID(episode_id)
 
         saved = []
-        for i, scene in enumerate(scenes):
-            scene_num = (max_num or 0) + i + 1
-            row = await conn.fetchrow("""
-                INSERT INTO scenes (project_id, title, description, location,
-                                    time_of_day, mood, target_duration_seconds,
-                                    scene_number, generation_status)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft')
-                RETURNING id
-            """, project_id, scene.get("title"), scene.get("description"),
-                scene.get("location"), scene.get("time_of_day"),
-                scene.get("mood"), None, scene_num)
+        async with conn.transaction():
+            # Lock to prevent concurrent calls from getting the same scene_number
+            await conn.execute("SELECT pg_advisory_xact_lock($1)", project_id)
 
-            scene_id = row["id"]
-            shot_ids = []
-            for j, shot in enumerate(scene.get("suggested_shots", [])):
-                # Resolve dialogue character name to slug
-                dial_char = shot.get("dialogue_character")
-                dial_slug = None
-                if dial_char:
-                    dial_slug = char_slug_map.get(dial_char.lower(), _name_to_slug(dial_char))
+            max_num = await conn.fetchval(
+                "SELECT COALESCE(MAX(scene_number), 0) FROM scenes WHERE project_id = $1",
+                project_id)
 
-                shot_row = await conn.fetchrow("""
-                    INSERT INTO shots (scene_id, shot_number, shot_type,
-                                       duration_seconds, motion_prompt,
-                                       characters_present, status,
-                                       dialogue_text, dialogue_character_slug)
-                    VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
+            # Get max position in episode if linking
+            max_pos = 0
+            if ep_uuid:
+                max_pos = await conn.fetchval(
+                    "SELECT COALESCE(MAX(position), 0) FROM episode_scenes WHERE episode_id = $1",
+                    ep_uuid) or 0
+
+            for i, scene in enumerate(scenes):
+                scene_num = (max_num or 0) + i + 1
+                row = await conn.fetchrow("""
+                    INSERT INTO scenes (project_id, title, description, location,
+                                        time_of_day, mood, target_duration_seconds,
+                                        scene_number, generation_status)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft')
                     RETURNING id
-                """, scene_id, j + 1, shot.get("shot_type", "medium"),
-                    shot.get("duration_seconds", 3),
-                    shot.get("motion_prompt") or shot.get("description", ""),
-                    scene.get("characters") or None,
-                    shot.get("dialogue_text"), dial_slug)
-                shot_ids.append(str(shot_row["id"]))
+                """, project_id, scene.get("title"), scene.get("description"),
+                    scene.get("location"), scene.get("time_of_day"),
+                    scene.get("mood"), None, scene_num)
 
-            # Update total_shots on scene
-            await conn.execute(
-                "UPDATE scenes SET total_shots = $2 WHERE id = $1",
-                scene_id, len(shot_ids))
+                scene_id = row["id"]
+                shot_ids = []
+                # Resolve scene-level character names to slugs for all shots
+                raw_chars = scene.get("characters") or []
+                chars_as_slugs = [
+                    char_slug_map.get(c.lower(), _name_to_slug(c))
+                    for c in raw_chars
+                ] if raw_chars else None
 
-            saved.append({
-                "scene_id": str(scene_id), "scene_number": scene_num,
-                "title": scene.get("title"), "shots_created": len(shot_ids),
-                "shot_ids": shot_ids,
-            })
+                for j, shot in enumerate(scene.get("suggested_shots", [])):
+                    dial_char = shot.get("dialogue_character")
+                    dial_slug = None
+                    if dial_char:
+                        dial_slug = char_slug_map.get(dial_char.lower(), _name_to_slug(dial_char))
 
-        logger.info(f"Persisted {len(saved)} scenes with shots for project {project_id}")
+                    shot_row = await conn.fetchrow("""
+                        INSERT INTO shots (scene_id, shot_number, shot_type,
+                                           duration_seconds, motion_prompt,
+                                           characters_present, status,
+                                           dialogue_text, dialogue_character_slug)
+                        VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
+                        RETURNING id
+                    """, scene_id, j + 1, shot.get("shot_type", "medium"),
+                        shot.get("duration_seconds", 3),
+                        shot.get("motion_prompt") or shot.get("description", ""),
+                        chars_as_slugs,
+                        shot.get("dialogue_text"), dial_slug)
+                    shot_ids.append(str(shot_row["id"]))
+
+                # Update total_shots on scene
+                await conn.execute(
+                    "UPDATE scenes SET total_shots = $2 WHERE id = $1",
+                    scene_id, len(shot_ids))
+
+                # Link to episode if provided
+                if ep_uuid:
+                    await conn.execute("""
+                        INSERT INTO episode_scenes (episode_id, scene_id, position)
+                        VALUES ($1, $2, $3)
+                    """, ep_uuid, scene_id, max_pos + i + 1)
+
+                saved.append({
+                    "scene_id": str(scene_id), "scene_number": scene_num,
+                    "title": scene.get("title"), "shots_created": len(shot_ids),
+                    "shot_ids": shot_ids,
+                })
+
+        logger.info(f"Persisted {len(saved)} scenes with shots for project {project_id}"
+                     + (f" (episode {episode_id})" if episode_id else ""))
         return saved
     finally:
         await conn.close()
@@ -491,6 +532,9 @@ async def get_scene(scene_id: str):
                 "fade_in": scene["audio_fade_in"],
                 "fade_out": scene["audio_fade_out"],
                 "start_offset": scene["audio_start_offset"],
+                "auto_duck": scene.get("audio_auto_duck", False),
+                "generation_mode": scene.get("audio_generation_mode"),
+                "source_playlist_id": scene.get("audio_source_playlist_id"),
             } if scene["audio_track_id"] else None,
             "shots": shot_list,
         }
@@ -614,10 +658,13 @@ async def set_scene_audio(scene_id: str, body: SceneAudioRequest):
         await conn.execute("""
             UPDATE scenes SET audio_track_id = $2, audio_track_name = $3,
                    audio_track_artist = $4, audio_preview_url = $5,
-                   audio_fade_in = $6, audio_fade_out = $7, audio_start_offset = $8
+                   audio_fade_in = $6, audio_fade_out = $7, audio_start_offset = $8,
+                   audio_auto_duck = $9, audio_generation_mode = $10,
+                   audio_source_playlist_id = $11
             WHERE id = $1
         """, sid, body.track_id, body.track_name, body.track_artist,
-            body.preview_url, body.fade_in, body.fade_out, body.start_offset)
+            body.preview_url, body.fade_in, body.fade_out, body.start_offset,
+            body.auto_duck, body.generation_mode, body.source_playlist_id)
         return {
             "message": "Audio track assigned to scene",
             "scene_id": scene_id,
@@ -640,7 +687,9 @@ async def remove_scene_audio(scene_id: str):
             UPDATE scenes SET audio_track_id = NULL, audio_track_name = NULL,
                    audio_track_artist = NULL, audio_preview_url = NULL,
                    audio_preview_path = NULL, audio_fade_in = 1.0,
-                   audio_fade_out = 2.0, audio_start_offset = 0
+                   audio_fade_out = 2.0, audio_start_offset = 0,
+                   audio_auto_duck = FALSE, audio_generation_mode = NULL,
+                   audio_source_playlist_id = NULL
             WHERE id = $1
         """, sid)
         return {"message": "Audio track removed from scene", "scene_id": scene_id}
@@ -1091,6 +1140,68 @@ async def generate_dialogue_for_scene(scene_id: str):
         await conn.close()
 
 
+@router.get("/scenes/source-image-stats")
+async def source_image_stats(project_id: int):
+    """Get source image effectiveness stats per character for a project."""
+    conn = await connect_direct()
+    try:
+        rows = await conn.fetch("""
+            SELECT sie.character_slug,
+                   sie.image_name,
+                   AVG(sie.video_quality_score) as avg_video_quality,
+                   COUNT(*) as times_used,
+                   AVG(sie.character_match) as avg_character_match,
+                   AVG(sie.style_match) as avg_style_match
+            FROM source_image_effectiveness sie
+            JOIN shots sh ON sie.shot_id = sh.id
+            JOIN scenes sc ON sh.scene_id = sc.id
+            WHERE sc.project_id = $1
+              AND sie.video_quality_score IS NOT NULL
+            GROUP BY sie.character_slug, sie.image_name
+            ORDER BY sie.character_slug, avg_video_quality DESC
+        """, project_id)
+
+        auto_counts = await conn.fetch("""
+            SELECT UNNEST(sh.characters_present) as character_slug,
+                   COUNT(*) FILTER (WHERE sh.source_image_auto_assigned = TRUE) as auto_assigned,
+                   COUNT(*) as total_shots
+            FROM shots sh
+            JOIN scenes sc ON sh.scene_id = sc.id
+            WHERE sc.project_id = $1
+            GROUP BY character_slug
+        """, project_id)
+        auto_map = {r["character_slug"]: dict(r) for r in auto_counts}
+
+        # Group by character
+        from collections import defaultdict
+        by_char: dict[str, list] = defaultdict(list)
+        for r in rows:
+            by_char[r["character_slug"]].append({
+                "image_name": r["image_name"],
+                "avg_video_quality": round(float(r["avg_video_quality"]), 3),
+                "times_used": r["times_used"],
+                "avg_character_match": round(float(r["avg_character_match"]), 3) if r["avg_character_match"] else None,
+                "avg_style_match": round(float(r["avg_style_match"]), 3) if r["avg_style_match"] else None,
+            })
+
+        result = []
+        all_slugs = set(by_char.keys()) | set(auto_map.keys())
+        for slug in sorted(all_slugs):
+            images = by_char.get(slug, [])
+            counts = auto_map.get(slug, {})
+            result.append({
+                "character_slug": slug,
+                "top_images": images[:5],
+                "worst_images": images[-3:] if len(images) > 5 else [],
+                "total_shots": counts.get("total_shots", 0),
+                "auto_assigned": counts.get("auto_assigned", 0),
+            })
+
+        return {"project_id": project_id, "characters": result}
+    finally:
+        await conn.close()
+
+
 @router.post("/scenes/generate-all")
 async def generate_all_scenes(project_id: int):
     """Queue generation for all scenes that have shots but no final video."""
@@ -1100,9 +1211,12 @@ async def generate_all_scenes(project_id: int):
             SELECT s.id, s.title, s.generation_status,
                    (SELECT COUNT(*) FROM shots WHERE scene_id = s.id) as shot_count
             FROM scenes s
+            LEFT JOIN episode_scenes es ON es.scene_id = s.id
+            LEFT JOIN episodes ep ON ep.id = es.episode_id
             WHERE s.project_id = $1
               AND s.generation_status NOT IN ('generating', 'completed')
-            ORDER BY s.scene_number NULLS LAST, s.created_at
+            ORDER BY ep.episode_number NULLS LAST, es.position NULLS LAST,
+                     s.scene_number NULLS LAST, s.created_at
         """, project_id)
 
         eligible = [r for r in rows if r["shot_count"] > 0]
@@ -1181,5 +1295,38 @@ async def select_engine_for_shot(scene_id: str, shot_id: str, body: SelectEngine
             "lora_name": body.lora_name,
             "lora_strength": body.lora_strength,
         }
+    finally:
+        await conn.close()
+
+
+@router.get("/continuity-frames")
+async def get_continuity_frames(project_id: int):
+    """View current continuity frames for all characters in a project."""
+    conn = await connect_direct()
+    try:
+        rows = await conn.fetch("""
+            SELECT ccf.character_slug, ccf.frame_path,
+                   ccf.scene_number, ccf.shot_number,
+                   s.title as scene_title, ccf.created_at
+            FROM character_continuity_frames ccf
+            LEFT JOIN scenes s ON s.id = ccf.scene_id
+            WHERE ccf.project_id = $1
+            ORDER BY ccf.character_slug
+        """, project_id)
+        return [dict(r) for r in rows]
+    finally:
+        await conn.close()
+
+
+@router.delete("/continuity-frames")
+async def clear_continuity_frames(project_id: int):
+    """Clear all continuity frames for a project (forces cold start from approved images)."""
+    conn = await connect_direct()
+    try:
+        result = await conn.execute(
+            "DELETE FROM character_continuity_frames WHERE project_id = $1", project_id
+        )
+        count = int(result.split()[-1])
+        return {"deleted": count, "project_id": project_id}
     finally:
         await conn.close()

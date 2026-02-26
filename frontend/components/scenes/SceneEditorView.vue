@@ -144,6 +144,10 @@
         v-if="sceneId"
         :scene-id="sceneId"
         :audio="scene.audio ?? null"
+        :scene-mood="(scene as any).mood || ''"
+        :scene-description="(scene as any).description || ''"
+        :time-of-day="(scene as any).time_of_day || ''"
+        :has-dialogue="shots.some((s: any) => s.dialogue_text)"
         @audio-changed="(a: SceneAudio | null) => emit('audio-changed', a)"
       />
 

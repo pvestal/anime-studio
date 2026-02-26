@@ -88,11 +88,12 @@ def build_framepack_workflow(
     prompt_text: str,
     image_path: str,
     total_seconds: float = 3.0,
-    steps: int = 25,
+    steps: int = 30,
     use_f1: bool = False,
     seed: int | None = None,
     negative_text: str = "low quality, blurry, distorted, watermark",
     gpu_memory_preservation: float = 6.0,
+    guidance_scale: float = 6.0,
 ) -> tuple[dict, str, str]:
     """Build FramePack I2V ComfyUI workflow.
 
@@ -237,7 +238,7 @@ def build_framepack_workflow(
         "use_teacache": True,
         "teacache_rel_l1_thresh": 0.15,
         "cfg": 1.0,
-        "guidance_scale": 10.0,
+        "guidance_scale": guidance_scale,
         "shift": 0.0,
         "seed": seed,
         "latent_window_size": latent_window_size,
@@ -352,6 +353,7 @@ async def generate_framepack(body: FramePackRequest):
         seed=body.seed,
         negative_text=negative,
         gpu_memory_preservation=body.gpu_memory_preservation,
+        guidance_scale=body.guidance_scale,
     )
 
     try:

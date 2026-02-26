@@ -1,4 +1,4 @@
-"""Audio composition — voice extraction, segment management, music generation."""
+"""Audio composition — voice extraction, segment management, music generation, proxy to Echo Brain pipeline."""
 
 import json
 import logging
@@ -8,8 +8,10 @@ import subprocess
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+import httpx
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from packages.core.config import BASE_PATH
@@ -436,3 +438,213 @@ async def serve_music(filename: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Track not found")
     return FileResponse(path, media_type="audio/wav", filename=filename)
+
+
+# ---------------------------------------------------------------------------
+# Proxy endpoints → Echo Brain Music Pipeline (localhost:8309)
+# ---------------------------------------------------------------------------
+ECHO_BRAIN_URL = "http://localhost:8309"
+
+
+@router.post("/suggest-music")
+async def suggest_music(body: dict):
+    """Proxy to Echo Brain: suggest music params for a scene."""
+    params = {
+        "mood": body.get("scene_mood", "dramatic"),
+        "description": body.get("scene_description", ""),
+        "time_of_day": body.get("time_of_day", ""),
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(f"{ECHO_BRAIN_URL}/api/music/suggest-for-scene", params=params)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+
+
+@router.post("/analyze-playlist")
+async def proxy_analyze_playlist(body: dict):
+    """Proxy to Echo Brain: analyze an Apple Music playlist."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(f"{ECHO_BRAIN_URL}/api/music/analyze-playlist", json=body)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+
+
+@router.post("/generate-from-playlist")
+async def proxy_generate_from_playlist(body: dict):
+    """Proxy to Echo Brain: generate music inspired by a playlist."""
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(f"{ECHO_BRAIN_URL}/api/music/generate-from-playlist", json=body)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+
+
+@router.get("/curated-playlists")
+async def proxy_list_curated_playlists():
+    """Proxy to Echo Brain: list curated playlists."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(f"{ECHO_BRAIN_URL}/api/music/curated-playlists")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+
+
+@router.post("/curated-playlists")
+async def proxy_create_curated_playlist(body: dict):
+    """Proxy to Echo Brain: create a curated playlist."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(f"{ECHO_BRAIN_URL}/api/music/curated-playlists", json=body)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+
+
+@router.delete("/curated-playlists/{playlist_id}")
+async def proxy_delete_curated_playlist(playlist_id: int):
+    """Proxy to Echo Brain: delete a curated playlist."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.delete(f"{ECHO_BRAIN_URL}/api/music/curated-playlists/{playlist_id}")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+
+
+@router.get("/curated-playlists/{playlist_id}/tracks")
+async def proxy_get_curated_playlist_tracks(playlist_id: int):
+    """Proxy to Echo Brain: get tracks in a curated playlist."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(f"{ECHO_BRAIN_URL}/api/music/curated-playlists/{playlist_id}/tracks")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+
+
+@router.post("/curated-playlists/{playlist_id}/tracks")
+async def proxy_add_curated_track(playlist_id: int, body: dict):
+    """Proxy to Echo Brain: add a track to a curated playlist."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            f"{ECHO_BRAIN_URL}/api/music/curated-playlists/{playlist_id}/tracks", json=body,
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+
+
+@router.delete("/curated-playlists/{playlist_id}/tracks/{track_id}")
+async def proxy_remove_curated_track(playlist_id: int, track_id: str):
+    """Proxy to Echo Brain: remove a track from a curated playlist."""
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.delete(
+            f"{ECHO_BRAIN_URL}/api/music/curated-playlists/{playlist_id}/tracks/{track_id}",
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Auto-Ducking (ffmpeg sidechaincompress)
+# ---------------------------------------------------------------------------
+@router.post("/mix-scene-audio")
+async def mix_scene_audio(body: dict):
+    """Mix music track with dialogue, applying auto-ducking via ffmpeg sidechaincompress.
+
+    Expects: { scene_id: str }
+    Reads scene's assigned music + shot dialogue WAVs, produces mixed output.
+    """
+    scene_id = body.get("scene_id")
+    if not scene_id:
+        raise HTTPException(status_code=400, detail="scene_id required")
+
+    from packages.core.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        scene = await conn.fetchrow(
+            "SELECT id, audio FROM scenes WHERE id = $1::uuid", scene_id
+        )
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    audio_data = scene["audio"]
+    if isinstance(audio_data, str):
+        audio_data = json.loads(audio_data)
+    if not audio_data or not audio_data.get("preview_url"):
+        raise HTTPException(status_code=400, detail="Scene has no assigned music track")
+
+    # Resolve music file path
+    preview_url = audio_data["preview_url"]
+    music_path = None
+    if "/api/audio/music/" in preview_url:
+        filename = preview_url.split("/")[-1]
+        candidate = MUSIC_CACHE / filename
+        if not candidate.exists():
+            candidate = Path(f"/opt/tower-ace-step/output/{filename}")
+        if candidate.exists():
+            music_path = candidate
+
+    if not music_path:
+        raise HTTPException(status_code=400, detail="Music file not found locally")
+
+    # Find dialogue audio files for this scene's shots
+    async with pool.acquire() as conn:
+        shots = await conn.fetch(
+            """SELECT id, dialogue_audio_path FROM scene_shots
+               WHERE scene_id = $1::uuid AND dialogue_audio_path IS NOT NULL
+               ORDER BY shot_number""",
+            scene_id,
+        )
+
+    dialogue_paths = [Path(s["dialogue_audio_path"]) for s in shots if s["dialogue_audio_path"] and Path(s["dialogue_audio_path"]).exists()]
+
+    output_dir = MUSIC_CACHE / "mixed"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"mixed_{scene_id}.wav"
+
+    if not dialogue_paths:
+        # No dialogue — just copy music as-is
+        shutil.copy2(music_path, output_path)
+        return {"output_path": str(output_path), "ducking_applied": False}
+
+    # Concatenate all dialogue into one file
+    dialogue_concat = output_dir / f"dialogue_{scene_id}.wav"
+    if len(dialogue_paths) == 1:
+        dialogue_concat = dialogue_paths[0]
+    else:
+        # Build concat list
+        concat_list = output_dir / f"concat_{scene_id}.txt"
+        with open(concat_list, "w") as f:
+            for dp in dialogue_paths:
+                f.write(f"file '{dp}'\n")
+        subprocess.run(
+            ["ffmpeg", "-f", "concat", "-safe", "0", "-i", str(concat_list),
+             "-acodec", "pcm_s16le", str(dialogue_concat), "-y"],
+            capture_output=True, timeout=60,
+        )
+
+    # Apply sidechaincompress: duck music when dialogue is present
+    cmd = [
+        "ffmpeg",
+        "-i", str(music_path),
+        "-i", str(dialogue_concat),
+        "-filter_complex",
+        "[0][1]sidechaincompress=threshold=0.02:ratio=6:attack=200:release=1000[ducked];[ducked][1]amix=inputs=2:duration=longest[out]",
+        "-map", "[out]",
+        "-acodec", "pcm_s16le",
+        str(output_path), "-y",
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        logger.error(f"ffmpeg mix failed: {result.stderr[:500]}")
+        raise HTTPException(status_code=500, detail=f"Audio mixing failed: {result.stderr[:200]}")
+
+    return {
+        "output_path": str(output_path),
+        "ducking_applied": True,
+        "dialogue_tracks": len(dialogue_paths),
+        "scene_id": scene_id,
+    }

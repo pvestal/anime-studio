@@ -546,6 +546,9 @@ export interface SceneAudio {
   fade_in: number
   fade_out: number
   start_offset: number
+  auto_duck?: boolean
+  generation_mode?: string
+  source_playlist_id?: string
 }
 
 export interface AppleMusicTrack {
@@ -1138,6 +1141,43 @@ export interface MusicTrack {
   duration?: number
 }
 
+export interface MusicSuggestion {
+  suggested_mood: string
+  suggested_genre: string
+  suggested_bpm: number
+  suggested_duration: number
+  reasoning: string
+}
+
+export interface PlaylistProfile {
+  playlist_id: string
+  track_count: number
+  avg_bpm: number
+  dominant_genres: string[]
+  dominant_mood: string
+  energy: number
+  genre_breakdown: Record<string, number>
+}
+
+export interface CuratedPlaylist {
+  id: number
+  name: string
+  description?: string | null
+  created_at?: string | null
+  track_count?: number
+}
+
+export interface CuratedPlaylistTrack {
+  id: number
+  track_id: string
+  track_name: string
+  track_artist: string
+  preview_url: string
+  source: string
+  position: number
+  added_at?: string | null
+}
+
 // --- Video Review ---
 
 export interface PendingVideo {
@@ -1234,6 +1274,7 @@ export interface GpuStatus {
   amd: { total_mb: number; used_mb: number; free_mb: number; gpu_name: string } | null
   ollama: { loaded_models: Array<{ name: string; size_mb: number; vram_mb: number }>; total_vram_mb: number }
   comfyui: { queue_running: number; queue_pending: number }
+  host?: { cpu_percent: number; cpu_count: number; ram_total_mb: number; ram_used_mb: number; ram_free_mb: number; ram_percent: number }
 }
 
 export interface ProjectSummary {

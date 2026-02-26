@@ -100,7 +100,8 @@ interface ProjectInfo {
   name: string
 }
 
-interface SceneWithShots extends BuilderScene {
+interface SceneWithShots extends Omit<BuilderScene, 'shots' | 'audio'> {
+  scene_number?: number
   shots: Array<{
     id: string
     shot_number: number
@@ -115,7 +116,7 @@ interface SceneWithShots extends BuilderScene {
   audio?: {
     track_name?: string
     track_artist?: string
-  }
+  } | null
 }
 
 const selectedProjectId = ref(0)
@@ -157,10 +158,10 @@ watch(selectedProjectId, async (pid) => {
     const detailed: SceneWithShots[] = []
     for (const scene of scenes.value) {
       try {
-        const full = await scenesApi.getScene(scene.id) as SceneWithShots
+        const full = await scenesApi.getScene(scene.id) as unknown as SceneWithShots
         detailed.push(full)
       } catch {
-        detailed.push({ ...scene, shots: [] } as SceneWithShots)
+        detailed.push({ ...scene, shots: [] } as unknown as SceneWithShots)
       }
     }
     // Sort by scene_number
@@ -201,7 +202,7 @@ async function generateAllDialogue() {
         const resp = await fetch(`/api/scenes/${scene.id}/generate-dialogue`, { method: 'POST' })
         if (resp.ok) {
           // Refresh scene data
-          const full = await scenesApi.getScene(scene.id) as SceneWithShots
+          const full = await scenesApi.getScene(scene.id) as unknown as SceneWithShots
           const idx = scenesWithShots.value.findIndex(s => s.id === scene.id)
           if (idx >= 0) scenesWithShots.value[idx] = full
         }

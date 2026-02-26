@@ -18,6 +18,10 @@ import type {
   MusicGenerateResponse,
   MusicTaskStatus,
   MusicTrack,
+  MusicSuggestion,
+  PlaylistProfile,
+  CuratedPlaylist,
+  CuratedPlaylistTrack,
   PendingVideo,
   VideoReviewRequest,
   BatchVideoReviewRequest,
@@ -103,19 +107,17 @@ export const scenesApi = {
 
   // --- Story to Scenes ---
 
-  async generateScenesFromStory(projectId: number): Promise<{
+  async generateScenesFromStory(projectId: number, episodeId?: string): Promise<{
     project_id: number
     scenes: Array<{
-      title: string; description: string; location: string;
-      time_of_day: string; mood: string; characters: string[]
-      suggested_shots: Array<{
-        shot_type: string; description: string; motion_prompt: string; duration_seconds: number
-        dialogue_character?: string; dialogue_text?: string
-      }>
+      scene_id: string; scene_number: number; title: string;
+      shots_created: number; shot_ids: string[]
     }>
     count: number
   }> {
-    return request(`/generate-from-story?project_id=${projectId}`, { method: 'POST' })
+    let url = `/generate-from-story?project_id=${projectId}`
+    if (episodeId) url += `&episode_id=${episodeId}`
+    return request(url, { method: 'POST' })
   },
 
   // --- Motion Presets ---
@@ -211,6 +213,76 @@ export const scenesApi = {
 
   generatedMusicUrl(filename: string): string {
     return `/api/audio/music/${encodeURIComponent(filename)}`
+  },
+
+  // --- Music Pipeline (via anime-studio proxy → Echo Brain) ---
+
+  async suggestMusicForScene(sceneMood: string, sceneDescription?: string, timeOfDay?: string): Promise<MusicSuggestion> {
+    return audioRequest('/suggest-music', {
+      method: 'POST',
+      body: JSON.stringify({
+        scene_mood: sceneMood,
+        scene_description: sceneDescription || '',
+        time_of_day: timeOfDay || '',
+      }),
+    })
+  },
+
+  async analyzePlaylist(playlistId: string): Promise<PlaylistProfile> {
+    return audioRequest('/analyze-playlist', {
+      method: 'POST',
+      body: JSON.stringify({ playlist_id: playlistId }),
+    })
+  },
+
+  async generateFromPlaylist(playlistId: string, mode: string = 'style_matched', duration: number = 60): Promise<{
+    task_id: string; status: string; profile: PlaylistProfile; prompt: string; mode: string
+  }> {
+    return audioRequest('/generate-from-playlist', {
+      method: 'POST',
+      body: JSON.stringify({ playlist_id: playlistId, mode, duration }),
+    })
+  },
+
+  async listCuratedPlaylists(): Promise<{ playlists: CuratedPlaylist[] }> {
+    return audioRequest('/curated-playlists')
+  },
+
+  async createCuratedPlaylist(name: string, description?: string): Promise<CuratedPlaylist> {
+    return audioRequest('/curated-playlists', {
+      method: 'POST',
+      body: JSON.stringify({ name, description }),
+    })
+  },
+
+  async deleteCuratedPlaylist(playlistId: number): Promise<{ message: string }> {
+    return audioRequest(`/curated-playlists/${playlistId}`, { method: 'DELETE' })
+  },
+
+  async getCuratedPlaylistTracks(playlistId: number): Promise<{ playlist_id: number; tracks: CuratedPlaylistTrack[] }> {
+    return audioRequest(`/curated-playlists/${playlistId}/tracks`)
+  },
+
+  async addToCuratedPlaylist(playlistId: number, track: {
+    track_id: string; name: string; artist: string; preview_url: string; source: string
+  }): Promise<{ id: number; playlist_id: number; position: number }> {
+    return audioRequest(`/curated-playlists/${playlistId}/tracks`, {
+      method: 'POST',
+      body: JSON.stringify(track),
+    })
+  },
+
+  async removeFromCuratedPlaylist(playlistId: number, trackId: string): Promise<{ message: string }> {
+    return audioRequest(`/curated-playlists/${playlistId}/tracks/${encodeURIComponent(trackId)}`, {
+      method: 'DELETE',
+    })
+  },
+
+  async mixSceneAudio(sceneId: string): Promise<{ output_path: string; ducking_applied: boolean }> {
+    return audioRequest('/mix-scene-audio', {
+      method: 'POST',
+      body: JSON.stringify({ scene_id: sceneId }),
+    })
   },
 
   // --- Video Review ---

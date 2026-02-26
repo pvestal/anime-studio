@@ -13,6 +13,11 @@
                 :title="`AMD ${gpuStatus.amd?.gpu_name || 'N/A'} — Ollama${ollamaModels.length ? ': ' + ollamaModels.join(', ') : ''}`">
             AMD {{ gpuStatus.amd ? gpuStatus.amd.free_mb + 'MB free' : 'N/A' }}
           </span>
+          <span v-if="gpuStatus.host" class="gpu-chip"
+                :class="gpuStatus.host.cpu_percent > 80 ? 'gpu-busy' : 'gpu-free'"
+                :title="`CPU: ${gpuStatus.host.cpu_percent}% (${gpuStatus.host.cpu_count} cores)\nRAM: ${Math.round(gpuStatus.host.ram_used_mb / 1024)}/${Math.round(gpuStatus.host.ram_total_mb / 1024)}GB`">
+            CPU {{ gpuStatus.host.cpu_percent }}% &middot; RAM {{ gpuStatus.host.ram_percent }}%
+          </span>
           <span v-if="comfyQueue.queue_running > 0 || comfyQueue.queue_pending > 0" class="gpu-chip gpu-busy">
             ComfyUI {{ comfyQueue.queue_running }}R / {{ comfyQueue.queue_pending }}Q
           </span>

@@ -1,4 +1,4 @@
-# Anime Studio v0.3.6 Architecture
+# Anime Studio v0.4.0 Architecture
 
 ## System Overview
 
@@ -95,19 +95,20 @@ packages/
 
   scene_generation/   # 23 routes
     router.py         # Scene/shot CRUD, generate, assemble, video serve, motion presets, story-to-scenes, music, Wan endpoints
-    builder.py        # Progressive-gate generation, crossfade assembly, continuity chaining, audio ducking, frame interpolation, video upscaling
+    builder.py        # Progressive-gate generation, crossfade assembly, intra-scene + cross-scene continuity chaining, audio ducking, frame interpolation, video upscaling
     framepack.py      # FramePack workflow building, I2V pipeline, motion presets
     ltx_video.py      # LTX-Video 2B workflow building, native LoRA support
     wan_video.py      # Wan 2.1 T2V workflow, GGUF support, environment/establishing shots
     engine_selector.py # Auto engine selection: shot type + LoRA availability + blacklist → wan/ltx/framepack
-    scene_crud.py     # Scene/shot CRUD endpoints, manual engine override
+    scene_crud.py     # Scene/shot CRUD, episode-aware generation, continuity frames API, manual engine override
     scene_review.py   # Shot review + engine blacklist management
     scene_audio.py    # Dialogue synthesis, music mixing, audio ducking
     scene_video_utils.py # Crossfade concat, frame interpolation, upscaling
     scene_comparison.py # Multi-engine video comparison
     video_qc.py       # QC loop with vision review, prompt refinement, progressive gates
     video_vision.py   # Video frame quality assessment via Ollama
-    story_to_scenes.py # AI scene breakdown from storyline (Ollama gemma3:12b)
+    story_to_scenes.py # AI scene breakdown from storyline (Ollama gemma3:12b), episode-scoped prompts
+    image_recommender.py # Approved image scoring for auto source-image assignment
 
   episode_assembly/   # 10 routes
     router.py         # Episode CRUD, scene linking, assemble, video serve, publish
@@ -137,6 +138,7 @@ erDiagram
     projects ||--o| world_settings : has
     projects ||--o{ scenes : has
     projects ||--o{ episodes : has
+    projects ||--o{ character_continuity_frames : tracks
 
     scenes ||--o{ shots : contains
     episodes ||--o{ episode_scenes : contains
@@ -369,10 +371,15 @@ sequenceDiagram
     loop For each shot (ordered)
         API->>DB: Set shot status = "generating"
 
-        alt First shot
-            API->>API: Copy source_image to ComfyUI/input/
-        else Subsequent shots
-            API->>API: Use previous shot's last_frame (continuity chain)
+        alt Same character as previous shot (intra-scene)
+            API->>API: Use previous shot's last_frame
+        else Different character — check cross-scene frame
+            API->>DB: SELECT frame_path FROM character_continuity_frames
+            alt Cross-scene frame exists
+                API->>API: Use cross-scene continuity frame
+            else No continuity frame
+                API->>API: Use auto-assigned approved image
+            end
         end
 
         rect rgb(255, 245, 230)
@@ -401,6 +408,7 @@ sequenceDiagram
         end
 
         API->>DB: Set shot completed + quality_score + paths
+        API->>DB: UPSERT character_continuity_frames<br/>(save last frame for cross-scene reuse)
     end
 
     rect rgb(230, 245, 255)
@@ -417,6 +425,112 @@ sequenceDiagram
     User->>Frontend: Play assembled video
     Frontend->>API: GET /scenes/{id}/video
     API-->>Frontend: MP4 FileResponse
+```
+
+## Cross-Scene Character Continuity
+
+When a character appears in multiple shots or scenes, the system maintains visual
+continuity by tracking the most recent generated frame per character.
+
+```mermaid
+graph TD
+    subgraph "Scene 8: Takeshi's Morning Visit"
+        S8_1[Shot 1: Yuki<br/>source: approved image] --> S8_1V[FramePack I2V<br/>→ video + last frame]
+        S8_1V --> S8_1_SAVE["Save continuity frame<br/>character_continuity_frames<br/>(project_id, yuki_tanaka)"]
+        S8_2[Shot 2: Yuki<br/>source: shot 1 last frame<br/>INTRA-SCENE CHAIN] --> S8_2V[FramePack I2V]
+        S8_2V --> S8_2_SAVE["Update continuity frame<br/>(yuki_tanaka)"]
+        S8_3[Shot 3: Takeshi<br/>source: approved image] --> S8_3V[FramePack I2V]
+        S8_3V --> S8_3_SAVE["Save continuity frame<br/>(takeshi_sato)"]
+        S8_4[Shot 4: Rina<br/>source: approved image] --> S8_4V[FramePack I2V]
+        S8_4V --> S8_4_SAVE["Save continuity frame<br/>(rina_suzuki)"]
+    end
+
+    subgraph "Scene 9: Rina's Counter-Offer"
+        S8_4_SAVE -.->|CROSS-SCENE CHAIN| S9_1[Shot 1: Rina<br/>source: scene 8 last frame]
+        S8_2_SAVE -.->|CROSS-SCENE CHAIN| S9_2[Shot 2: Yuki<br/>source: scene 8 last frame]
+        S8_3_SAVE -.->|CROSS-SCENE CHAIN| S9_3[Shot 3: Takeshi<br/>source: scene 8 last frame]
+    end
+
+    style S8_1_SAVE fill:#2d5,stroke:#1a3
+    style S8_2_SAVE fill:#2d5,stroke:#1a3
+    style S8_3_SAVE fill:#2d5,stroke:#1a3
+    style S8_4_SAVE fill:#2d5,stroke:#1a3
+```
+
+### Source Image Priority
+
+```mermaid
+graph LR
+    START[Shot needs<br/>source image] --> CHECK1{Same character<br/>as previous shot<br/>in this scene?}
+    CHECK1 -->|Yes| P1["Priority 1<br/>INTRA-SCENE CHAIN<br/>prev shot's last frame"]
+    CHECK1 -->|No| CHECK2{Cross-scene<br/>continuity frame<br/>exists?}
+    CHECK2 -->|Yes| P2["Priority 2<br/>CROSS-SCENE CHAIN<br/>from character_continuity_frames"]
+    CHECK2 -->|No| CHECK3{Auto-assigned<br/>source image?}
+    CHECK3 -->|Yes| P3["Priority 3<br/>APPROVED IMAGE<br/>from approval pool"]
+    CHECK3 -->|No| FAIL[FAIL<br/>no source available]
+
+    style P1 fill:#2a5,stroke:#1a3
+    style P2 fill:#28a,stroke:#159
+    style P3 fill:#a72,stroke:#741
+    style FAIL fill:#a22,stroke:#711
+```
+
+### Database
+
+```mermaid
+erDiagram
+    character_continuity_frames {
+        uuid id PK
+        int project_id FK
+        string character_slug
+        uuid scene_id FK
+        uuid shot_id FK
+        string frame_path
+        int scene_number
+        int shot_number
+        timestamp created_at
+    }
+
+    character_continuity_frames }o--|| projects : "one per char per project"
+    character_continuity_frames }o--|| scenes : "source scene"
+    character_continuity_frames }o--|| shots : "source shot"
+```
+
+## Episode-Aware Scene Generation
+
+Scenes can now be generated per-episode, with AI continuity context from existing scenes.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant API as Scene CRUD
+    participant Ollama as Ollama gemma3:12b
+    participant DB as PostgreSQL
+
+    User->>API: POST /scenes/generate-from-story<br/>?project_id=24&episode_id=UUID
+    API->>DB: Fetch episode synopsis + characters + existing scenes
+    API->>Ollama: Episode-scoped prompt<br/>(synopsis + cast + continuity context)
+    Ollama-->>API: JSON scenes with shots + dialogue
+
+    API->>DB: pg_advisory_xact_lock(project_id)
+    API->>DB: INSERT scenes (atomic numbering)
+    API->>DB: INSERT shots (with characters_present as slugs)
+    API->>DB: INSERT episode_scenes (link to episode)
+    API-->>User: {scenes: [...], episode_id: UUID}
+```
+
+### Name-to-Slug Resolution
+
+AI returns character names ("Rina", "Takeshi") which must be resolved to DB slugs
+(`rina_suzuki`, `takeshi_sato`) for source image auto-assignment.
+
+```mermaid
+graph LR
+    AI[Ollama output:<br/>characters: Rina, Yuki] --> MAP{char_slug_map<br/>from DB}
+    MAP -->|found| SLUG[rina_suzuki, yuki_tanaka]
+    MAP -->|not found| FALLBACK["_name_to_slug(name)<br/>LOWER + REPLACE + REGEXP"]
+    SLUG --> DB[shots.characters_present]
+    FALLBACK --> DB
 ```
 
 ## Frontend Component Tree
@@ -449,7 +563,7 @@ graph TD
 |---------|--------|--------|-----------|
 | story | `/projects`, `/storyline`, `/world-settings`, `/generation-styles` | 15 | router.py |
 | visual_pipeline | `/approval/vision-review` | 5 | router.py, classification.py, vision.py, comfyui.py |
-| scene_generation | `/scenes`, `/scenes/motion-presets`, `/scenes/generate-from-story`, `/scenes/{id}/generate-music`, `/scenes/{id}/attach-music`, `/generate/wan`, `/generate/wan/models` | 23 | router.py, builder.py, framepack.py, ltx_video.py, wan_video.py, story_to_scenes.py |
+| scene_generation | `/scenes`, `/scenes/motion-presets`, `/scenes/generate-from-story`, `/scenes/{id}/generate-music`, `/scenes/{id}/attach-music`, `/generate/wan`, `/generate/wan/models`, `/continuity-frames` | 25 | router.py, builder.py, framepack.py, ltx_video.py, wan_video.py, story_to_scenes.py, scene_crud.py |
 | episode_assembly | `/episodes`, `/episodes/{id}/scenes`, `/episodes/{id}/assemble`, `/episodes/{id}/publish` | 10 | router.py, builder.py, publish.py |
 | lora_training | `/dataset`, `/approval`, `/training`, `/gallery`, `/ingest`, `/feedback` | 32 | router.py, training_router.py, ingest_router.py, feedback.py |
 | audio_composition | `/audio`, `/audio/ingest/voice`, `/audio/voice/*`, `/audio/generate-music`, `/audio/music/*` | 8 | router.py |
@@ -457,7 +571,7 @@ graph TD
 | core (orchestrator) | `/orchestrator/status`, `/orchestrator/toggle`, `/orchestrator/initialize`, `/orchestrator/pipeline/{id}`, `/orchestrator/summary/{id}`, `/orchestrator/tick`, `/orchestrator/override`, `/orchestrator/training-target` | 8 | orchestrator.py, orchestrator_router.py |
 | core (graph) | `/graph/sync`, `/graph/stats`, `/graph/lineage/*`, `/graph/co-occurrence/*`, `/graph/drift/*`, `/graph/ranking/*`, `/graph/health`, `/graph/feedback/*`, `/graph/cross-project/*` | 11 | graph_sync.py, graph_queries.py, graph_router.py |
 | app.py | `/health`, `/gpu/status`, `/events/stats`, `/learning/*`, `/recommend/*`, `/drift`, `/quality/*`, `/correction/*`, `/replenishment/*` | 14 | — |
-| **Total** | | **148+** | |
+| **Total** | | **150+** | |
 
 ## Hardware
 
@@ -663,7 +777,10 @@ graph LR
 - **Episode assembly**: ffmpeg xfade crossfade between scenes (fadeblack default, 0.5s overlap) with fallback to hard-cut concat
 - **Jellyfin publishing**: Symlinks (not copies) to avoid doubling disk usage; S01E01 naming convention
 - **Audio mixing**: Non-fatal — if TTS or music download fails, scene video is kept without audio
-- **Story-to-scenes AI**: Uses Ollama gemma3:12b for scene breakdowns; structured JSON output with retry parsing
+- **Story-to-scenes AI**: Uses Ollama gemma3:12b for scene breakdowns; structured JSON output with retry parsing. Episode-scoped generation includes episode synopsis + cast + existing scene continuity context
+- **Cross-scene continuity**: `character_continuity_frames` table tracks most recent generated frame per character per project. Source image priority: intra-scene chain > cross-scene frame > approved image pool. UPSERT on every shot completion, backfilled from already-completed shots on service restart
+- **Episode-aware generation**: `generate-from-story` accepts optional `episode_id` — AI generates scenes scoped to that episode with awareness of existing scenes. New scenes auto-linked to episode via `episode_scenes` junction table. Atomic scene numbering via `pg_advisory_xact_lock(project_id)`
+- **Character name resolution**: AI returns human-readable names ("Rina"), pipeline resolves to DB slugs (`rina_suzuki`) via DB lookup with `_name_to_slug()` fallback. Critical for source image auto-assignment
 - **Motion presets**: Curated per shot type, served via API so frontend stays in sync without hardcoding
 - **Model lineage tracking**: dataset-stats API returns `model_breakdown` per character (which checkpoint generated each approved image), `dominant_model`, and `is_mixed_models` flag. LoRA listing includes `checkpoint`, `final_loss`, `trained_epochs`. Frontend surfaces mixed-model warnings and LoRA/image model mismatches
 - **Character archiving**: `archived` boolean column on characters table, filtered from `get_char_project_map()` core query. Archive/unarchive via API without deleting data

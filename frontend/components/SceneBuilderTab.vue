@@ -718,50 +718,8 @@ async function generateFromStory() {
   if (!selectedProjectId.value) return
   generatingFromStory.value = true
   try {
+    // Backend persists scenes + shots to DB — just reload after
     const data = await api.generateScenesFromStory(selectedProjectId.value)
-    // Create each generated scene with its shots
-    for (const generated of data.scenes) {
-      const sceneResult = await api.createScene({
-        project_id: selectedProjectId.value,
-        title: generated.title,
-        description: generated.description,
-        location: generated.location,
-        time_of_day: generated.time_of_day,
-        mood: generated.mood,
-        target_duration_seconds: generated.suggested_shots.reduce((sum: number, s: { duration_seconds: number }) => sum + (s.duration_seconds || 3), 0),
-      })
-      // Create shots for this scene (with dialogue if AI provided it)
-      // Build character name→slug map from project characters
-      const charSlugMap: Record<string, string> = {}
-      for (const c of projectCharacters.value) {
-        charSlugMap[c.name.toLowerCase()] = c.slug
-        charSlugMap[c.slug] = c.slug
-      }
-      for (let i = 0; i < generated.suggested_shots.length; i++) {
-        const shot = generated.suggested_shots[i]
-        // Resolve dialogue character to slug
-        let dialogueSlug: string | undefined
-        if (shot.dialogue_character) {
-          const key = shot.dialogue_character.toLowerCase().replace(/\s+/g, '_')
-          dialogueSlug = charSlugMap[key] || charSlugMap[shot.dialogue_character.toLowerCase()]
-        }
-        // Resolve characters_present from scene-level characters list
-        const charsPresent = (generated.characters || [])
-          .map((name: string) => charSlugMap[name.toLowerCase()] || charSlugMap[name.toLowerCase().replace(/\s+/g, '_')])
-          .filter(Boolean)
-        await api.createShot(sceneResult.id, {
-          shot_number: i + 1,
-          source_image_path: '',
-          shot_type: shot.shot_type || 'medium',
-          camera_angle: 'eye-level',
-          duration_seconds: shot.duration_seconds || 3,
-          motion_prompt: shot.motion_prompt || shot.description || '',
-          characters_present: charsPresent.length > 0 ? charsPresent : undefined,
-          dialogue_text: shot.dialogue_text || undefined,
-          dialogue_character_slug: dialogueSlug || undefined,
-        })
-      }
-    }
     await loadScenes()
     alert(`Created ${data.count} scenes from story! Open each scene to assign source images.`)
   } catch (e) {

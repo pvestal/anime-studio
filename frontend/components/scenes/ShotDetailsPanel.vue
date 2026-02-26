@@ -21,6 +21,24 @@
         />
         <button class="btn" style="font-size: 11px; padding: 4px 8px;" @click="$emit('browse-image')">Browse</button>
       </div>
+      <div v-if="shot.source_image_path" style="display: flex; align-items: center; gap: 6px; margin-top: 6px;">
+        <span
+          v-if="shot.source_image_auto_assigned"
+          class="source-badge source-badge--auto"
+          title="Auto-assigned by recommender"
+        >auto</span>
+        <span
+          v-else-if="shot.source_image_path"
+          class="source-badge source-badge--manual"
+          title="Manually selected"
+        >manual</span>
+        <span
+          v-if="shot.quality_score != null"
+          class="source-badge"
+          :class="shot.quality_score >= 0.65 ? 'source-badge--good' : shot.quality_score >= 0.4 ? 'source-badge--ok' : 'source-badge--poor'"
+          :title="`Video quality: ${(shot.quality_score * 100).toFixed(0)}%`"
+        >{{ (shot.quality_score * 100).toFixed(0) }}% quality</span>
+      </div>
       <div v-if="shot.source_image_path" style="margin-top: 8px;">
         <img
           :src="sourceImageUrl(shot.source_image_path || '')"
@@ -320,6 +338,38 @@ function updateField(field: string, value: unknown) {
   background: rgba(122, 162, 247, 0.15);
   border-color: var(--accent-primary);
   color: var(--accent-primary);
+}
+.source-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.source-badge--auto {
+  background: rgba(122, 162, 247, 0.15);
+  color: var(--accent-primary);
+  border: 1px solid rgba(122, 162, 247, 0.3);
+}
+.source-badge--manual {
+  background: rgba(160, 160, 160, 0.1);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-primary);
+}
+.source-badge--good {
+  background: rgba(80, 200, 120, 0.15);
+  color: #50c878;
+  border: 1px solid rgba(80, 200, 120, 0.3);
+}
+.source-badge--ok {
+  background: rgba(240, 180, 60, 0.15);
+  color: #f0b43c;
+  border: 1px solid rgba(240, 180, 60, 0.3);
+}
+.source-badge--poor {
+  background: rgba(200, 80, 80, 0.15);
+  color: #c85050;
+  border: 1px solid rgba(200, 80, 80, 0.3);
 }
 .dialogue-section {
   border-top: 2px solid var(--accent-primary);

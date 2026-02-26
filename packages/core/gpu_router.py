@@ -232,8 +232,25 @@ def ensure_gpu_ready(task: str, min_free_mb: int = MIN_FREE_VRAM_MB) -> tuple[bo
     return False, f"Unknown GPU target for task '{task}'"
 
 
+def get_host_stats() -> dict:
+    """CPU usage + system RAM."""
+    try:
+        import psutil
+        mem = psutil.virtual_memory()
+        return {
+            "cpu_percent": psutil.cpu_percent(interval=0.1),
+            "cpu_count": psutil.cpu_count(),
+            "ram_total_mb": round(mem.total / 1048576),
+            "ram_used_mb": round(mem.used / 1048576),
+            "ram_free_mb": round(mem.available / 1048576),
+            "ram_percent": mem.percent,
+        }
+    except ImportError:
+        return {"cpu_percent": 0, "cpu_count": 0, "ram_total_mb": 0, "ram_used_mb": 0, "ram_free_mb": 0, "ram_percent": 0}
+
+
 def get_system_status() -> dict:
-    """Full GPU dashboard — both GPUs + Ollama + ComfyUI."""
+    """Full GPU dashboard — both GPUs + Ollama + ComfyUI + host CPU/RAM."""
     return {
         "nvidia": get_nvidia_info(),
         "amd": get_amd_info(),
@@ -242,4 +259,5 @@ def get_system_status() -> dict:
             "total_vram_mb": sum(m["vram_mb"] for m in get_ollama_models()),
         },
         "comfyui": get_comfyui_queue(),
+        "host": get_host_stats(),
     }

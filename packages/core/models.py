@@ -76,10 +76,11 @@ class FramePackRequest(BaseModel):
     negative_prompt: Optional[str] = None
     image_path: Optional[str] = None  # Reference image filename in ComfyUI/input/
     seconds: float = 3.0
-    steps: int = 25
+    steps: int = 30
     use_f1: bool = False
     seed: Optional[int] = None
     gpu_memory_preservation: float = 6.0
+    guidance_scale: float = 6.0
 
 
 class EchoChatRequest(BaseModel):
@@ -233,6 +234,7 @@ class ShotCreateRequest(BaseModel):
     transition_type: str = "dissolve"  # dissolve, fade, fadeblack, wipeleft, slideup, etc.
     transition_duration: float = 0.3  # seconds of crossfade overlap
     video_engine: str = "framepack"  # framepack, framepack_f1, ltx
+    guidance_scale: Optional[float] = None  # FramePack guidance (default 6.0)
 
 
 class ShotUpdateRequest(BaseModel):
@@ -251,6 +253,7 @@ class ShotUpdateRequest(BaseModel):
     transition_type: Optional[str] = None
     transition_duration: Optional[float] = None
     video_engine: Optional[str] = None
+    guidance_scale: Optional[float] = None
 
 
 class SceneUpdateRequest(BaseModel):
@@ -273,6 +276,9 @@ class SceneAudioRequest(BaseModel):
     fade_in: Optional[float] = 1.0
     fade_out: Optional[float] = 2.0
     start_offset: Optional[float] = 0
+    auto_duck: Optional[bool] = False
+    generation_mode: Optional[str] = None
+    source_playlist_id: Optional[str] = None
 
 
 # --- Episode Assembly Models ---

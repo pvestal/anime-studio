@@ -33,11 +33,25 @@ _DEFAULT_POSE_SCORE = 0.3
 _DEFAULT_QUALITY_SCORE = 0.5
 _DEFAULT_VISION_SCORE = 0.5
 
-# Composite weights
-_W_POSE = 0.40
-_W_QUALITY = 0.30
-_W_VISION = 0.20
+# Composite weights (must sum to 1.0)
+_W_POSE = 0.35
+_W_QUALITY = 0.25
+_W_VISION = 0.15
 _W_DIVERSITY = 0.10
+_W_VIDEO_HISTORY = 0.15
+
+# Default when no video history exists (neutral — doesn't penalize or boost)
+_DEFAULT_VIDEO_HISTORY_SCORE = 0.5
+
+# Action keywords for description matching
+_ACTION_KEYWORDS = {
+    "walking": ["walking", "stride", "stroll", "standing"],
+    "running": ["running", "sprint", "dash", "dynamic"],
+    "fighting": ["fighting", "combat", "sword", "dynamic pose", "attack"],
+    "sitting": ["sitting", "seated", "chair", "bench"],
+    "talking": ["upper body", "portrait", "three-quarter"],
+    "looking": ["portrait", "close-up", "face"],
+}
 
 
 def batch_read_metadata(
@@ -123,6 +137,72 @@ def score_diversity(image_name: str, already_used: set[str]) -> float:
     return 0.0 if image_name in already_used else 1.0
 
 
+def score_video_effectiveness(
+    image_name: str,
+    video_scores: dict[str, float] | None,
+) -> float:
+    """Score 0-1 based on historical video quality when using this image.
+
+    Args:
+        image_name: The image filename.
+        video_scores: Pre-fetched dict of {image_name: avg_video_quality_score}.
+                      None or empty means no history available.
+    """
+    if not video_scores:
+        return _DEFAULT_VIDEO_HISTORY_SCORE
+    avg = video_scores.get(image_name)
+    if avg is None:
+        return _DEFAULT_VIDEO_HISTORY_SCORE
+    return max(0.0, min(1.0, avg))
+
+
+def score_description_match(
+    meta: dict[str, Any],
+    motion_prompt: str | None,
+) -> float:
+    """Score 0-1 based on keyword overlap between shot motion_prompt and image caption.
+
+    Checks image caption/description from .meta.json against the shot's motion_prompt.
+    """
+    if not motion_prompt:
+        return 0.5  # neutral
+
+    prompt_lower = motion_prompt.lower()
+
+    # Get image description from meta
+    caption = ""
+    vr = meta.get("vision_review")
+    if isinstance(vr, dict):
+        caption = (vr.get("description") or "").lower()
+    if not caption:
+        caption = (meta.get("caption") or "").lower()
+    if not caption:
+        return 0.5  # no caption, neutral
+
+    # Direct word overlap
+    prompt_words = set(prompt_lower.split())
+    caption_words = set(caption.split())
+    common = prompt_words & caption_words
+    # Remove stopwords
+    stopwords = {"the", "a", "an", "in", "on", "at", "to", "of", "and", "is", "with", "for"}
+    common -= stopwords
+
+    overlap_score = min(len(common) / max(len(prompt_words - stopwords), 1), 1.0)
+
+    # Action keyword bonus
+    action_bonus = 0.0
+    for action, related_poses in _ACTION_KEYWORDS.items():
+        if action in prompt_lower:
+            for pose in related_poses:
+                if pose in caption:
+                    action_bonus = 0.3
+                    break
+            if action_bonus > 0:
+                break
+
+    return min(1.0, 0.3 + overlap_score * 0.4 + action_bonus)
+
+
 def _build_reason(
     pose_score: float, quality_score: float, image_pose: str | None,
     shot_type: str,
@@ -147,8 +227,14 @@ def recommend_images_for_shot(
     camera_angle: str | None,
     already_used: set[str],
     top_n: int = 5,
+    video_scores: dict[str, float] | None = None,
+    motion_prompt: str | None = None,
 ) -> list[dict[str, Any]]:
     """Score and rank images for a single shot.
+
+    Args:
+        video_scores: Pre-fetched {image_name: avg_video_quality} for this character.
+        motion_prompt: Shot's motion prompt for description matching.
 
     Returns sorted list of {image_name, slug, score, pose, quality_score, reason}.
     """
@@ -160,7 +246,25 @@ def recommend_images_for_shot(
         q = score_quality(meta)
         v = score_vision_match(meta)
         d = score_diversity(name, already_used)
-        composite = _W_POSE * p + _W_QUALITY * q + _W_VISION * v + _W_DIVERSITY * d
+        vh = score_video_effectiveness(name, video_scores)
+        dm = score_description_match(meta, motion_prompt)
+
+        # Redistribute description match weight from pose when motion_prompt provided
+        if motion_prompt:
+            w_pose = _W_POSE - 0.05
+            w_desc = 0.05
+        else:
+            w_pose = _W_POSE
+            w_desc = 0.0
+
+        composite = (
+            w_pose * p
+            + _W_QUALITY * q
+            + _W_VISION * v
+            + _W_DIVERSITY * d
+            + _W_VIDEO_HISTORY * vh
+            + w_desc * dm
+        )
 
         scored.append({
             "image_name": name,
@@ -168,6 +272,7 @@ def recommend_images_for_shot(
             "score": round(composite, 3),
             "pose": image_pose,
             "quality_score": round(q, 3),
+            "video_history_score": round(vh, 3),
             "reason": _build_reason(p, q, image_pose, shot_type),
         })
 
@@ -180,15 +285,18 @@ def recommend_for_scene(
     shots: list[dict[str, Any]],
     approved_images: dict[str, list[str]],
     top_n: int = 5,
+    video_scores: dict[str, dict[str, float]] | None = None,
 ) -> list[dict[str, Any]]:
     """Generate per-shot recommendations for an entire scene.
 
     Args:
         base_path: Dataset base directory.
         shots: List of shot dicts with shot_type, camera_angle,
-               characters_present, source_image_path, id, shot_number.
+               characters_present, source_image_path, id, shot_number,
+               and optionally motion_prompt.
         approved_images: {slug: [image_name, ...]} of approved images.
         top_n: Max recommendations per shot.
+        video_scores: {slug: {image_name: avg_quality}} from source_image_effectiveness.
 
     Returns:
         [{shot_id, shot_number, shot_type, camera_angle,
@@ -216,6 +324,7 @@ def recommend_for_scene(
     for shot in shots:
         shot_type = shot.get("shot_type") or "medium"
         camera_angle = shot.get("camera_angle")
+        motion_prompt = shot.get("motion_prompt")
         chars = shot.get("characters_present") or []
 
         # Determine which slugs to score (prefer characters_present, fall back to all)
@@ -229,8 +338,11 @@ def recommend_for_scene(
             meta = all_meta.get(slug, {})
             if not meta:
                 continue
+            slug_video_scores = (video_scores or {}).get(slug)
             recs = recommend_images_for_shot(
                 slug, meta, shot_type, camera_angle, already_used, top_n,
+                video_scores=slug_video_scores,
+                motion_prompt=motion_prompt,
             )
             combined.extend(recs)
 
