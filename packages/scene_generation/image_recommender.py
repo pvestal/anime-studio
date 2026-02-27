@@ -40,6 +40,20 @@ _W_VISION = 0.15
 _W_DIVERSITY = 0.10
 _W_VIDEO_HISTORY = 0.15
 
+# Weights when narrative state data is available (must sum to 1.0)
+_W_STATE_POSE = 0.20
+_W_STATE_QUALITY = 0.20
+_W_STATE_VISION = 0.10
+_W_STATE_DIVERSITY = 0.05
+_W_STATE_VIDEO_HISTORY = 0.15
+_W_STATE_MATCH = 0.30
+
+# Sub-weights for state matching score
+_STATE_CLOTHING_W = 0.40
+_STATE_EXPRESSION_W = 0.25
+_STATE_HAIR_W = 0.20
+_STATE_BODY_W = 0.15
+
 # Default when no video history exists (neutral — doesn't penalize or boost)
 _DEFAULT_VIDEO_HISTORY_SCORE = 0.5
 
@@ -203,6 +217,60 @@ def score_description_match(
     return min(1.0, 0.3 + overlap_score * 0.4 + action_bonus)
 
 
+def _fuzzy_text_match(a: str | None, b: str | None) -> float:
+    """Fuzzy text similarity: 1.0 for exact, partial overlap otherwise."""
+    if not a or not b:
+        return 0.0
+    a_lower, b_lower = a.lower().strip(), b.lower().strip()
+    if a_lower == b_lower:
+        return 1.0
+    # Check substring containment
+    if a_lower in b_lower or b_lower in a_lower:
+        return 0.7
+    # Word overlap
+    a_words = set(a_lower.split())
+    b_words = set(b_lower.split())
+    if not a_words or not b_words:
+        return 0.0
+    overlap = len(a_words & b_words)
+    union = len(a_words | b_words)
+    return (overlap / union) * 0.6 if union > 0 else 0.0
+
+
+def score_state_match(
+    image_tags: dict[str, Any] | None,
+    target_state: dict[str, Any] | None,
+) -> float:
+    """Score 0-1 how well an image's visual tags match the target narrative state.
+
+    Args:
+        image_tags: from image_visual_tags table (clothing, expression, hair_state, body_state)
+        target_state: from character_scene_state table
+    """
+    if not image_tags or not target_state:
+        return 0.5  # neutral when no data
+
+    clothing_score = _fuzzy_text_match(
+        image_tags.get("clothing"), target_state.get("clothing")
+    )
+    expression_score = _fuzzy_text_match(
+        image_tags.get("expression"), target_state.get("emotional_state")
+    )
+    hair_score = _fuzzy_text_match(
+        image_tags.get("hair_state"), target_state.get("hair_state")
+    )
+    body_score = _fuzzy_text_match(
+        image_tags.get("body_state"), target_state.get("body_state")
+    )
+
+    return (
+        _STATE_CLOTHING_W * clothing_score
+        + _STATE_EXPRESSION_W * expression_score
+        + _STATE_HAIR_W * hair_score
+        + _STATE_BODY_W * body_score
+    )
+
+
 def _build_reason(
     pose_score: float, quality_score: float, image_pose: str | None,
     shot_type: str,
@@ -229,16 +297,21 @@ def recommend_images_for_shot(
     top_n: int = 5,
     video_scores: dict[str, float] | None = None,
     motion_prompt: str | None = None,
+    target_state: dict[str, Any] | None = None,
+    image_tags: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Score and rank images for a single shot.
 
     Args:
         video_scores: Pre-fetched {image_name: avg_video_quality} for this character.
         motion_prompt: Shot's motion prompt for description matching.
+        target_state: Narrative state for this character in this scene (from character_scene_state).
+        image_tags: Pre-fetched {image_name: tags_dict} from image_visual_tags.
 
     Returns sorted list of {image_name, slug, score, pose, quality_score, reason}.
     """
     scored: list[dict[str, Any]] = []
+    has_state = target_state is not None and image_tags is not None
 
     for name, meta in images_meta.items():
         image_pose = meta.get("pose")
@@ -249,24 +322,45 @@ def recommend_images_for_shot(
         vh = score_video_effectiveness(name, video_scores)
         dm = score_description_match(meta, motion_prompt)
 
-        # Redistribute description match weight from pose when motion_prompt provided
-        if motion_prompt:
-            w_pose = _W_POSE - 0.05
-            w_desc = 0.05
+        if has_state:
+            # State-aware weights
+            sm = score_state_match(image_tags.get(name), target_state)
+
+            if motion_prompt:
+                w_pose = _W_STATE_POSE - 0.05
+                w_desc = 0.05
+            else:
+                w_pose = _W_STATE_POSE
+                w_desc = 0.0
+
+            composite = (
+                w_pose * p
+                + _W_STATE_QUALITY * q
+                + _W_STATE_VISION * v
+                + _W_STATE_DIVERSITY * d
+                + _W_STATE_VIDEO_HISTORY * vh
+                + _W_STATE_MATCH * sm
+                + w_desc * dm
+            )
         else:
-            w_pose = _W_POSE
-            w_desc = 0.0
+            # Original weights (no state data)
+            if motion_prompt:
+                w_pose = _W_POSE - 0.05
+                w_desc = 0.05
+            else:
+                w_pose = _W_POSE
+                w_desc = 0.0
 
-        composite = (
-            w_pose * p
-            + _W_QUALITY * q
-            + _W_VISION * v
-            + _W_DIVERSITY * d
-            + _W_VIDEO_HISTORY * vh
-            + w_desc * dm
-        )
+            composite = (
+                w_pose * p
+                + _W_QUALITY * q
+                + _W_VISION * v
+                + _W_DIVERSITY * d
+                + _W_VIDEO_HISTORY * vh
+                + w_desc * dm
+            )
 
-        scored.append({
+        entry = {
             "image_name": name,
             "slug": slug,
             "score": round(composite, 3),
@@ -274,7 +368,11 @@ def recommend_images_for_shot(
             "quality_score": round(q, 3),
             "video_history_score": round(vh, 3),
             "reason": _build_reason(p, q, image_pose, shot_type),
-        })
+        }
+        if has_state:
+            entry["state_match_score"] = round(sm, 3)
+
+        scored.append(entry)
 
     scored.sort(key=lambda x: x["score"], reverse=True)
     return scored[:top_n]
@@ -286,6 +384,8 @@ def recommend_for_scene(
     approved_images: dict[str, list[str]],
     top_n: int = 5,
     video_scores: dict[str, dict[str, float]] | None = None,
+    character_states: dict[str, dict[str, Any]] | None = None,
+    character_image_tags: dict[str, dict[str, dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Generate per-shot recommendations for an entire scene.
 
@@ -297,6 +397,8 @@ def recommend_for_scene(
         approved_images: {slug: [image_name, ...]} of approved images.
         top_n: Max recommendations per shot.
         video_scores: {slug: {image_name: avg_quality}} from source_image_effectiveness.
+        character_states: {slug: state_dict} from character_scene_state (NSM Phase 1b).
+        character_image_tags: {slug: {image_name: tags_dict}} from image_visual_tags.
 
     Returns:
         [{shot_id, shot_number, shot_type, camera_angle,
@@ -339,10 +441,14 @@ def recommend_for_scene(
             if not meta:
                 continue
             slug_video_scores = (video_scores or {}).get(slug)
+            slug_state = (character_states or {}).get(slug)
+            slug_tags = (character_image_tags or {}).get(slug)
             recs = recommend_images_for_shot(
                 slug, meta, shot_type, camera_angle, already_used, top_n,
                 video_scores=slug_video_scores,
                 motion_prompt=motion_prompt,
+                target_state=slug_state,
+                image_tags=slug_tags,
             )
             combined.extend(recs)
 

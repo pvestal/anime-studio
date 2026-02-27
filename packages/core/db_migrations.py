@@ -624,7 +624,105 @@ async def run_migrations():
         ]:
             await conn.execute(idx_sql)
 
+        # --- Narrative State Machine (NSM) ---
+
+        # Character state per scene
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS character_scene_state (
+                id SERIAL PRIMARY KEY,
+                scene_id UUID NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+                character_slug VARCHAR(255) NOT NULL,
+                clothing TEXT,
+                hair_state TEXT,
+                injuries JSONB DEFAULT '[]',
+                accessories TEXT[] DEFAULT '{}',
+                body_state TEXT DEFAULT 'clean',
+                emotional_state TEXT DEFAULT 'calm',
+                energy_level TEXT DEFAULT 'normal',
+                relationship_context JSONB DEFAULT '{}',
+                location_in_scene TEXT,
+                carrying TEXT[] DEFAULT '{}',
+                state_source VARCHAR(50) NOT NULL DEFAULT 'auto',
+                version INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                updated_at TIMESTAMPTZ DEFAULT now(),
+                UNIQUE(scene_id, character_slug)
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_css_scene ON character_scene_state(scene_id)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_css_char ON character_scene_state(character_slug)"
+        )
+
+        # Image visual tags (Phase 1b)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS image_visual_tags (
+                id SERIAL PRIMARY KEY,
+                character_slug VARCHAR(255) NOT NULL,
+                project_name VARCHAR(255),
+                image_name VARCHAR(500) NOT NULL,
+                clothing TEXT,
+                hair_state TEXT,
+                expression TEXT,
+                body_state TEXT,
+                pose TEXT,
+                accessories TEXT[],
+                setting TEXT,
+                quality_score FLOAT,
+                nsfw_level INTEGER DEFAULT 0,
+                face_visible BOOLEAN,
+                full_body BOOLEAN,
+                tagged_by VARCHAR(50) DEFAULT 'vision_llm',
+                confidence FLOAT DEFAULT 1.0,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                UNIQUE(character_slug, image_name)
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ivt_char ON image_visual_tags(character_slug)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ivt_project ON image_visual_tags(project_name)"
+        )
+
+        # Scene dependencies (Phase 2)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS scene_dependencies (
+                id SERIAL PRIMARY KEY,
+                source_scene_id UUID NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+                target_scene_id UUID NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+                dependency_type VARCHAR(50) NOT NULL,
+                character_slug VARCHAR(255) DEFAULT '',
+                created_at TIMESTAMPTZ DEFAULT now(),
+                UNIQUE(source_scene_id, target_scene_id, dependency_type, character_slug)
+            )
+        """)
+
+        # Regeneration queue (Phase 2)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS regeneration_queue (
+                id SERIAL PRIMARY KEY,
+                scene_id UUID NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+                shot_id UUID REFERENCES shots(id) ON DELETE CASCADE,
+                reason TEXT NOT NULL,
+                priority INTEGER NOT NULL DEFAULT 5,
+                source_scene_id UUID,
+                source_field TEXT,
+                status VARCHAR(50) DEFAULT 'pending',
+                created_at TIMESTAMPTZ DEFAULT now(),
+                processed_at TIMESTAMPTZ
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_regen_queue_status ON regeneration_queue(status)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_regen_queue_scene ON regeneration_queue(scene_id)"
+        )
+
         await conn.close()
-        logger.info("Schema migrations completed successfully (incl. Phase 1 autonomy tables)")
+        logger.info("Schema migrations completed successfully (incl. Phase 1 autonomy + NSM tables)")
     except Exception as e:
         logger.warning(f"Schema migration failed (non-fatal): {e}")

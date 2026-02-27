@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 
 from packages.core.config import BASE_PATH, COMFYUI_OUTPUT_DIR
 from packages.core.db import connect_direct, get_char_project_map
+from packages.core.events import event_bus, SCENE_UPDATED, SHOT_UPDATED
 from packages.core.models import (
     SceneCreateRequest, ShotCreateRequest, ShotUpdateRequest,
     SceneUpdateRequest, SceneAudioRequest,
@@ -559,6 +560,15 @@ async def update_scene(scene_id: str, body: SceneUpdateRequest):
             return {"message": "No fields to update"}
         updates.append("updated_at = NOW()")
         await conn.execute(f"UPDATE scenes SET {', '.join(updates)} WHERE id = $1", sid, *params)
+
+        # Emit scene updated event for NSM propagation
+        changed_fields = [f for f in ["title", "description", "location", "time_of_day", "weather", "mood"] if getattr(body, f, None) is not None]
+        if changed_fields:
+            await event_bus.emit(SCENE_UPDATED, {
+                "scene_id": str(sid),
+                "changed_fields": changed_fields,
+            })
+
         return {"message": "Scene updated"}
     finally:
         await conn.close()
@@ -627,6 +637,19 @@ async def update_shot(scene_id: str, shot_id: str, body: ShotUpdateRequest):
         if not updates:
             return {"message": "No fields to update"}
         await conn.execute(f"UPDATE shots SET {', '.join(updates)} WHERE id = $1", shid, *params)
+
+        # Emit shot updated event for NSM
+        changed_fields = [f for f, _ in [
+            ("motion_prompt", "motion_prompt"), ("characters_present", "characters_present"),
+            ("shot_type", "shot_type"), ("camera_angle", "camera_angle"),
+        ] if getattr(body, f, None) is not None]
+        if changed_fields:
+            await event_bus.emit(SHOT_UPDATED, {
+                "shot_id": str(shid),
+                "scene_id": scene_id,
+                "changed_fields": changed_fields,
+            })
+
         return {"message": "Shot updated"}
     finally:
         await conn.close()

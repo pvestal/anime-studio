@@ -55,6 +55,15 @@ VOICE_TRAINING_SUBMITTED = "voice.training.submitted"
 VOICE_TRAINING_COMPLETED = "voice.training.completed"
 VOICE_SYNTHESIS_COMPLETED = "voice.synthesis.completed"
 
+# Narrative State Machine events
+STATE_INITIALIZED = "state.initialized"
+STATE_UPDATED = "state.updated"
+STATE_PROPAGATED = "state.propagated"
+SCENE_UPDATED = "scene.updated"
+SHOT_UPDATED = "shot.updated"
+EPISODE_UPDATED = "episode.updated"
+REGENERATION_NEEDED = "regeneration.needed"
+
 
 class EventBus:
     """Async event emitter. Handlers run concurrently via asyncio.gather."""

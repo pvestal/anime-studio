@@ -208,6 +208,86 @@
         placeholder="What does this character say?"
         class="field-input field-textarea"
       ></textarea>
+      <div v-if="shot.dialogue_character_slug && shot.dialogue_text" style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
+        <button
+          class="btn"
+          style="font-size: 11px; padding: 3px 10px;"
+          :disabled="synthBusy"
+          @click="synthesizeAndPlay"
+        >
+          {{ synthBusy ? 'Generating...' : dialogueAudioUrl ? 'Re-generate' : 'Play Voice' }}
+        </button>
+        <span v-if="synthEngine" class="source-badge source-badge--auto" style="font-size: 10px;">{{ synthEngine }}</span>
+        <span v-if="synthDuration" style="font-size: 10px; color: var(--text-secondary);">{{ synthDuration }}s</span>
+        <audio v-if="dialogueAudioUrl" ref="audioPlayer" :src="dialogueAudioUrl" controls style="height: 28px; flex: 1;" />
+      </div>
+    </div>
+
+    <!-- Character State (NSM) -->
+    <div v-if="characterStates.length > 0" class="state-section">
+      <div
+        class="state-header"
+        @click="stateExpanded = !stateExpanded"
+      >
+        <span class="field-label" style="margin-bottom: 0; font-weight: 500; cursor: pointer;">
+          Character State {{ stateExpanded ? '▾' : '▸' }}
+        </span>
+        <span
+          v-for="cs in characterStates"
+          :key="cs.character_slug"
+          class="source-badge"
+          :class="cs.state_source === 'manual' ? 'source-badge--manual' : 'source-badge--auto'"
+          style="font-size: 9px;"
+        >{{ cs.state_source }}</span>
+      </div>
+      <div v-if="stateExpanded">
+        <div v-for="cs in characterStates" :key="cs.character_slug" class="state-card">
+          <div style="font-size: 11px; font-weight: 500; color: var(--accent-primary); margin-bottom: 4px;">{{ cs.character_slug }}</div>
+          <div class="state-grid">
+            <div v-if="cs.clothing" class="state-item">
+              <span class="state-label">Clothing</span>
+              <span class="state-value">{{ cs.clothing }}</span>
+            </div>
+            <div v-if="cs.emotional_state && cs.emotional_state !== 'calm'" class="state-item">
+              <span class="state-label">Emotion</span>
+              <span class="state-value">{{ cs.emotional_state }}</span>
+            </div>
+            <div v-if="cs.hair_state" class="state-item">
+              <span class="state-label">Hair</span>
+              <span class="state-value">{{ cs.hair_state }}</span>
+            </div>
+            <div v-if="cs.body_state && cs.body_state !== 'clean'" class="state-item">
+              <span class="state-label">Body</span>
+              <span class="state-value">{{ cs.body_state }}</span>
+            </div>
+            <div v-if="cs.energy_level && cs.energy_level !== 'normal'" class="state-item">
+              <span class="state-label">Energy</span>
+              <span class="state-value">{{ cs.energy_level }}</span>
+            </div>
+            <div v-if="cs.location_in_scene" class="state-item">
+              <span class="state-label">Position</span>
+              <span class="state-value">{{ cs.location_in_scene }}</span>
+            </div>
+            <div v-if="cs.accessories && cs.accessories.length" class="state-item">
+              <span class="state-label">Accessories</span>
+              <span class="state-value">{{ cs.accessories.join(', ') }}</span>
+            </div>
+            <div v-if="cs.carrying && cs.carrying.length" class="state-item">
+              <span class="state-label">Carrying</span>
+              <span class="state-value">{{ cs.carrying.join(', ') }}</span>
+            </div>
+          </div>
+          <div v-if="cs.injuries && cs.injuries.length" style="margin-top: 4px;">
+            <span class="state-label">Injuries</span>
+            <span
+              v-for="(inj, i) in cs.injuries"
+              :key="i"
+              class="source-badge source-badge--poor"
+              style="font-size: 9px; margin-left: 4px;"
+            >{{ inj.severity }} {{ inj.type }} ({{ inj.location }})</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div v-if="shot.error_message" style="margin-top: 8px; padding: 8px; background: rgba(160,80,80,0.15); border-radius: 4px; font-size: 12px; color: var(--status-error);">
@@ -226,7 +306,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import type { BuilderShot } from '@/types'
+import type { BuilderShot, CharacterSceneState } from '@/types'
 import { scenesApi } from '@/api/scenes'
 import { useProjectStore } from '@/stores/project'
 import EchoAssistButton from '../EchoAssistButton.vue'
@@ -250,6 +330,62 @@ const emit = defineEmits<{
 
 const shotTypes = ['establishing', 'wide', 'medium', 'close-up', 'extreme_close-up', 'action']
 const cameraAngles = ['eye-level', 'high', 'low', 'dutch', 'pov']
+
+const stateExpanded = ref(false)
+const characterStates = ref<CharacterSceneState[]>([])
+
+const synthBusy = ref(false)
+const dialogueAudioUrl = ref<string | null>(null)
+const synthEngine = ref<string | null>(null)
+const synthDuration = ref<number | null>(null)
+const audioPlayer = ref<HTMLAudioElement | null>(null)
+
+async function synthesizeAndPlay() {
+  const shotId = (props.shot as any)?.id
+  if (!shotId || !props.shot?.dialogue_text || !props.shot?.dialogue_character_slug) return
+  synthBusy.value = true
+  try {
+    const result = await scenesApi.synthesizeShotDialogue(shotId)
+    synthEngine.value = result.engine_used
+    synthDuration.value = result.duration_seconds
+    dialogueAudioUrl.value = scenesApi.synthesisAudioUrl(result.job_id)
+    // Auto-play after a tick to let the audio element mount
+    await new Promise(r => setTimeout(r, 100))
+    audioPlayer.value?.play()
+  } catch (e: any) {
+    console.error('Voice synthesis failed:', e)
+    alert(`Voice synthesis failed: ${e.message || e}`)
+  } finally {
+    synthBusy.value = false
+  }
+}
+
+// Reset audio and fetch character states when shot changes
+watch(() => (props.shot as any)?.id, async () => {
+  dialogueAudioUrl.value = null
+  synthEngine.value = null
+  synthDuration.value = null
+  characterStates.value = []
+  stateExpanded.value = false
+
+  // Fetch narrative states for this shot's scene
+  const shotAny = props.shot as any
+  if (shotAny?.scene_id) {
+    try {
+      const baseUrl = (scenesApi as any).baseUrl || '/anime-studio/api'
+      const resp = await fetch(`${baseUrl}/narrative/state/${shotAny.scene_id}`)
+      if (resp.ok) {
+        const data = await resp.json()
+        const chars = shotAny.characters_present || []
+        characterStates.value = (data.states || []).filter(
+          (s: CharacterSceneState) => chars.length === 0 || chars.includes(s.character_slug)
+        )
+      }
+    } catch {
+      // NSM not available — silently skip
+    }
+  }
+})
 
 const motionPresets = ref<string[]>([])
 
@@ -370,6 +506,44 @@ function updateField(field: string, value: unknown) {
   background: rgba(200, 80, 80, 0.15);
   color: #c85050;
   border: 1px solid rgba(200, 80, 80, 0.3);
+}
+.state-section {
+  border-top: 1px solid var(--border-primary);
+  padding-top: 8px;
+  margin-top: 8px;
+}
+.state-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+.state-card {
+  background: rgba(122, 162, 247, 0.04);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  padding: 8px;
+  margin-bottom: 6px;
+}
+.state-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 12px;
+}
+.state-item {
+  display: flex;
+  gap: 4px;
+  font-size: 11px;
+}
+.state-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+  min-width: 60px;
+}
+.state-value {
+  color: var(--text-primary);
+  word-break: break-word;
 }
 .dialogue-section {
   border-top: 2px solid var(--accent-primary);

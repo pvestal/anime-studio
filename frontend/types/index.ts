@@ -350,6 +350,8 @@ export interface CheckpointFile {
   default_cfg?: number
   default_steps?: number
   default_sampler?: string
+  quality_prefix?: string
+  quality_negative?: string
 }
 
 export interface ProjectCreate {
@@ -1354,4 +1356,57 @@ export interface DatasetCharacterStats {
 export interface DatasetStatsResponse {
   characters: DatasetCharacterStats[]
   totals: { approved: number; pending: number; rejected: number; total: number }
+}
+
+// --- Narrative State Machine (NSM) ---
+
+export interface CharacterSceneState {
+  scene_id: string
+  character_slug: string
+  clothing: string | null
+  hair_state: string | null
+  injuries: Array<{ type: string; severity: string; location: string; countdown?: number }>
+  accessories: string[]
+  body_state: string
+  emotional_state: string
+  energy_level: string
+  relationship_context: Record<string, unknown>
+  location_in_scene: string | null
+  carrying: string[]
+  state_source: 'auto' | 'manual' | 'ai_initialized' | 'propagated'
+  version: number
+  created_at?: string
+  updated_at?: string
+}
+
+export interface ImageVisualTags {
+  character_slug: string
+  project_name: string | null
+  image_name: string
+  clothing: string | null
+  hair_state: string | null
+  expression: string | null
+  body_state: string | null
+  pose: string | null
+  accessories: string[]
+  setting: string | null
+  quality_score: number | null
+  nsfw_level: number
+  face_visible: boolean | null
+  full_body: boolean | null
+  tagged_by: string
+  confidence: number
+}
+
+export interface RegenerationQueueItem {
+  id: number
+  scene_id: string
+  scene_title: string
+  shot_id: string | null
+  reason: string
+  priority: number
+  source_scene_id: string | null
+  source_field: string | null
+  status: 'pending' | 'processed' | 'cancelled'
+  created_at: string | null
 }

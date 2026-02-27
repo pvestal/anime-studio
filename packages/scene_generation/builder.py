@@ -372,8 +372,39 @@ async def ensure_source_images(conn, scene_id: str, shots: list) -> int:
         "motion_prompt": s.get("motion_prompt"),
     } for s in shots]  # Pass ALL shots for diversity tracking
 
+    # Fetch narrative state and image tags for state-aware selection (NSM Phase 1b)
+    character_states = None
+    character_image_tags = None
+    try:
+        state_rows = await conn.fetch(
+            "SELECT character_slug, clothing, hair_state, emotional_state, "
+            "body_state, energy_level FROM character_scene_state WHERE scene_id = $1",
+            scene_id,
+        )
+        if state_rows:
+            character_states = {
+                r["character_slug"]: dict(r) for r in state_rows
+            }
+            # Fetch image tags for all characters that have states
+            character_image_tags = {}
+            for slug in character_states:
+                tag_rows = await conn.fetch(
+                    "SELECT image_name, clothing, hair_state, expression, "
+                    "body_state, pose FROM image_visual_tags "
+                    "WHERE character_slug = $1",
+                    slug,
+                )
+                if tag_rows:
+                    character_image_tags[slug] = {
+                        r["image_name"]: dict(r) for r in tag_rows
+                    }
+    except Exception as e:
+        logger.debug(f"NSM state lookup for scene {scene_id}: {e}")
+
     recommendations = recommend_for_scene(
         BASE_PATH, shot_list, approved, top_n=1, video_scores=video_scores,
+        character_states=character_states,
+        character_image_tags=character_image_tags,
     )
 
     assigned_count = 0
@@ -505,6 +536,17 @@ async def _generate_scene_impl(scene_id: str):
                 scene_id,
             )
 
+        # Pre-fetch narrative states for this scene (Phase 4)
+        _nsm_shot_states = {}
+        try:
+            from packages.narrative_state.continuity import get_shot_state_context
+            for _s in shots:
+                _s_ctx = await get_shot_state_context(conn, scene_id, dict(_s))
+                if _s_ctx:
+                    _nsm_shot_states[str(_s["id"])] = _s_ctx
+        except Exception as _e:
+            logger.debug(f"NSM state context pre-fetch: {_e}")
+
         completed_videos = []
         completed_count = 0
         prev_last_frame = None
@@ -593,8 +635,49 @@ async def _generate_scene_impl(scene_id: str):
                             logger.info(f"Shot {shot_id}: identity-anchored prompt for '{character_slug}'")
                     except Exception as e:
                         logger.warning(f"Shot {shot_id}: design_prompt lookup failed: {e}")
+                elif shot_engine == "wan" and chars:
+                    # Wan T2V: anchor ALL characters' appearances in prompt
+                    try:
+                        char_descriptions = []
+                        for cslug in chars:
+                            char_row = await conn.fetchrow(
+                                "SELECT name, design_prompt FROM characters "
+                                "WHERE REGEXP_REPLACE(LOWER(REPLACE(name, ' ', '_')), '[^a-z0-9_-]', '', 'g') = $1",
+                                cslug,
+                            )
+                            if char_row and char_row["design_prompt"]:
+                                cname = char_row["name"]
+                                design = char_row["design_prompt"].strip().rstrip(",. ")
+                                char_descriptions.append(f"{cname}: {design}")
+                        if char_descriptions:
+                            chars_block = ". ".join(char_descriptions)
+                            current_prompt = f"{chars_block}. Scene: {motion_prompt}"
+                            logger.info(f"Shot {shot_id}: Wan multi-char prompt with {len(char_descriptions)} characters")
+                    except Exception as e:
+                        logger.warning(f"Shot {shot_id}: Wan character prompt build failed: {e}")
+
+                # Inject NSM state descriptors into prompt (Phase 4)
+                _shot_nsm = _nsm_shot_states.get(str(shot_id), {})
+                if _shot_nsm and character_slug and character_slug in _shot_nsm:
+                    _state_ctx = _shot_nsm[character_slug]
+                    if _state_ctx.get("prompt_additions"):
+                        current_prompt = f"{current_prompt}, {_state_ctx['prompt_additions']}"
+                        logger.info(f"Shot {shot_id}: NSM state additions: {_state_ctx['prompt_additions'][:80]}")
+                elif _shot_nsm and shot_engine == "wan" and chars:
+                    # Multi-character: inject all characters' state additions
+                    state_additions = []
+                    for _cs in chars:
+                        if _cs in _shot_nsm and _shot_nsm[_cs].get("prompt_additions"):
+                            state_additions.append(f"{_cs}: {_shot_nsm[_cs]['prompt_additions']}")
+                    if state_additions:
+                        current_prompt = f"{current_prompt}. State: {'. '.join(state_additions)}"
 
                 current_negative = "low quality, blurry, distorted, watermark"
+                # Add state-based negative prompt additions
+                if _shot_nsm and character_slug and character_slug in _shot_nsm:
+                    _neg_add = _shot_nsm[character_slug].get("negative_additions", "")
+                    if _neg_add:
+                        current_negative = f"{current_negative}, {_neg_add}"
                 shot_steps = shot_dict.get("steps") or 25
                 shot_guidance = shot_dict.get("guidance_scale") or 6.0
                 shot_seconds = float(shot_dict.get("duration_seconds") or 3)
@@ -602,48 +685,104 @@ async def _generate_scene_impl(scene_id: str):
                 shot_seed = shot_dict.get("seed")
 
                 # Determine first frame source — priority order:
+                # 0. Multi-character FramePack: generate composite source image via IP-Adapter
                 # 1. Previous shot's last frame (same character, same scene) — intra-scene continuity
                 # 2. Cross-scene continuity frame (same character, prior scene) — inter-scene continuity
                 # 3. Auto-assigned source image from approved pool — cold start
-                same_char_prev_shot = (
-                    prev_last_frame
-                    and prev_character
-                    and character_slug == prev_character
-                    and Path(prev_last_frame).exists()
-                )
-                if same_char_prev_shot:
-                    # Priority 1: chain from previous shot in this scene
-                    first_frame_path = prev_last_frame
-                    image_filename = await copy_to_comfyui_input(first_frame_path)
-                    logger.info(f"Shot {shot_id}: continuity chain from previous shot (same character: {character_slug})")
-                else:
-                    # Priority 2: check for cross-scene continuity frame
-                    cross_scene_frame = None
-                    if character_slug and project_id:
-                        cross_scene_frame = await _get_continuity_frame(
-                            conn, project_id, character_slug, scene_id
-                        )
+                # Wan T2V is text-only — skip source image entirely
+                is_multi_char = chars and len(chars) >= 2
+                image_filename = None
+                first_frame_path = None
+                if shot_engine == "wan":
+                    logger.info(f"Shot {shot_id}: Wan T2V — no source image needed")
+                elif is_multi_char and shot_engine in ("framepack", "framepack_f1"):
+                    # Multi-character shot: generate composite source image
+                    try:
+                        from .composite_image import generate_composite_source
+                        # Get checkpoint from project's generation style
+                        ckpt = "realistic_vision_v51.safetensors"
+                        try:
+                            style_row = await conn.fetchrow(
+                                """SELECT gs.checkpoint_model FROM projects p
+                                   JOIN generation_styles gs ON p.default_style = gs.style_name
+                                   WHERE p.id = $1""", project_id)
+                            if style_row and style_row["checkpoint_model"]:
+                                ckpt = style_row["checkpoint_model"]
+                                if not ckpt.endswith(".safetensors"):
+                                    ckpt += ".safetensors"
+                        except Exception:
+                            pass
 
-                    if cross_scene_frame:
-                        first_frame_path = cross_scene_frame
-                        image_filename = await copy_to_comfyui_input(first_frame_path)
-                        logger.info(
-                            f"Shot {shot_id}: cross-scene continuity frame for '{character_slug}' "
-                            f"(from prior scene)"
+                        logger.info(f"Shot {shot_id}: multi-char ({chars}) — generating composite source image")
+                        composite_path = await generate_composite_source(
+                            conn, project_id, list(chars), motion_prompt, ckpt
                         )
+                        if composite_path and composite_path.exists():
+                            first_frame_path = str(composite_path)
+                            image_filename = await copy_to_comfyui_input(first_frame_path)
+                            logger.info(f"Shot {shot_id}: composite source ready: {composite_path.name}")
+                        else:
+                            logger.warning(f"Shot {shot_id}: composite generation failed, falling back to solo image")
+                            # Fall through to solo image logic below
+                            is_multi_char = False
+                    except Exception as e:
+                        logger.warning(f"Shot {shot_id}: composite error: {e}, falling back to solo image")
+                        is_multi_char = False
+
+                if not image_filename and shot_engine != "wan" and not (is_multi_char and first_frame_path):
+                    same_char_prev_shot = (
+                        prev_last_frame
+                        and prev_character
+                        and character_slug == prev_character
+                        and Path(prev_last_frame).exists()
+                    )
+                    if same_char_prev_shot:
+                        # Priority 1: chain from previous shot in this scene
+                        first_frame_path = prev_last_frame
+                        image_filename = await copy_to_comfyui_input(first_frame_path)
+                        logger.info(f"Shot {shot_id}: continuity chain from previous shot (same character: {character_slug})")
                     else:
-                        # Priority 3: fall back to auto-assigned source image
-                        source_path = shot_dict.get("source_image_path")
-                        if not source_path:
-                            logger.error(f"Shot {shot_id}: no source image and no continuity frame available")
-                            await conn.execute(
-                                "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
-                                shot_id, "No source image available (auto-assignment failed or no characters_present)")
-                            continue
-                        image_filename = await copy_to_comfyui_input(source_path)
-                        first_frame_path = str(BASE_PATH / source_path) if not Path(source_path).is_absolute() else source_path
-                        if prev_character and character_slug != prev_character:
-                            logger.info(f"Shot {shot_id}: character switch {prev_character} → {character_slug}, using source image")
+                        # Priority 2: check for cross-scene continuity frame
+                        # Use state-aware selection when NSM states exist (Phase 4)
+                        cross_scene_frame = None
+                        if character_slug and project_id:
+                            _char_target_state = None
+                            if _shot_nsm and character_slug in _shot_nsm:
+                                _char_target_state = _shot_nsm[character_slug].get("state")
+                            if _char_target_state:
+                                try:
+                                    from packages.narrative_state.continuity import select_continuity_source
+                                    cross_scene_frame = await select_continuity_source(
+                                        conn, project_id, character_slug,
+                                        _char_target_state, scene_id,
+                                    )
+                                except Exception as _e:
+                                    logger.debug(f"NSM continuity selection: {_e}")
+                            if not cross_scene_frame:
+                                cross_scene_frame = await _get_continuity_frame(
+                                    conn, project_id, character_slug, scene_id
+                                )
+
+                        if cross_scene_frame:
+                            first_frame_path = cross_scene_frame
+                            image_filename = await copy_to_comfyui_input(first_frame_path)
+                            logger.info(
+                                f"Shot {shot_id}: cross-scene continuity frame for '{character_slug}' "
+                                f"(from prior scene)"
+                            )
+                        else:
+                            # Priority 3: fall back to auto-assigned source image
+                            source_path = shot_dict.get("source_image_path")
+                            if not source_path:
+                                logger.error(f"Shot {shot_id}: no source image and no continuity frame available")
+                                await conn.execute(
+                                    "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
+                                    shot_id, "No source image available (auto-assignment failed or no characters_present)")
+                                continue
+                            image_filename = await copy_to_comfyui_input(source_path)
+                            first_frame_path = str(BASE_PATH / source_path) if not Path(source_path).is_absolute() else source_path
+                            if prev_character and character_slug != prev_character:
+                                logger.info(f"Shot {shot_id}: character switch {prev_character} → {character_slug}, using source image")
 
                 attempt_start = _time_inner.time()
 
@@ -695,6 +834,26 @@ async def _generate_scene_impl(scene_id: str):
 
                 video_filename = result["output_files"][0]
                 video_path = str(COMFYUI_OUTPUT_DIR / video_filename)
+
+                # Post-process all video outputs: interpolation + upscale + color grade
+                # Wan gets upscale (480→960), FramePack gets interpolation + color only
+                try:
+                    from .video_postprocess import postprocess_wan_video
+                    do_upscale = shot_engine == "wan"  # Wan is 480p, needs upscale
+                    processed = await postprocess_wan_video(
+                        video_path,
+                        upscale=do_upscale,
+                        interpolate=True,
+                        color_grade=True,
+                        scale_factor=2,
+                        target_fps=30,
+                    )
+                    if processed:
+                        video_path = processed
+                        logger.info(f"Shot {shot_id}: post-processed → {Path(processed).name}")
+                except Exception as e:
+                    logger.warning(f"Shot {shot_id}: post-processing failed: {e}, using raw output")
+
                 last_frame = await extract_last_frame(video_path)
 
                 # Record source image effectiveness for the feedback loop

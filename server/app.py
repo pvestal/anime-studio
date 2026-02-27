@@ -42,6 +42,7 @@ from packages.voice_pipeline.router import router as voice_router
 from packages.episode_assembly.router import router as episode_router
 from packages.core.graph_router import router as graph_router
 from packages.core.orchestrator_router import router as orchestrator_router
+from packages.narrative_state import narrative_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -77,6 +78,9 @@ app.include_router(graph_router, prefix="/api/graph", tags=["graph"])   # /api/g
 # Production orchestrator:
 app.include_router(orchestrator_router, prefix="/api/system", tags=["orchestrator"])  # /api/system/orchestrator/*
 
+# Narrative State Machine:
+app.include_router(narrative_router, prefix="/api/narrative", tags=["narrative"])  # /api/narrative/*
+
 
 @app.on_event("startup")
 async def startup():
@@ -92,11 +96,15 @@ async def startup():
     orchestrator.register_orchestrator_handlers()
     await orchestrator.start_tick_loop()
 
+    # Register NSM EventBus handlers
+    from packages.narrative_state.hooks import register_nsm_handlers
+    register_nsm_handlers()
+
     # Recover any shots stuck in 'generating' from before this restart
     from packages.scene_generation.builder import recover_interrupted_generations
     await recover_interrupted_generations()
 
-    logger.info("Tower Anime Studio v3.5 started — 8 packages + graph + orchestrator mounted")
+    logger.info("Tower Anime Studio v3.5 started — 9 packages + graph + orchestrator + NSM mounted")
 
 
 # ── System Endpoints ─────────────────────────────────────────────────────

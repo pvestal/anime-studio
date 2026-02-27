@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from packages.core.db import connect_direct
+from packages.core.events import event_bus, EPISODE_UPDATED
 from packages.core.models import (
     EpisodeCreateRequest, EpisodeUpdateRequest,
     EpisodeAddSceneRequest, EpisodeReorderRequest,
@@ -150,6 +151,12 @@ async def update_episode(episode_id: str, body: EpisodeUpdateRequest):
         updates.append("updated_at = NOW()")
         await conn.execute(
             f"UPDATE episodes SET {', '.join(updates)} WHERE id = $1", eid, *params)
+
+        # Emit episode updated event for NSM
+        await event_bus.emit(EPISODE_UPDATED, {
+            "episode_id": str(eid),
+        })
+
         return {"message": "Episode updated"}
     finally:
         await conn.close()
