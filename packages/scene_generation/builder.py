@@ -15,6 +15,7 @@ from pathlib import Path
 from packages.core.config import BASE_PATH, COMFYUI_URL, COMFYUI_OUTPUT_DIR, COMFYUI_INPUT_DIR
 from packages.core.db import connect_direct
 from packages.core.audit import log_decision
+from packages.core.events import event_bus, SHOT_GENERATED
 
 from .framepack import build_framepack_workflow, _submit_comfyui_workflow
 from .ltx_video import build_ltx_workflow, _submit_comfyui_workflow as _submit_ltx_workflow
@@ -900,6 +901,16 @@ async def _generate_scene_impl(scene_id: str):
                         logger.warning(f"Shot {shot_id}: failed to save continuity frame: {e}")
 
                 logger.info(f"Shot {shot_id}: generated in {gen_time:.0f}s → pending_review")
+
+                await event_bus.emit(SHOT_GENERATED, {
+                    "shot_id": str(shot_id),
+                    "scene_id": str(scene_id),
+                    "project_id": project_id,
+                    "character_slug": character_slug,
+                    "video_engine": shot_engine,
+                    "generation_time": gen_time,
+                    "video_path": video_path,
+                })
 
             except Exception as e:
                 logger.error(f"Shot {shot_id} generation failed: {e}")

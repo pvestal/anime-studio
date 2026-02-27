@@ -28,6 +28,12 @@ from .events import (
     event_bus,
     IMAGE_APPROVED,
     PIPELINE_PHASE_ADVANCED,
+    TRAINING_STARTED,
+    SCENE_PLANNING_COMPLETE,
+    SCENE_READY,
+    SHOT_GENERATED,
+    EPISODE_ASSEMBLED,
+    EPISODE_PUBLISHED,
 )
 from .audit import log_decision
 
@@ -509,8 +515,222 @@ async def _handle_phase_advanced(data: dict):
     )
 
 
+async def _handle_training_started(data: dict):
+    """Audit log when LoRA training begins."""
+    slug = data.get("character_slug", "unknown")
+    logger.info(f"Orchestrator: training started for {slug}")
+    await log_decision(
+        decision_type="orchestrator_training_started",
+        character_slug=slug,
+        input_context=data,
+        decision_made="training_started",
+        confidence_score=1.0,
+        reasoning=f"LoRA training initiated for {data.get('character_name', slug)}",
+    )
+
+
+async def _handle_scene_planning_complete(data: dict):
+    """Auto-advance scene_planning phase and trigger shot preparation."""
+    project_id = data.get("project_id")
+    if not project_id:
+        return
+
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            entry = await conn.fetchrow("""
+                SELECT * FROM production_pipeline
+                WHERE entity_type = 'project' AND project_id = $1
+                  AND phase = 'scene_planning' AND status NOT IN ('completed', 'skipped')
+            """, project_id)
+            if entry:
+                await _advance_phase_impl(conn, dict(entry), CHARACTER_PHASES, PROJECT_PHASES)
+                logger.info(
+                    f"Orchestrator: scene_planning → shot_preparation "
+                    f"(auto-advanced for project {project_id}, {data.get('scene_count', '?')} scenes)"
+                )
+    except Exception as e:
+        logger.error(f"Orchestrator: failed to auto-advance scene_planning for project {project_id}: {e}")
+
+
+async def _handle_scene_ready(data: dict):
+    """When a scene's videos finish, check if all shots are done and trigger assembly."""
+    project_id = data.get("project_id")
+    scene_id = data.get("scene_id")
+    if not project_id or not scene_id:
+        return
+
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Check if all shots in this scene have video
+            counts = await conn.fetchrow("""
+                SELECT COUNT(*) as total,
+                       COUNT(*) FILTER (WHERE status IN ('completed', 'accepted_best')
+                                        AND output_video_path IS NOT NULL) as done
+                FROM shots WHERE scene_id = $1
+            """, scene_id)
+
+            if counts and counts["total"] > 0 and counts["done"] >= counts["total"]:
+                logger.info(
+                    f"Orchestrator: scene {scene_id} all {counts['done']} shots complete, "
+                    f"eligible for assembly"
+                )
+                await log_decision(
+                    decision_type="orchestrator_scene_ready",
+                    project_name=str(project_id),
+                    input_context={"scene_id": scene_id, "shots_done": counts["done"]},
+                    decision_made="scene_ready_for_assembly",
+                    confidence_score=1.0,
+                    reasoning=f"All {counts['done']} shots generated for scene {scene_id}",
+                )
+    except Exception as e:
+        logger.error(f"Orchestrator: scene_ready handler failed for scene {scene_id}: {e}")
+
+
+async def _handle_shot_generated(data: dict):
+    """Log shot completion and update pipeline progress."""
+    shot_id = data.get("shot_id")
+    project_id = data.get("project_id")
+    engine = data.get("video_engine", "unknown")
+    gen_time = data.get("generation_time", 0)
+
+    logger.info(
+        f"Orchestrator: shot {shot_id} generated via {engine} in {gen_time:.0f}s"
+    )
+
+    if not project_id:
+        return
+
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            # Update video_generation phase progress
+            progress = await conn.fetchrow("""
+                SELECT
+                    (SELECT COUNT(*) FROM shots sh
+                     JOIN scenes sc ON sh.scene_id = sc.id
+                     WHERE sc.project_id = $1
+                       AND sh.status IN ('completed', 'accepted_best')
+                       AND sh.output_video_path IS NOT NULL) as done,
+                    (SELECT COUNT(*) FROM shots sh
+                     JOIN scenes sc ON sh.scene_id = sc.id
+                     WHERE sc.project_id = $1) as total
+            """, project_id)
+
+            if progress:
+                await conn.execute("""
+                    UPDATE production_pipeline
+                    SET progress_current = $1, progress_target = $2, updated_at = NOW()
+                    WHERE entity_type = 'project' AND project_id = $3
+                      AND phase = 'video_generation'
+                      AND status NOT IN ('completed', 'skipped')
+                """, progress["done"], progress["total"], project_id)
+    except Exception as e:
+        logger.warning(f"Orchestrator: shot_generated progress update failed: {e}")
+
+
+async def _handle_episode_assembled(data: dict):
+    """Log episode assembly completion."""
+    project_id = data.get("project_id")
+    episode_id = data.get("episode_id")
+    episode_num = data.get("episode_number", "?")
+
+    logger.info(f"Orchestrator: episode {episode_num} assembled for project {project_id}")
+
+    await log_decision(
+        decision_type="orchestrator_episode_assembled",
+        project_name=str(project_id),
+        input_context=data,
+        decision_made="episode_assembled",
+        confidence_score=1.0,
+        reasoning=f"Episode {episode_num} video assembled from scene videos",
+    )
+
+    # Auto-advance episode_assembly phase if all episodes are assembled
+    if not project_id:
+        return
+
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            unassembled = await conn.fetchval("""
+                SELECT COUNT(*) FROM episodes
+                WHERE project_id = $1 AND final_video_path IS NULL
+            """, project_id)
+            if unassembled == 0:
+                entry = await conn.fetchrow("""
+                    SELECT * FROM production_pipeline
+                    WHERE entity_type = 'project' AND project_id = $1
+                      AND phase = 'episode_assembly'
+                      AND status NOT IN ('completed', 'skipped')
+                """, project_id)
+                if entry:
+                    await _advance_phase_impl(conn, dict(entry), CHARACTER_PHASES, PROJECT_PHASES)
+                    logger.info(
+                        f"Orchestrator: episode_assembly → publishing "
+                        f"(all episodes assembled for project {project_id})"
+                    )
+    except Exception as e:
+        logger.error(f"Orchestrator: episode_assembled handler failed: {e}")
+
+
+async def _handle_episode_published(data: dict):
+    """Log publishing and send Telegram notification."""
+    project_id = data.get("project_id")
+    episode_num = data.get("episode_number", "?")
+    published_path = data.get("published_path", "")
+
+    logger.info(f"Orchestrator: episode {episode_num} published to Jellyfin")
+
+    await log_decision(
+        decision_type="orchestrator_episode_published",
+        project_name=str(project_id),
+        input_context=data,
+        decision_made="episode_published",
+        confidence_score=1.0,
+        reasoning=f"Episode {episode_num} published to Jellyfin at {published_path}",
+    )
+
+    # Best-effort Telegram notification
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            project_name = await conn.fetchval(
+                "SELECT name FROM projects WHERE id = $1", project_id
+            )
+
+        import urllib.request
+        payload = json.dumps({
+            "method": "tools/call",
+            "params": {
+                "name": "send_notification",
+                "arguments": {
+                    "message": f"Episode {episode_num} of {project_name or project_id} published to Jellyfin",
+                    "title": "Episode Published",
+                    "channels": ["telegram"],
+                    "priority": "normal",
+                },
+            },
+        }).encode()
+        req = urllib.request.Request(
+            "http://localhost:8309/mcp",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        logger.debug(f"Telegram notification failed (non-fatal): {e}")
+
+
 def register_orchestrator_handlers():
     """Register EventBus handlers. Called once at startup."""
     event_bus.subscribe(IMAGE_APPROVED, _handle_image_approved)
     event_bus.subscribe(PIPELINE_PHASE_ADVANCED, _handle_phase_advanced)
-    logger.info("Orchestrator EventBus handlers registered")
+    event_bus.subscribe(TRAINING_STARTED, _handle_training_started)
+    event_bus.subscribe(SCENE_PLANNING_COMPLETE, _handle_scene_planning_complete)
+    event_bus.subscribe(SCENE_READY, _handle_scene_ready)
+    event_bus.subscribe(SHOT_GENERATED, _handle_shot_generated)
+    event_bus.subscribe(EPISODE_ASSEMBLED, _handle_episode_assembled)
+    event_bus.subscribe(EPISODE_PUBLISHED, _handle_episode_published)
+    logger.info("Orchestrator EventBus handlers registered (8 events)")
