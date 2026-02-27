@@ -25,6 +25,9 @@ def decay_injury(injury: dict) -> dict | None:
     severity = injury.get("severity", "minor")
     countdown = injury.get("countdown", _DEFAULT_INJURY_COUNTDOWN)
 
+    if severity == "permanent":
+        return injury  # permanent injuries never decay
+
     if severity == "healed":
         return None
 
@@ -58,6 +61,9 @@ _EMOTION_DECAY = {
     "furious": "angry",
     "angry": "irritated",
     "irritated": "calm",
+    "threatening": "irritated",
+    "nervous": "uneasy",
+    "uneasy": "calm",
     "calm": "calm",
     "ecstatic": "happy",
     "happy": "content",
@@ -74,6 +80,8 @@ _EMOTION_DECAY = {
     "uncomfortable": "calm",
     "determined": "focused",
     "focused": "calm",
+    "serene": "calm",
+    "embarrassed": "uncomfortable",
 }
 
 

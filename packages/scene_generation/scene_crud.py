@@ -1227,34 +1227,37 @@ async def source_image_stats(project_id: int):
 
 @router.post("/scenes/generate-all")
 async def generate_all_scenes(project_id: int):
-    """Queue generation for all scenes that have shots but no final video."""
+    """Queue generation for all scenes that have shots but no final video.
+
+    Scenes are generated sequentially in scene_number order to maintain
+    narrative continuity (each scene's last frame feeds the next).
+    """
     conn = await connect_direct()
     try:
         rows = await conn.fetch("""
-            SELECT s.id, s.title, s.generation_status,
+            SELECT s.id, s.title, s.scene_number, s.generation_status,
                    (SELECT COUNT(*) FROM shots WHERE scene_id = s.id) as shot_count
             FROM scenes s
-            LEFT JOIN episode_scenes es ON es.scene_id = s.id
-            LEFT JOIN episodes ep ON ep.id = es.episode_id
             WHERE s.project_id = $1
               AND s.generation_status NOT IN ('generating', 'completed')
-            ORDER BY ep.episode_number NULLS LAST, es.position NULLS LAST,
-                     s.scene_number NULLS LAST, s.created_at
+            ORDER BY s.scene_number NULLS LAST, s.created_at
         """, project_id)
 
         eligible = [r for r in rows if r["shot_count"] > 0]
         if not eligible:
             return {"message": "No scenes to generate", "queued": 0}
 
-        queued = []
-        for scene_row in eligible:
-            scene_id = str(scene_row["id"])
-            sid = scene_row["id"]
-            if scene_id in _scene_generation_tasks:
-                task = _scene_generation_tasks[scene_id]
-                if not task.done():
-                    continue
+        # Check if a generate-all pipeline is already running for this project
+        pipeline_key = f"pipeline_{project_id}"
+        if pipeline_key in _scene_generation_tasks:
+            task = _scene_generation_tasks[pipeline_key]
+            if not task.done():
+                return {"message": "Generation pipeline already running for this project",
+                        "queued": 0}
 
+        # Reset all eligible shots to pending
+        for scene_row in eligible:
+            sid = scene_row["id"]
             await conn.execute(
                 "UPDATE shots SET status = 'pending', error_message = NULL "
                 "WHERE scene_id = $1", sid)
@@ -1262,17 +1265,32 @@ async def generate_all_scenes(project_id: int):
                 "UPDATE scenes SET completed_shots = 0, "
                 "current_generating_shot_id = NULL WHERE id = $1", sid)
 
-            async def _guarded_generate(scene_uuid):
-                async with _scene_gen_semaphore:
-                    await generate_scene(scene_uuid)
+        scene_ids = [r["id"] for r in eligible]
+        queued = [{"scene_id": str(r["id"]), "title": r["title"],
+                   "scene_number": r["scene_number"],
+                   "shot_count": r["shot_count"]} for r in eligible]
 
-            task = asyncio.create_task(_guarded_generate(sid))
-            _scene_generation_tasks[scene_id] = task
-            queued.append({"scene_id": scene_id, "title": scene_row["title"],
-                          "shot_count": scene_row["shot_count"]})
+        async def _sequential_pipeline(ordered_scene_ids):
+            """Generate scenes one at a time in order."""
+            for sid in ordered_scene_ids:
+                scene_id_str = str(sid)
+                try:
+                    async with _scene_gen_semaphore:
+                        logger.info(f"generate-all: starting scene {scene_id_str}")
+                        await generate_scene(sid)
+                        logger.info(f"generate-all: completed scene {scene_id_str}")
+                except Exception as e:
+                    logger.error(f"generate-all: scene {scene_id_str} failed: {e}")
+                    # Continue to next scene on failure
+                _scene_generation_tasks.pop(scene_id_str, None)
+            _scene_generation_tasks.pop(pipeline_key, None)
+            logger.info(f"generate-all: pipeline finished for project {project_id}")
+
+        task = asyncio.create_task(_sequential_pipeline(scene_ids))
+        _scene_generation_tasks[pipeline_key] = task
 
         return {
-            "message": f"Queued {len(queued)} scenes for generation",
+            "message": f"Queued {len(queued)} scenes for sequential generation",
             "queued": len(queued),
             "scenes": queued,
         }
