@@ -142,6 +142,38 @@ async def run_migrations():
                 END $$
             """)
 
+        # Reference V2V: source video clip columns on shots
+        for col, coltype in [
+            ("source_video_path", "TEXT"),
+            ("source_video_auto_assigned", "BOOLEAN DEFAULT FALSE"),
+        ]:
+            await conn.execute(f"""
+                DO $$ BEGIN
+                    ALTER TABLE shots ADD COLUMN {col} {coltype};
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$
+            """)
+
+        # Character clips table (persists CLIP-extracted video clips per character)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS character_clips (
+                id SERIAL PRIMARY KEY,
+                character_slug VARCHAR(255) NOT NULL,
+                clip_path TEXT NOT NULL UNIQUE,
+                source_video TEXT,
+                timestamp_seconds FLOAT,
+                similarity FLOAT,
+                duration_seconds FLOAT DEFAULT 2.0,
+                frame_index INTEGER,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        for idx_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_character_clips_slug ON character_clips(character_slug)",
+            "CREATE INDEX IF NOT EXISTS idx_character_clips_similarity ON character_clips(character_slug, similarity DESC NULLS LAST)",
+        ]:
+            await conn.execute(idx_sql)
+
         # Scene generated music columns (ACE-Step pipeline)
         for col, coltype in [
             ("generated_music_path", "TEXT"),
@@ -201,6 +233,18 @@ async def run_migrations():
                 updated_at TIMESTAMP DEFAULT NOW()
             )
         """)
+
+        # Episode music columns
+        for col, coltype in [
+            ("episode_music_path", "TEXT"),
+            ("episode_mood", "TEXT"),
+        ]:
+            await conn.execute(f"""
+                DO $$ BEGIN
+                    ALTER TABLE episodes ADD COLUMN {col} {coltype};
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$
+            """)
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS episode_scenes (

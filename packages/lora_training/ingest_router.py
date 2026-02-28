@@ -14,9 +14,10 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from pydantic import BaseModel
 
 from packages.core.config import BASE_PATH, COMFYUI_URL, COMFYUI_OUTPUT_DIR
-from packages.core.db import get_char_project_map
+from packages.core.db import get_char_project_map, connect_direct
 from packages.lora_training.dedup import is_duplicate, register_hash
 from .ingest_helpers import (
     _ingest_progress,
@@ -330,3 +331,87 @@ async def clear_stuck_generations():
         }
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to communicate with ComfyUI: {e}")
+
+
+@ingest_router.get("/ingest/clips/{character_slug}")
+async def list_character_clips(character_slug: str, limit: int = 50):
+    """List extracted video clips for a character from the character_clips table."""
+    conn = await connect_direct()
+    try:
+        rows = await conn.fetch(
+            "SELECT id, character_slug, clip_path, source_video, timestamp_seconds, "
+            "similarity, duration_seconds, frame_index, created_at "
+            "FROM character_clips WHERE character_slug = $1 "
+            "ORDER BY similarity DESC NULLS LAST LIMIT $2",
+            character_slug, limit,
+        )
+        clips = []
+        for r in rows:
+            clip_path = r["clip_path"]
+            clips.append({
+                "id": r["id"],
+                "character_slug": r["character_slug"],
+                "clip_path": clip_path,
+                "exists": Path(clip_path).exists() if clip_path else False,
+                "source_video": r["source_video"],
+                "timestamp_seconds": r["timestamp_seconds"],
+                "similarity": r["similarity"],
+                "duration_seconds": r["duration_seconds"],
+                "frame_index": r["frame_index"],
+                "created_at": str(r["created_at"]) if r["created_at"] else None,
+            })
+        return {"character_slug": character_slug, "clips": clips, "total": len(clips)}
+    finally:
+        await conn.close()
+
+
+class ClipExtractRequest(BaseModel):
+    video_path: str
+    character_slug: str
+    project_name: str
+    max_frames: int = 100
+    clip_duration: float = 2.0
+
+
+@ingest_router.post("/ingest/clips/extract")
+async def extract_clips_for_character(body: ClipExtractRequest):
+    """Extract CLIP-classified video clips for a character and persist to DB.
+
+    Combines frame extraction + CLIP classification + clip extraction + DB persistence.
+    Runs as a background task — poll GET /ingest/progress for status.
+    """
+    video_path = Path(body.video_path)
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail=f"Video not found: {body.video_path}")
+
+    existing = _ingest_progress.get("clip-classify")
+    if isinstance(existing, dict) and existing.get("active"):
+        raise HTTPException(status_code=409, detail="A CLIP classification is already running")
+
+    char_map = await get_char_project_map()
+    project_slugs = [
+        slug for slug, info in char_map.items()
+        if info.get("project_name") == body.project_name
+    ]
+    if not project_slugs:
+        raise HTTPException(status_code=404, detail=f"No characters for project '{body.project_name}'")
+
+    # Delegate to the existing CLIP classify pipeline with clip extraction enabled
+    from .ingest_videos import _clip_classify_task
+    req = ClipClassifyRequest(
+        path=body.video_path,
+        project_name=body.project_name,
+        target_character=body.character_slug,
+        max_frames=body.max_frames,
+        extract_clips=True,
+        clip_duration=body.clip_duration,
+    )
+    asyncio.create_task(_clip_classify_task(req, char_map, project_slugs, is_url=False))
+
+    return {
+        "status": "started",
+        "character_slug": body.character_slug,
+        "project_name": body.project_name,
+        "video_path": body.video_path,
+        "message": "Clip extraction started. Poll GET /api/training/ingest/progress for status.",
+    }

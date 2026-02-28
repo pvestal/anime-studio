@@ -187,12 +187,12 @@ async def _persist_scenes_and_shots(
             for i, scene in enumerate(scenes):
                 scene_num = (max_num or 0) + i + 1
                 row = await conn.fetchrow("""
-                    INSERT INTO scenes (project_id, title, description, location,
+                    INSERT INTO scenes (project_id, episode_id, title, description, location,
                                         time_of_day, mood, target_duration_seconds,
                                         scene_number, generation_status)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft')
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft')
                     RETURNING id
-                """, project_id, scene.get("title"), scene.get("description"),
+                """, project_id, ep_uuid, scene.get("title"), scene.get("description"),
                     scene.get("location"), scene.get("time_of_day"),
                     scene.get("mood"), None, scene_num)
 
@@ -242,6 +242,28 @@ async def _persist_scenes_and_shots(
                     "title": scene.get("title"), "shots_created": len(shot_ids),
                     "shot_ids": shot_ids,
                 })
+
+                # Auto-populate character_scene_state from scene metadata
+                scene_mood = scene.get("mood", "calm")
+                _emotion_map = {
+                    "tense": "anxious", "romantic": "content", "seductive": "content",
+                    "intimate": "content", "action": "determined", "melancholy": "sad",
+                    "comedic": "happy", "threatening": "scared", "powerful": "determined",
+                    "desperate": "anxious", "vulnerable": "sad", "peaceful": "calm",
+                    "ambient": "calm", "dark": "anxious", "dramatic": "shocked",
+                    "suspenseful": "anxious", "angry": "angry", "cheerful": "happy",
+                }
+                _default_emotion = _emotion_map.get(scene_mood, "calm") if scene_mood else "calm"
+                for _char_slug in (chars_as_slugs or []):
+                    try:
+                        await conn.execute("""
+                            INSERT INTO character_scene_state
+                                (scene_id, character_slug, emotional_state, state_source)
+                            VALUES ($1, $2, $3, 'auto')
+                            ON CONFLICT (scene_id, character_slug) DO NOTHING
+                        """, scene_id, _char_slug, _default_emotion)
+                    except Exception:
+                        pass  # Table may not exist yet in some installs
 
         logger.info(f"Persisted {len(saved)} scenes with shots for project {project_id}"
                      + (f" (episode {episode_id})" if episode_id else ""))
@@ -493,6 +515,7 @@ async def get_scene(scene_id: str):
                 "characters_present": sh["characters_present"] or [],
                 "motion_prompt": sh["motion_prompt"] or sh["generation_prompt"],
                 "source_image_path": sh["source_image_path"],
+                "source_video_path": sh.get("source_video_path"),
                 "first_frame_path": sh["first_frame_path"],
                 "last_frame_path": sh["last_frame_path"],
                 "output_video_path": sh["output_video_path"],
@@ -508,6 +531,8 @@ async def get_scene(scene_id: str):
                 "video_engine": sh.get("video_engine") or "framepack",
                 "transition_type": sh.get("transition_type") or "dissolve",
                 "transition_duration": float(sh.get("transition_duration") or 0.3),
+                "generation_prompt": sh.get("generation_prompt"),
+                "generation_negative": sh.get("generation_negative"),
             })
         return {
             "id": str(scene["id"]), "project_id": scene["project_id"],
@@ -818,8 +843,13 @@ async def attach_scene_music(scene_id: str, body: dict):
 # --- Generation Endpoints ---
 
 @router.post("/scenes/{scene_id}/generate")
-async def generate_scene_endpoint(scene_id: str):
-    """Start scene generation (background task)."""
+async def generate_scene_endpoint(scene_id: str, auto_approve: bool = False):
+    """Start scene generation (background task).
+
+    Args:
+        auto_approve: If True, auto-approve all completed shots so the full
+            downstream pipeline (voice → music → assembly) fires without review.
+    """
     sid = uuid.UUID(scene_id)
     if scene_id in _scene_generation_tasks:
         task = _scene_generation_tasks[scene_id]
@@ -850,13 +880,13 @@ async def generate_scene_endpoint(scene_id: str):
     finally:
         await conn.close()
 
-    async def _guarded_generate(scene_uuid):
+    async def _guarded_generate(scene_uuid, _auto_approve):
         async with _scene_gen_semaphore:
-            await generate_scene(scene_uuid)
+            await generate_scene(scene_uuid, auto_approve=_auto_approve)
 
-    task = asyncio.create_task(_guarded_generate(sid))
+    task = asyncio.create_task(_guarded_generate(sid, auto_approve))
     _scene_generation_tasks[scene_id] = task
-    return {"message": "Scene generation started", "total_shots": shot_count, "estimated_minutes": est_minutes}
+    return {"message": "Scene generation started", "total_shots": shot_count, "estimated_minutes": est_minutes, "auto_approve": auto_approve}
 
 
 @router.get("/scenes/{scene_id}/status")
@@ -874,7 +904,8 @@ async def get_scene_status(scene_id: str):
             raise HTTPException(status_code=404, detail="Scene not found")
         shots = await conn.fetch(
             "SELECT id, shot_number, status, output_video_path, error_message, "
-            "comfyui_prompt_id, generation_time_seconds, quality_score, motion_prompt "
+            "comfyui_prompt_id, generation_time_seconds, quality_score, motion_prompt, "
+            "generation_prompt, generation_negative, video_engine "
             "FROM shots WHERE scene_id = $1 ORDER BY shot_number", sid)
         shot_statuses = [{
             "id": str(sh["id"]), "shot_number": sh["shot_number"],
@@ -885,6 +916,9 @@ async def get_scene_status(scene_id: str):
             "generation_time_seconds": sh["generation_time_seconds"],
             "quality_score": sh["quality_score"],
             "motion_prompt": sh["motion_prompt"],
+            "generation_prompt": sh["generation_prompt"],
+            "generation_negative": sh["generation_negative"],
+            "video_engine": sh["video_engine"],
         } for sh in shots]
         return {
             "generation_status": scene["generation_status"] or "draft",
@@ -1024,6 +1058,64 @@ async def serve_shot_video(scene_id: str, shot_id: str):
     if not path or not Path(path).exists():
         raise HTTPException(status_code=404, detail="Shot video not found")
     return FileResponse(path, media_type="video/mp4", filename=f"shot_{shot_id}.mp4")
+
+
+@router.post("/scenes/{scene_id}/synthesize-dialogue")
+async def synthesize_scene_dialogue_endpoint(scene_id: str):
+    """Synthesize dialogue for a scene from its shot data and return status.
+
+    Uses build_scene_dialogue to generate a combined WAV from per-shot
+    dialogue_text + dialogue_character_slug fields. Idempotent — skips
+    if dialogue audio already exists.
+    """
+    from .scene_audio import build_scene_dialogue
+
+    sid = uuid.UUID(scene_id)
+    conn = await connect_direct()
+    try:
+        # Check if already exists
+        existing = await conn.fetchval("SELECT dialogue_audio_path FROM scenes WHERE id = $1", sid)
+        if existing and Path(existing).exists():
+            return {"scene_id": scene_id, "status": "exists", "dialogue_audio_path": existing}
+
+        dialogue_path = await build_scene_dialogue(conn, sid)
+        if not dialogue_path:
+            raise HTTPException(status_code=400, detail="No dialogue found in scene shots")
+        return {"scene_id": scene_id, "status": "synthesized", "dialogue_audio_path": dialogue_path}
+    finally:
+        await conn.close()
+
+
+@router.get("/scenes/{scene_id}/dialogue-audio")
+async def serve_scene_dialogue_audio(scene_id: str):
+    """Serve combined dialogue audio WAV for a scene."""
+    sid = uuid.UUID(scene_id)
+    conn = await connect_direct()
+    try:
+        path = await conn.fetchval("SELECT dialogue_audio_path FROM scenes WHERE id = $1", sid)
+    finally:
+        await conn.close()
+    if not path or not Path(path).exists():
+        raise HTTPException(status_code=404, detail="Scene dialogue audio not found")
+    return FileResponse(path, media_type="audio/wav", filename=f"scene_{scene_id}_dialogue.wav")
+
+
+@router.get("/scenes/{scene_id}/dialogue-status")
+async def get_scene_dialogue_status(scene_id: str):
+    """Check if a scene has dialogue audio available."""
+    sid = uuid.UUID(scene_id)
+    conn = await connect_direct()
+    try:
+        row = await conn.fetchrow(
+            "SELECT dialogue_audio_path FROM scenes WHERE id = $1", sid
+        )
+    finally:
+        await conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Scene not found")
+    path = row["dialogue_audio_path"]
+    has_audio = bool(path and Path(path).exists())
+    return {"scene_id": scene_id, "has_dialogue_audio": has_audio, "dialogue_audio_path": path if has_audio else None}
 
 
 @router.get("/scenes/{scene_id}/approved-images")
@@ -1226,21 +1318,30 @@ async def source_image_stats(project_id: int):
 
 
 @router.post("/scenes/generate-all")
-async def generate_all_scenes(project_id: int):
+async def generate_all_scenes(project_id: int, auto_approve: bool = False):
     """Queue generation for all scenes that have shots but no final video.
 
-    Scenes are generated sequentially in scene_number order to maintain
-    narrative continuity (each scene's last frame feeds the next).
+    Scenes are generated sequentially in episode order (episode_number, then
+    position within episode) to maintain narrative continuity.
+    Falls back to scene_number for scenes not linked to an episode.
+
+    Args:
+        auto_approve: If True, auto-approve all completed shots so voice synthesis,
+            music generation, audio mixing, and scene assembly fire automatically.
     """
     conn = await connect_direct()
     try:
         rows = await conn.fetch("""
             SELECT s.id, s.title, s.scene_number, s.generation_status,
+                   e.episode_number,
+                   COALESCE(es.position, 0) as ep_position,
                    (SELECT COUNT(*) FROM shots WHERE scene_id = s.id) as shot_count
             FROM scenes s
+            LEFT JOIN episodes e ON s.episode_id = e.id
+            LEFT JOIN episode_scenes es ON es.scene_id = s.id AND es.episode_id = e.id
             WHERE s.project_id = $1
               AND s.generation_status NOT IN ('generating', 'completed')
-            ORDER BY s.scene_number NULLS LAST, s.created_at
+            ORDER BY e.episode_number NULLS LAST, COALESCE(es.position, 0), s.scene_number NULLS LAST, s.created_at
         """, project_id)
 
         eligible = [r for r in rows if r["shot_count"] > 0]
@@ -1267,17 +1368,18 @@ async def generate_all_scenes(project_id: int):
 
         scene_ids = [r["id"] for r in eligible]
         queued = [{"scene_id": str(r["id"]), "title": r["title"],
+                   "episode_number": r["episode_number"],
                    "scene_number": r["scene_number"],
                    "shot_count": r["shot_count"]} for r in eligible]
 
-        async def _sequential_pipeline(ordered_scene_ids):
+        async def _sequential_pipeline(ordered_scene_ids, _auto_approve):
             """Generate scenes one at a time in order."""
             for sid in ordered_scene_ids:
                 scene_id_str = str(sid)
                 try:
                     async with _scene_gen_semaphore:
                         logger.info(f"generate-all: starting scene {scene_id_str}")
-                        await generate_scene(sid)
+                        await generate_scene(sid, auto_approve=_auto_approve)
                         logger.info(f"generate-all: completed scene {scene_id_str}")
                 except Exception as e:
                     logger.error(f"generate-all: scene {scene_id_str} failed: {e}")
@@ -1286,7 +1388,7 @@ async def generate_all_scenes(project_id: int):
             _scene_generation_tasks.pop(pipeline_key, None)
             logger.info(f"generate-all: pipeline finished for project {project_id}")
 
-        task = asyncio.create_task(_sequential_pipeline(scene_ids))
+        task = asyncio.create_task(_sequential_pipeline(scene_ids, auto_approve))
         _scene_generation_tasks[pipeline_key] = task
 
         return {
@@ -1304,7 +1406,7 @@ class SelectEngineRequest(BaseModel):
     lora_strength: float = 0.8
 
 
-KNOWN_ENGINES = {"framepack", "framepack_f1", "ltx", "wan"}
+KNOWN_ENGINES = {"framepack", "framepack_f1", "ltx", "wan", "reference_v2v"}
 
 
 @router.post("/scenes/{scene_id}/shots/{shot_id}/select-engine")
@@ -1335,6 +1437,41 @@ async def select_engine_for_shot(scene_id: str, shot_id: str, body: SelectEngine
             "video_engine": body.video_engine,
             "lora_name": body.lora_name,
             "lora_strength": body.lora_strength,
+        }
+    finally:
+        await conn.close()
+
+
+class AssignSourceVideoRequest(BaseModel):
+    clip_path: str
+
+
+@router.post("/scenes/{scene_id}/shots/{shot_id}/assign-source-video")
+async def assign_source_video(scene_id: str, shot_id: str, body: AssignSourceVideoRequest):
+    """Manually assign a source video clip to a shot for V2V style transfer."""
+    clip = Path(body.clip_path)
+    if not clip.exists():
+        raise HTTPException(status_code=404, detail=f"Clip not found: {body.clip_path}")
+
+    sid = uuid.UUID(scene_id)
+    shot_uuid = uuid.UUID(shot_id)
+    conn = await connect_direct()
+    try:
+        shot = await conn.fetchrow(
+            "SELECT id FROM shots WHERE id = $1 AND scene_id = $2", shot_uuid, sid,
+        )
+        if not shot:
+            raise HTTPException(status_code=404, detail="Shot not found in this scene")
+
+        await conn.execute(
+            "UPDATE shots SET source_video_path = $1, source_video_auto_assigned = FALSE, "
+            "video_engine = 'reference_v2v' WHERE id = $2",
+            body.clip_path, shot_uuid,
+        )
+        return {
+            "shot_id": shot_id,
+            "source_video_path": body.clip_path,
+            "video_engine": "reference_v2v",
         }
     finally:
         await conn.close()

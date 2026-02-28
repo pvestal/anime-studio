@@ -17,6 +17,7 @@ export interface AppearanceData {
   weapons?: Array<{ name?: string; type?: string; description?: string }>
   accessories?: string[]
   sexual?: { orientation?: string; preferences?: string; physical_traits?: string }
+  [key: string]: unknown
 }
 
 export interface Character {
@@ -608,6 +609,7 @@ export interface BuilderShot {
   characters_present: string[]
   motion_prompt: string | null
   source_image_path: string | null
+  source_video_path: string | null
   first_frame_path: string | null
   last_frame_path: string | null
   output_video_path: string | null
@@ -621,9 +623,12 @@ export interface BuilderShot {
   generation_time_seconds: number | null
   dialogue_text: string | null
   dialogue_character_slug: string | null
-  video_engine: 'framepack' | 'framepack_f1' | 'ltx' | 'wan' | null
+  video_engine: 'framepack' | 'framepack_f1' | 'ltx' | 'wan' | 'reference_v2v' | null
   transition_type: string | null
   transition_duration: number | null
+  generation_prompt: string | null
+  generation_negative: string | null
+  source_image_auto_assigned: boolean | null
 }
 
 export interface SceneCreateRequest {
@@ -652,7 +657,7 @@ export interface ShotCreateRequest {
   use_f1?: boolean
   dialogue_text?: string | null
   dialogue_character_slug?: string | null
-  video_engine?: 'framepack' | 'framepack_f1' | 'ltx' | 'wan' | null
+  video_engine?: 'framepack' | 'framepack_f1' | 'ltx' | 'wan' | 'reference_v2v' | null
   transition_type?: string | null
   transition_duration?: number | null
 }
@@ -1194,7 +1199,7 @@ export interface PendingVideo {
   source_image_path: string | null
   output_video_path: string | null
   quality_score: number | null
-  video_engine: 'framepack' | 'framepack_f1' | 'ltx' | 'wan'
+  video_engine: 'framepack' | 'framepack_f1' | 'ltx' | 'wan' | 'reference_v2v'
   seed: number | null
   steps: number | null
   generation_time_seconds: number | null

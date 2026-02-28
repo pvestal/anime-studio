@@ -45,6 +45,227 @@ from .scene_audio import (  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Genre-aware video prompt profiles
+# ---------------------------------------------------------------------------
+# Tag categories — superset of classification keywords across all genres.
+# Used by both FramePack (reorder) and Wan (condense) paths.
+TAG_CATEGORIES: dict[str, set[str]] = {
+    "identity": {"male", "man", "woman", "female", "young", "old", "japanese",
+                 "boy", "girl", "adult", "teen", "child", "elderly"},
+    "face": {"expression", "smirk", "smile", "frown", "eyes", "eye", "face",
+             "scar", "menacing", "nervous", "confident", "worried", "aggressive",
+             "gentle", "stern", "gaze", "look", "glasses", "eyepatch", "mask",
+             "beard", "mustache"},
+    "hair": {"hair", "bald", "ponytail", "braid", "bangs", "twintail",
+             "short hair", "long hair", "mohawk"},
+    "skin": {"tan", "pale", "skin", "dark skin", "fair", "rough", "smooth",
+             "tattoo", "freckle"},
+    "body": {"body", "build", "muscular", "slim", "athletic", "toned",
+             "shoulder", "chest", "pec", "waist", "abs", "thigh", "leg",
+             "butt", "hip", "tall", "short", "lean", "broad", "narrow",
+             "flat male chest", "wide", "underfed", "stocky", "petite"},
+    "anatomy": {"penis", "testicle", "vagina", "breast", "nipple", "areola",
+                "cock", "b-cup", "c-cup", "d-cup", "perky", "nude", "naked",
+                "genitals"},
+    "equipment": {"sword", "shield", "armor", "helmet", "weapon", "gun",
+                  "blade", "staff", "bow", "axe", "spear", "dagger", "gauntlet",
+                  "scabbard", "holster"},
+    "clothing": {"clothing", "dress", "shirt", "pants", "skirt", "jacket",
+                 "coat", "boots", "gloves", "cape", "cloak", "hat", "uniform",
+                 "suit", "scarf", "belt", "collar", "bikini", "underwear",
+                 "overalls", "vest"},
+    "cybernetics": {"cybernetic", "augment", "prosthetic", "implant", "visor",
+                    "neon", "circuit", "chrome", "mechanical arm", "bionic"},
+    "proportions": {"proportions", "chibi", "stylized", "exaggerated",
+                    "realistic proportions", "cartoonish", "round", "plump"},
+    "style": {"3d render", "cel-shaded", "pixel", "watercolor", "painterly",
+              "illumination", "pixar", "disney", "ghibli"},
+}
+
+# Each genre profile specifies how to condense/reorder design_prompt tags.
+GENRE_VIDEO_PROFILES: dict[str, dict] = {
+    "explicit": {
+        "keep_categories": {"identity", "hair", "skin", "body", "anatomy"},
+        "reorder_priority": ["identity", "face", "hair", "skin", "body", "anatomy"],
+        "negative_additions": "malformed genitals, distorted genitals, malformed penis",
+        "include_scene_desc": True,
+    },
+    "cyberpunk": {
+        "keep_categories": {"identity", "hair", "skin", "body", "face",
+                            "equipment", "clothing", "cybernetics"},
+        "reorder_priority": ["identity", "face", "hair", "equipment",
+                             "cybernetics", "clothing", "body", "skin"],
+        "negative_additions": "modern casual, peaceful, bright cheerful",
+        "include_scene_desc": True,
+    },
+    "action": {
+        "keep_categories": {"identity", "hair", "skin", "body", "face",
+                            "equipment", "clothing"},
+        "reorder_priority": ["identity", "face", "hair", "equipment",
+                             "clothing", "body", "skin"],
+        "negative_additions": "peaceful, static, boring",
+        "include_scene_desc": True,
+    },
+    "3d_animation": {
+        "keep_categories": {"identity", "hair", "face", "clothing",
+                            "proportions", "style"},
+        "reorder_priority": ["style", "identity", "face", "hair",
+                             "clothing", "proportions"],
+        "negative_additions": "photorealistic, anime, 2d, flat shading",
+        "include_scene_desc": True,
+    },
+    "anime": {
+        "keep_categories": {"identity", "hair", "face", "skin", "body",
+                            "clothing"},
+        "reorder_priority": ["identity", "face", "hair", "clothing",
+                             "body", "skin"],
+        "negative_additions": "photorealistic, 3d render, live action",
+        "include_scene_desc": True,
+    },
+    "default": {
+        "keep_categories": {"identity", "hair", "face", "skin", "body",
+                            "clothing", "equipment"},
+        "reorder_priority": ["identity", "face", "hair", "clothing",
+                             "equipment", "body", "skin"],
+        "negative_additions": "",
+        "include_scene_desc": True,
+    },
+}
+
+
+def _get_genre_profile(genre: str | None, content_rating: str | None) -> dict:
+    """Resolve project genre + content_rating → video profile dict."""
+    # Explicit content rating overrides genre completely
+    if content_rating:
+        cr = content_rating.lower()
+        if any(kw in cr for kw in ("xxx", "adult", "nsfw", "hentai")):
+            return GENRE_VIDEO_PROFILES["explicit"]
+
+    if not genre:
+        return GENRE_VIDEO_PROFILES["default"]
+
+    g = genre.lower().strip()
+    # Direct match
+    if g in GENRE_VIDEO_PROFILES:
+        return GENRE_VIDEO_PROFILES[g]
+    # Keyword-based fallback
+    if any(kw in g for kw in ("cyber", "sci-fi", "scifi", "dystop")):
+        return GENRE_VIDEO_PROFILES["cyberpunk"]
+    if any(kw in g for kw in ("action", "shonen", "battle", "fight", "martial")):
+        return GENRE_VIDEO_PROFILES["action"]
+    if any(kw in g for kw in ("3d", "pixar", "cg", "illumination", "cartoon")):
+        return GENRE_VIDEO_PROFILES["3d_animation"]
+    if any(kw in g for kw in ("anime", "manga", "slice of life", "romance")):
+        return GENRE_VIDEO_PROFILES["anime"]
+    return GENRE_VIDEO_PROFILES["default"]
+
+
+def _classify_tag(tag_lower: str) -> str:
+    """Classify a single prompt tag into a TAG_CATEGORIES bucket."""
+    for cat, keywords in TAG_CATEGORIES.items():
+        if any(kw in tag_lower for kw in keywords):
+            return cat
+    return "other"
+
+
+def _condense_for_video(design_prompt: str, genre_profile: dict,
+                        engine: str) -> str:
+    """Replace both _video_safe_appearance and _condensed_appearance.
+
+    FramePack: reorder tags by genre priority (keeps all meaningful tags).
+    Wan: aggressive condense — only keep tags matching genre keep_categories.
+    """
+    strip_tags = {"solo", "1boy", "1girl", "full body", "score_9", "score_8_up"}
+    parts = [p.strip() for p in design_prompt.split(",") if p.strip()]
+    parts = [p for p in parts if p.lower().strip() not in strip_tags]
+
+    if engine in ("framepack", "framepack_f1"):
+        # Reorder by genre priority, keep all categorised tags
+        priority = genre_profile.get("reorder_priority",
+                                     GENRE_VIDEO_PROFILES["default"]["reorder_priority"])
+        buckets: dict[str, list[str]] = {cat: [] for cat in priority}
+        buckets["other"] = []
+        for p in parts:
+            cat = _classify_tag(p.lower().strip())
+            if cat in buckets:
+                buckets[cat].append(p)
+            else:
+                buckets["other"].append(p)
+        ordered = []
+        for cat in priority:
+            ordered.extend(buckets.get(cat, []))
+        ordered.extend(buckets["other"])
+        return ", ".join(ordered) if ordered else design_prompt
+    else:
+        # Wan T2V: aggressive condense — only keep_categories tags
+        keep_cats = genre_profile.get("keep_categories",
+                                      GENRE_VIDEO_PROFILES["default"]["keep_categories"])
+        # Flatten all keywords from kept categories
+        keep_keywords: set[str] = set()
+        for cat in keep_cats:
+            if cat in TAG_CATEGORIES:
+                keep_keywords.update(TAG_CATEGORIES[cat])
+        kept = []
+        for p in parts:
+            low = p.lower().strip()
+            if any(kw in low for kw in keep_keywords):
+                kept.append(p)
+        return ", ".join(kept) if kept else design_prompt
+
+
+def _build_video_negative(style_anchor: str, genre_profile: dict,
+                          nsm_negative: str = "") -> str:
+    """Build negative prompt from base + style exclusions + genre additions."""
+    parts = ["low quality, blurry, watermark, deformed face, distorted face, "
+             "bad hands, extra limbs"]
+    # Style-aware exclusions
+    if style_anchor:
+        if "photorealistic" in style_anchor:
+            parts.append("anime, cartoon, illustration, drawing, painted, "
+                         "cel-shaded, 3d render")
+        elif "anime" in style_anchor:
+            parts.append("photorealistic, photograph, live action, real person")
+        elif "Pixar" in style_anchor:
+            parts.append("anime, photorealistic, photograph, live action, 2d, flat")
+    # Genre-specific additions
+    genre_neg = genre_profile.get("negative_additions", "")
+    if genre_neg:
+        parts.append(genre_neg)
+    # NSM state additions
+    if nsm_negative:
+        parts.append(nsm_negative)
+    return ", ".join(parts)
+
+
+# --- Slug resolver: maps short slugs (rina) to dataset dir slugs (rina_suzuki) ---
+_slug_cache: dict[str, str] = {}
+
+
+def resolve_slug(short_slug: str) -> str:
+    """Resolve a possibly-short character slug to the actual dataset directory name.
+
+    Tries exact match first, then prefix match (short_slug + '_*').
+    Caches results for the lifetime of the process.
+    """
+    if short_slug in _slug_cache:
+        return _slug_cache[short_slug]
+    # Exact match
+    if (BASE_PATH / short_slug).is_dir():
+        _slug_cache[short_slug] = short_slug
+        return short_slug
+    # Prefix match: rina -> rina_suzuki
+    candidates = sorted(BASE_PATH.glob(f"{short_slug}_*"))
+    dirs = [c for c in candidates if c.is_dir()]
+    if dirs:
+        resolved = dirs[0].name
+        _slug_cache[short_slug] = resolved
+        return resolved
+    # No match — return as-is
+    _slug_cache[short_slug] = short_slug
+    return short_slug
+
+
 # Scene output directory (canonical location — also set in scene_audio.py)
 SCENE_OUTPUT_DIR = BASE_PATH.parent / "output" / "scenes"
 SCENE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -193,7 +414,19 @@ async def poll_comfyui_completion(prompt_id: str, timeout_seconds: int = 1800) -
             resp = urllib.request.urlopen(req, timeout=10)
             history = json.loads(resp.read())
             if prompt_id in history:
-                outputs = history[prompt_id].get("outputs", {})
+                entry = history[prompt_id]
+                # Check execution status
+                status_info = entry.get("status", {})
+                status_str = status_info.get("status_str", "unknown")
+                if status_str == "error":
+                    # Extract error details from messages
+                    msgs = status_info.get("messages", [])
+                    err_detail = ""
+                    for msg in msgs:
+                        if isinstance(msg, list) and len(msg) >= 2 and "error" in str(msg[0]).lower():
+                            err_detail = str(msg[1])[:200]
+                    return {"status": "error", "output_files": [], "error": err_detail or "ComfyUI execution error"}
+                outputs = entry.get("outputs", {})
                 videos = []
                 for node_output in outputs.values():
                     for key in ("videos", "gifs", "images"):
@@ -201,6 +434,24 @@ async def poll_comfyui_completion(prompt_id: str, timeout_seconds: int = 1800) -
                             fn = item.get("filename")
                             if fn:
                                 videos.append(fn)
+                    # Also check 'video' (singular) used by some Wan nodes
+                    if "video" in node_output:
+                        v = node_output["video"]
+                        if isinstance(v, dict) and v.get("filename"):
+                            videos.append(v["filename"])
+                        elif isinstance(v, list):
+                            for item in v:
+                                fn = item.get("filename") if isinstance(item, dict) else None
+                                if fn:
+                                    videos.append(fn)
+                if not videos and status_str == "success":
+                    # Scan output dir for files matching prefix (fallback)
+                    try:
+                        import glob as _glob
+                        prompt_files = _glob.glob(str(COMFYUI_OUTPUT_DIR / f"*{prompt_id[:8]}*"))
+                        videos = [Path(f).name for f in prompt_files if f.endswith((".mp4", ".webm"))]
+                    except Exception:
+                        pass
                 return {"status": "completed", "output_files": videos}
         except Exception:
             pass
@@ -275,34 +526,123 @@ async def recover_interrupted_generations():
         await conn.close()
 
 
-async def generate_scene(scene_id: str):
+async def generate_scene(scene_id: str, auto_approve: bool = False):
     """Background task: generate all shots sequentially with continuity chaining.
 
     Uses _scene_generation_lock to ensure only one scene generates at a time,
     so scenes complete fully (all shots in order) before the next scene starts.
+
+    Args:
+        auto_approve: If True, shots are auto-approved after generation so the
+            full downstream pipeline (voice → music → assembly) fires without
+            manual review. Also enabled by project metadata auto_approve_shots=true.
     """
     await _scene_generation_lock.acquire()
     try:
-        await _generate_scene_impl(scene_id)
+        await _generate_scene_impl(scene_id, auto_approve=auto_approve)
     finally:
         _scene_generation_lock.release()
+
+
+async def ensure_source_videos(conn, scene_id: str, shots: list) -> int:
+    """Auto-assign best source video clips to solo shots from character_clips table.
+
+    Mirrors ensure_source_images but assigns video clips for V2V style transfer.
+    Only assigns to solo character shots that don't already have a source_video_path
+    and weren't manually assigned. Returns the number of shots auto-assigned.
+    """
+    null_shots = [
+        s for s in shots
+        if not s.get("source_video_path")
+        and not s.get("source_video_auto_assigned")
+        and len(s.get("characters_present") or []) == 1
+    ]
+    if not null_shots:
+        return 0
+
+    assigned = 0
+    for shot in null_shots:
+        chars = shot.get("characters_present") or []
+        slug = chars[0] if chars else None
+        if not slug:
+            continue
+
+        try:
+            clip_row = await conn.fetchrow(
+                "SELECT clip_path FROM character_clips "
+                "WHERE character_slug = $1 ORDER BY similarity DESC NULLS LAST LIMIT 1",
+                slug,
+            )
+            if clip_row and clip_row["clip_path"] and Path(clip_row["clip_path"]).exists():
+                await conn.execute(
+                    "UPDATE shots SET source_video_path = $2, source_video_auto_assigned = TRUE WHERE id = $1",
+                    shot["id"], clip_row["clip_path"],
+                )
+                assigned += 1
+                logger.info(
+                    f"Shot {shot['id']}: auto-assigned source video clip for '{slug}' "
+                    f"({clip_row['clip_path']})"
+                )
+        except Exception as e:
+            logger.debug(f"Source video lookup for {slug}: {e}")
+
+    return assigned
 
 
 async def ensure_source_images(conn, scene_id: str, shots: list) -> int:
     """Auto-assign best source images to shots that have NULL source_image_path.
 
     Uses the image recommender to score and rank approved images per character.
-    Skips shots using text-only engines (wan).
+    Assigns images to ALL solo character shots (1 character) regardless of current
+    engine — the engine selector runs AFTER this and will pick FramePack when a
+    source image is available. Multi-char shots (>1 character) are skipped since
+    they use Wan T2V (text-to-video) which doesn't need a source image.
 
     Returns the number of shots that were auto-assigned.
     """
     null_shots = [
         s for s in shots
         if not s["source_image_path"]
-        and (s.get("video_engine") or "framepack") != "wan"
+        and len(s.get("characters_present") or []) == 1
     ]
     if not null_shots:
         return 0
+
+    # Priority 0: Check continuity frames from previously completed shots
+    # These are the last frames from prior scenes — best for visual consistency
+    assigned_from_continuity = 0
+    scene_row = await conn.fetchrow("SELECT project_id FROM scenes WHERE id = $1", scene_id)
+    _project_id = scene_row["project_id"] if scene_row else None
+    if _project_id:
+        remaining_null = []
+        for shot in null_shots:
+            chars = shot.get("characters_present") or []
+            slug = chars[0] if chars else None
+            if not slug:
+                remaining_null.append(shot)
+                continue
+            try:
+                cont_row = await conn.fetchrow(
+                    "SELECT frame_path FROM character_continuity_frames "
+                    "WHERE project_id = $1 AND character_slug = $2 AND scene_id != $3",
+                    _project_id, slug, scene_id,
+                )
+                if cont_row and cont_row["frame_path"] and Path(cont_row["frame_path"]).exists():
+                    await conn.execute(
+                        "UPDATE shots SET source_image_path = $2, source_image_auto_assigned = TRUE WHERE id = $1",
+                        shot["id"], cont_row["frame_path"],
+                    )
+                    assigned_from_continuity += 1
+                    logger.info(
+                        f"Shot {shot['id']}: continuity frame for '{slug}' from prior scene"
+                    )
+                    continue
+            except Exception as _e:
+                logger.debug(f"Continuity frame lookup for {slug}: {_e}")
+            remaining_null.append(shot)
+        null_shots = remaining_null
+        if not null_shots:
+            return assigned_from_continuity
 
     # Build approved image map from approval_status.json
     all_slugs: set[str] = set()
@@ -313,13 +653,15 @@ async def ensure_source_images(conn, scene_id: str, shots: list) -> int:
 
     if not all_slugs:
         logger.warning(f"Scene {scene_id}: shots need source images but no characters_present set")
-        return 0
+        return assigned_from_continuity
 
     approved: dict[str, list[str]] = {}
     for slug in all_slugs:
-        approval_file = BASE_PATH / slug / "approval_status.json"
-        images_dir = BASE_PATH / slug / "images"
+        dir_slug = resolve_slug(slug)
+        approval_file = BASE_PATH / dir_slug / "approval_status.json"
+        images_dir = BASE_PATH / dir_slug / "images"
         if not images_dir.exists():
+            logger.debug(f"No dataset dir for slug '{slug}' (resolved: '{dir_slug}')")
             continue
         if approval_file.exists():
             try:
@@ -331,9 +673,11 @@ async def ensure_source_images(conn, scene_id: str, shots: list) -> int:
                     and (images_dir / name).exists()
                 ]
                 if imgs:
+                    # Store under BOTH short and dir slug so lookups work either way
                     approved[slug] = sorted(imgs)
+                    approved[dir_slug] = approved[slug]
             except (json.JSONDecodeError, OSError) as e:
-                logger.warning(f"Failed to read approval_status.json for {slug}: {e}")
+                logger.warning(f"Failed to read approval_status.json for {dir_slug}: {e}")
 
     if not approved:
         # Mark all null shots as failed — no images available
@@ -349,16 +693,19 @@ async def ensure_source_images(conn, scene_id: str, shots: list) -> int:
     # Batch-fetch video effectiveness scores (one query per character, not per image)
     video_scores: dict[str, dict[str, float]] = {}
     for slug in all_slugs:
+        dir_slug = resolve_slug(slug)
         try:
+            # Try both short and resolved slug in effectiveness table
             rows = await conn.fetch(
                 "SELECT image_name, AVG(video_quality_score) as avg_score "
                 "FROM source_image_effectiveness "
-                "WHERE character_slug = $1 AND video_quality_score IS NOT NULL "
+                "WHERE character_slug IN ($1, $2) AND video_quality_score IS NOT NULL "
                 "GROUP BY image_name",
-                slug,
+                slug, dir_slug,
             )
             if rows:
                 video_scores[slug] = {r["image_name"]: float(r["avg_score"]) for r in rows}
+                video_scores[dir_slug] = video_scores[slug]
         except Exception as e:
             logger.debug(f"Video effectiveness lookup for {slug}: {e}")
 
@@ -425,7 +772,8 @@ async def ensure_source_images(conn, scene_id: str, shots: list) -> int:
             continue
 
         best = top_recs[0]
-        image_path = f"{best['slug']}/images/{best['image_name']}"
+        dir_slug = resolve_slug(best['slug'])
+        image_path = f"{dir_slug}/images/{best['image_name']}"
 
         await conn.execute(
             "UPDATE shots SET source_image_path = $2, source_image_auto_assigned = TRUE WHERE id = $1",
@@ -452,10 +800,14 @@ async def ensure_source_images(conn, scene_id: str, shots: list) -> int:
             f"(score={best['score']:.3f}, {best['reason']})"
         )
 
-    if assigned_count:
-        logger.info(f"Scene {scene_id}: auto-assigned source images for {assigned_count}/{len(null_shots)} shots")
+    total_assigned = assigned_count + assigned_from_continuity
+    if total_assigned:
+        logger.info(
+            f"Scene {scene_id}: auto-assigned source images for {total_assigned} shots "
+            f"({assigned_from_continuity} from continuity, {assigned_count} from approved pool)"
+        )
 
-    return assigned_count
+    return total_assigned
 
 
 async def _get_continuity_frame(conn, project_id: int, character_slug: str, current_scene_id) -> str | None:
@@ -499,8 +851,15 @@ async def _save_continuity_frame(
          scene_number, shot_number)
 
 
-async def _generate_scene_impl(scene_id: str):
-    """Inner implementation — do not call directly, use generate_scene()."""
+async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
+    """Inner implementation — do not call directly, use generate_scene().
+
+    Args:
+        scene_id: UUID of the scene to generate.
+        auto_approve: If True, auto-approve all completed shots so the full
+            downstream pipeline (voice synthesis → music → audio mixing →
+            scene assembly) fires automatically without manual review.
+    """
     import time as _time
     conn = None
     try:
@@ -516,26 +875,85 @@ async def _generate_scene_impl(scene_id: str):
             )
             return
 
-        # Get project_id and scene_number for continuity tracking
-        scene_row = await conn.fetchrow(
-            "SELECT project_id, scene_number FROM scenes WHERE id = $1", scene_id
-        )
+        # Get project_id, scene_number, and episode info for continuity tracking + filenames
+        scene_row = await conn.fetchrow("""
+            SELECT s.project_id, s.scene_number, e.episode_number,
+                   REGEXP_REPLACE(LOWER(REPLACE(p.name, ' ', '_')), '[^a-z0-9_]', '', 'g') as project_slug,
+                   p.genre, p.content_rating
+            FROM scenes s
+            LEFT JOIN episodes e ON s.episode_id = e.id
+            LEFT JOIN projects p ON s.project_id = p.id
+            WHERE s.id = $1
+        """, scene_id)
         project_id = scene_row["project_id"] if scene_row else None
         scene_number = scene_row["scene_number"] if scene_row else None
+        episode_number = scene_row["episode_number"] if scene_row else None
+        project_slug = scene_row["project_slug"] if scene_row else "proj"
+        genre_profile = _get_genre_profile(
+            scene_row.get("genre") if scene_row else None,
+            scene_row.get("content_rating") if scene_row else None,
+        )
+
+        # Check project-level auto_approve setting if not explicitly passed
+        if not auto_approve and project_id:
+            try:
+                proj_meta = await conn.fetchval(
+                    "SELECT metadata->>'auto_approve_shots' FROM projects WHERE id = $1",
+                    project_id,
+                )
+                if proj_meta == "true":
+                    auto_approve = True
+            except Exception:
+                pass
 
         await conn.execute(
             "UPDATE scenes SET generation_status = 'generating', total_shots = $2 WHERE id = $1",
             scene_id, len(shots),
         )
 
-        # Auto-assign source images for shots that don't have one
-        auto_assigned = await ensure_source_images(conn, scene_id, shots)
-        if auto_assigned:
-            # Re-fetch shots to get updated source_image_path values
+        # Step 0: Auto-assign source VIDEO clips (for V2V reference pipeline)
+        video_assigned = await ensure_source_videos(conn, scene_id, shots)
+        if video_assigned:
             shots = await conn.fetch(
                 "SELECT * FROM shots WHERE scene_id = $1 ORDER BY shot_number",
                 scene_id,
             )
+
+        # Step 1: Auto-assign source images FIRST (before engine selection)
+        # This ensures solo shots get images, then engine selector sees
+        # has_source_image=True and picks FramePack instead of falling back to Wan
+        auto_assigned = await ensure_source_images(conn, scene_id, shots)
+        if auto_assigned:
+            shots = await conn.fetch(
+                "SELECT * FROM shots WHERE scene_id = $1 ORDER BY shot_number",
+                scene_id,
+            )
+
+        # Step 2: Run engine selector with source image + video info available
+        from .engine_selector import select_engine as _pre_select_engine
+        for _s in shots:
+            _s_chars = _s.get("characters_present")
+            _s_char_list = list(_s_chars) if isinstance(_s_chars, list) else []
+            _s_has_source = bool(_s.get("source_image_path"))
+            _s_has_video = bool(_s.get("source_video_path"))
+            _s_type = _s.get("shot_type") or "medium"
+            _sel = _pre_select_engine(
+                shot_type=_s_type,
+                characters_present=_s_char_list,
+                has_source_image=_s_has_source,
+                has_source_video=_s_has_video,
+            )
+            if _sel.engine != (_s.get("video_engine") or "framepack"):
+                await conn.execute(
+                    "UPDATE shots SET video_engine = $2 WHERE id = $1",
+                    _s["id"], _sel.engine,
+                )
+                logger.info(f"Shot {_s['id']}: pre-assigned engine={_sel.engine} ({_sel.reason})")
+        # Re-fetch to pick up engine updates
+        shots = await conn.fetch(
+            "SELECT * FROM shots WHERE scene_id = $1 ORDER BY shot_number",
+            scene_id,
+        )
 
         # Pre-fetch narrative states for this scene (Phase 4)
         _nsm_shot_states = {}
@@ -596,11 +1014,30 @@ async def _generate_scene_impl(scene_id: str):
                 import time as _time_inner
 
                 shot_dict = dict(shot)
-                shot_engine = shot_dict.get("video_engine") or "framepack"
                 character_slug = None
                 chars = shot_dict.get("characters_present")
                 if chars and isinstance(chars, list) and len(chars) > 0:
                     character_slug = chars[0]
+
+                # Auto-select engine based on shot characteristics
+                from .engine_selector import select_engine
+                has_source = bool(shot_dict.get("source_image_path"))
+                has_source_video = bool(shot_dict.get("source_video_path"))
+                shot_type = shot_dict.get("shot_type") or "medium"
+                char_list = chars if isinstance(chars, list) else []
+                engine_sel = select_engine(
+                    shot_type=shot_type,
+                    characters_present=char_list,
+                    has_source_image=has_source,
+                    has_source_video=has_source_video,
+                )
+                shot_engine = engine_sel.engine
+                # Persist engine selection to DB
+                await conn.execute(
+                    "UPDATE shots SET video_engine = $2 WHERE id = $1",
+                    shot_id, shot_engine,
+                )
+                logger.info(f"Shot {shot_id}: engine={shot_engine} reason='{engine_sel.reason}'")
 
                 # Engine blacklist check
                 if character_slug:
@@ -622,40 +1059,117 @@ async def _generate_scene_impl(scene_id: str):
 
                 # Build identity-anchored prompt
                 motion_prompt = shot_dict["motion_prompt"] or shot_dict.get("generation_prompt") or ""
+
+                # Helper: look up character by short or full slug
+                async def _find_character(slug):
+                    return await conn.fetchrow(
+                        "SELECT name, design_prompt FROM characters "
+                        "WHERE project_id = $2 AND ("
+                        "  REGEXP_REPLACE(LOWER(REPLACE(name, ' ', '_')), '[^a-z0-9_-]', '', 'g') = $1 "
+                        "  OR REGEXP_REPLACE(LOWER(REPLACE(name, ' ', '_')), '[^a-z0-9_-]', '', 'g') LIKE $1 || '_%'"
+                        ")", slug, project_id,
+                    )
+
+                # Fetch scene context for richer prompts
+                scene_desc = ""
+                scene_location = ""
+                scene_mood = ""
+                scene_time = ""
+                try:
+                    _scene_ctx = await conn.fetchrow(
+                        "SELECT description, location, time_of_day, mood FROM scenes WHERE id = $1",
+                        scene_id,
+                    )
+                    if _scene_ctx:
+                        scene_desc = _scene_ctx["description"] or ""
+                        scene_location = _scene_ctx["location"] or ""
+                        scene_mood = _scene_ctx["mood"] or ""
+                        scene_time = _scene_ctx["time_of_day"] or ""
+                except Exception:
+                    pass
+
+                # Fetch project style for visual anchoring
+                style_anchor = ""
+                try:
+                    _style_row = await conn.fetchrow(
+                        "SELECT gs.checkpoint_model, gs.prompt_format FROM projects p "
+                        "JOIN generation_styles gs ON p.default_style = gs.style_name "
+                        "WHERE p.id = $1", project_id,
+                    )
+                    if _style_row:
+                        ckpt = (_style_row["checkpoint_model"] or "").lower()
+                        if "realistic" in ckpt or "cyber" in ckpt:
+                            style_anchor = "photorealistic, live action film, cinematic lighting"
+                        elif "cartoon" in ckpt or "pixar" in ckpt:
+                            style_anchor = "3D animated, Pixar style, cinematic lighting"
+                        elif "counterfeit" in ckpt or "noob" in ckpt:
+                            style_anchor = "anime style, detailed animation, cinematic"
+                except Exception:
+                    pass
+
                 current_prompt = motion_prompt
                 if character_slug and shot_engine in ("framepack", "framepack_f1"):
                     try:
-                        char_row = await conn.fetchrow(
-                            "SELECT design_prompt FROM characters "
-                            "WHERE REGEXP_REPLACE(LOWER(REPLACE(name, ' ', '_')), '[^a-z0-9_-]', '', 'g') = $1",
-                            character_slug,
-                        )
+                        char_row = await _find_character(character_slug)
                         if char_row and char_row["design_prompt"]:
-                            design = char_row["design_prompt"].strip().rstrip(",. ")
-                            current_prompt = f"{design}, {motion_prompt}, consistent character appearance"
-                            logger.info(f"Shot {shot_id}: identity-anchored prompt for '{character_slug}'")
+                            appearance = _condense_for_video(char_row["design_prompt"], genre_profile, shot_engine)
+                            # Build FramePack prompt with same structure as Wan:
+                            # style anchor → scene context → character → motion
+                            fp_parts = []
+                            if style_anchor:
+                                fp_parts.append(style_anchor)
+                            if scene_location:
+                                setting = scene_location
+                                if scene_time:
+                                    setting += f", {scene_time}"
+                                fp_parts.append(setting)
+                            if scene_desc:
+                                fp_parts.append(scene_desc)
+                            fp_parts.append(appearance)
+                            if motion_prompt and motion_prompt.lower() != "static":
+                                fp_parts.append(motion_prompt)
+                            fp_parts.append("consistent character appearance, maintain all physical features")
+                            if scene_mood:
+                                fp_parts.append(f"{scene_mood} mood")
+                            current_prompt = ", ".join(fp_parts)
+                            logger.info(f"Shot {shot_id}: FramePack prompt ({len(current_prompt)} chars): {current_prompt[:120]}...")
                     except Exception as e:
                         logger.warning(f"Shot {shot_id}: design_prompt lookup failed: {e}")
                 elif shot_engine == "wan" and chars:
-                    # Wan T2V: anchor ALL characters' appearances in prompt
+                    # Wan T2V: ACTION FIRST, then condensed characters, then context.
+                    # Wan 1.3B has limited attention — explicit terms must be near the start.
                     try:
                         char_descriptions = []
                         for cslug in chars:
-                            char_row = await conn.fetchrow(
-                                "SELECT name, design_prompt FROM characters "
-                                "WHERE REGEXP_REPLACE(LOWER(REPLACE(name, ' ', '_')), '[^a-z0-9_-]', '', 'g') = $1",
-                                cslug,
-                            )
+                            char_row = await _find_character(cslug)
                             if char_row and char_row["design_prompt"]:
                                 cname = char_row["name"]
-                                design = char_row["design_prompt"].strip().rstrip(",. ")
-                                char_descriptions.append(f"{cname}: {design}")
+                                appearance = _condense_for_video(char_row["design_prompt"], genre_profile, shot_engine)
+                                char_descriptions.append(f"{cname} ({appearance})")
+                        # Build structured prompt: ACTION → characters → scene
+                        prompt_parts = []
+                        # 1. Action/motion FIRST — this is what the shot is about
+                        if motion_prompt and motion_prompt.lower() != "static":
+                            prompt_parts.append(motion_prompt)
+                        # 2. Condensed character appearances
                         if char_descriptions:
-                            chars_block = ". ".join(char_descriptions)
-                            current_prompt = f"{chars_block}. Scene: {motion_prompt}"
-                            logger.info(f"Shot {shot_id}: Wan multi-char prompt with {len(char_descriptions)} characters")
+                            prompt_parts.append("; ".join(char_descriptions))
+                        # 3. Scene description (truncated for token budget)
+                        if scene_desc and genre_profile.get("include_scene_desc", True):
+                            prompt_parts.append(scene_desc[:120])
+                        # 4. Scene context (location + time)
+                        if scene_location:
+                            setting = scene_location
+                            if scene_time:
+                                setting += f", {scene_time}"
+                            prompt_parts.append(setting)
+                        # 5. Style anchor last (least important for content)
+                        if style_anchor:
+                            prompt_parts.append(style_anchor)
+                        current_prompt = ". ".join(prompt_parts)
+                        logger.info(f"Shot {shot_id}: Wan prompt ({len(current_prompt)} chars): {current_prompt[:120]}...")
                     except Exception as e:
-                        logger.warning(f"Shot {shot_id}: Wan character prompt build failed: {e}")
+                        logger.warning(f"Shot {shot_id}: Wan prompt build failed: {e}")
 
                 # Inject NSM state descriptors into prompt (Phase 4)
                 _shot_nsm = _nsm_shot_states.get(str(shot_id), {})
@@ -665,21 +1179,41 @@ async def _generate_scene_impl(scene_id: str):
                         current_prompt = f"{current_prompt}, {_state_ctx['prompt_additions']}"
                         logger.info(f"Shot {shot_id}: NSM state additions: {_state_ctx['prompt_additions'][:80]}")
                 elif _shot_nsm and shot_engine == "wan" and chars:
-                    # Multi-character: inject all characters' state additions
-                    state_additions = []
-                    for _cs in chars:
-                        if _cs in _shot_nsm and _shot_nsm[_cs].get("prompt_additions"):
-                            state_additions.append(f"{_cs}: {_shot_nsm[_cs]['prompt_additions']}")
-                    if state_additions:
-                        current_prompt = f"{current_prompt}. State: {'. '.join(state_additions)}"
+                    # Multi-character: use structured state prompt builder
+                    try:
+                        from packages.narrative_state.continuity import build_multi_character_state_prompt
+                        _mc_chars = []
+                        for _cs in chars:
+                            _cs_state = _shot_nsm.get(_cs, {}).get("state", {})
+                            _cs_row = await _find_character(_cs)
+                            _mc_chars.append({
+                                "name": _cs_row["name"] if _cs_row else _cs,
+                                "slug": _cs,
+                                "design_prompt": _cs_row["design_prompt"] if _cs_row else "",
+                                "state": _cs_state,
+                            })
+                        if any(c["state"] for c in _mc_chars):
+                            current_prompt = build_multi_character_state_prompt(
+                                characters=_mc_chars,
+                                motion_prompt=current_prompt,
+                            )
+                            logger.info(f"Shot {shot_id}: multi-char state prompt built ({len(current_prompt)} chars)")
+                    except Exception as _mc_err:
+                        # Fallback to simple injection
+                        state_additions = []
+                        for _cs in chars:
+                            if _cs in _shot_nsm and _shot_nsm[_cs].get("prompt_additions"):
+                                state_additions.append(f"{_cs}: {_shot_nsm[_cs]['prompt_additions']}")
+                        if state_additions:
+                            current_prompt = f"{current_prompt}. State: {'. '.join(state_additions)}"
+                        logger.debug(f"Shot {shot_id}: multi-char state prompt fallback: {_mc_err}")
 
-                current_negative = "low quality, blurry, distorted, watermark"
-                # Add state-based negative prompt additions
+                # Build genre + style-aware negative prompt
+                _nsm_neg = ""
                 if _shot_nsm and character_slug and character_slug in _shot_nsm:
-                    _neg_add = _shot_nsm[character_slug].get("negative_additions", "")
-                    if _neg_add:
-                        current_negative = f"{current_negative}, {_neg_add}"
-                shot_steps = shot_dict.get("steps") or 25
+                    _nsm_neg = _shot_nsm[character_slug].get("negative_additions", "")
+                current_negative = _build_video_negative(style_anchor, genre_profile, _nsm_neg)
+                shot_steps = shot_dict.get("steps") or 30
                 shot_guidance = shot_dict.get("guidance_scale") or 6.0
                 shot_seconds = float(shot_dict.get("duration_seconds") or 3)
                 shot_use_f1 = shot_dict.get("use_f1") or False
@@ -787,14 +1321,140 @@ async def _generate_scene_impl(scene_id: str):
 
                 attempt_start = _time_inner.time()
 
+                # Build structured filename prefix: {project}_ep{N}_sc{N}_sh{N}_{engine}
+                _ep = f"ep{episode_number:02d}" if episode_number else "ep00"
+                _sc = f"sc{scene_number:02d}" if scene_number else "sc00"
+                _sh = f"sh{shot_dict.get('shot_number', 0):02d}"
+                _file_prefix = f"{project_slug}_{_ep}_{_sc}_{_sh}_{shot_engine}"
+
+                # Persist the final assembled prompts so they're visible in the UI
+                await conn.execute(
+                    "UPDATE shots SET generation_prompt = $2, generation_negative = $3 WHERE id = $1",
+                    shot_id, current_prompt, current_negative,
+                )
+
                 # Dispatch to video engine
-                if shot_engine == "wan":
+                if shot_engine == "reference_v2v":
+                    # V2V style transfer: use source video clip directly through FramePack V2V
+                    _ref_video = shot_dict.get("source_video_path")
+                    if not _ref_video or not Path(_ref_video).exists():
+                        logger.error(f"Shot {shot_id}: reference_v2v but no source_video_path")
+                        await conn.execute(
+                            "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
+                            shot_id, "No source video clip available for reference_v2v",
+                        )
+                        continue
+
+                    # Auto-detect HunyuanVideo LoRA for the character
+                    _fp_lora = None
+                    if character_slug:
+                        for _suffix in ("_framepack_lora", "_framepack"):
+                            _lp = Path(f"/opt/ComfyUI/models/loras/{character_slug}{_suffix}.safetensors")
+                            if _lp.exists():
+                                _fp_lora = _lp.name
+                                break
+
+                    from .framepack_refine import refine_wan_video
+                    attempt_start = _time_inner.time()
+                    refined = await refine_wan_video(
+                        wan_video_path=_ref_video,
+                        prompt_text=current_prompt,
+                        negative_text=current_negative,
+                        denoise_strength=0.45,
+                        total_seconds=shot_seconds,
+                        steps=25,
+                        seed=shot_seed,
+                        guidance_scale=shot_guidance,
+                        lora_name=_fp_lora,
+                        output_prefix=_file_prefix,
+                    )
+                    gen_time = _time_inner.time() - attempt_start
+
+                    if not refined:
+                        await conn.execute(
+                            "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
+                            shot_id, "FramePack V2V refinement returned no output",
+                        )
+                        continue
+
+                    video_path = refined
+                    logger.info(f"Shot {shot_id}: reference_v2v done in {gen_time:.0f}s → {Path(refined).name}")
+
+                    # Post-process: interpolation + color grade only (no upscale — already 544x704)
+                    try:
+                        from .video_postprocess import postprocess_wan_video
+                        processed = await postprocess_wan_video(
+                            video_path,
+                            upscale=False,
+                            interpolate=True,
+                            color_grade=True,
+                            target_fps=30,
+                        )
+                        if processed:
+                            video_path = processed
+                            logger.info(f"Shot {shot_id}: post-processed → {Path(processed).name}")
+                    except Exception as e:
+                        logger.warning(f"Shot {shot_id}: post-processing failed: {e}, using raw output")
+
+                    last_frame = await extract_last_frame(video_path)
+
+                    completed_count += 1
+                    completed_videos.append(video_path)
+                    prev_last_frame = last_frame
+                    prev_character = character_slug
+
+                    _review = 'approved' if auto_approve else 'pending_review'
+                    await conn.execute("""
+                        UPDATE shots SET status = 'completed', output_video_path = $2,
+                               last_frame_path = $3, generation_time_seconds = $4,
+                               review_status = $5
+                        WHERE id = $1
+                    """, shot_id, video_path, last_frame, gen_time, _review)
+
+                    if character_slug and last_frame and project_id:
+                        try:
+                            await _save_continuity_frame(
+                                conn, project_id, character_slug,
+                                scene_id, shot_id, last_frame,
+                                scene_number=scene_number,
+                                shot_number=shot_dict.get("shot_number"),
+                            )
+                        except Exception as e:
+                            logger.warning(f"Shot {shot_id}: failed to save continuity frame: {e}")
+
+                    logger.info(f"Shot {shot_id}: generated in {gen_time:.0f}s → {_review}")
+
+                    await event_bus.emit(SHOT_GENERATED, {
+                        "shot_id": str(shot_id),
+                        "scene_id": str(scene_id),
+                        "project_id": project_id,
+                        "video_engine": shot_engine,
+                        "video_path": video_path,
+                        "generation_time_seconds": gen_time,
+                        "auto_approve": auto_approve,
+                    })
+                    continue
+
+                elif shot_engine == "wan":
                     fps = 16
                     num_frames = max(9, int(shot_seconds * fps) + 1)
+                    # Use scene-level seed for style consistency across shots
+                    # Derive per-shot seed: scene_seed + shot_number
+                    import hashlib as _hashlib
+                    if not shot_seed:
+                        _scene_seed_bytes = _hashlib.sha256(str(scene_id).encode()).digest()
+                        _scene_base_seed = int.from_bytes(_scene_seed_bytes[:8], "big") % (2**63)
+                        shot_seed = _scene_base_seed + (shot_dict.get("shot_number", 0) or 0)
+                    # Higher CFG for better style compliance
+                    wan_cfg = max(shot_guidance, 7.5)
                     workflow, prefix = build_wan_t2v_workflow(
                         prompt_text=current_prompt, num_frames=num_frames, fps=fps,
-                        steps=shot_steps, seed=shot_seed, use_gguf=True,
+                        steps=shot_steps, seed=shot_seed, cfg=wan_cfg,
+                        use_gguf=True,
+                        negative_text=current_negative,
+                        output_prefix=_file_prefix,
                     )
+                    logger.info(f"Shot {shot_id}: Wan seed={shot_seed} cfg={wan_cfg} frames={num_frames}")
                     comfyui_prompt_id = _submit_wan_workflow(workflow)
                 elif shot_engine == "ltx":
                     fps = 24
@@ -815,6 +1475,7 @@ async def _generate_scene_impl(scene_id: str):
                         total_seconds=shot_seconds, steps=shot_steps, use_f1=use_f1,
                         seed=shot_seed, negative_text=current_negative,
                         gpu_memory_preservation=6.0, guidance_scale=shot_guidance,
+                        output_prefix=_file_prefix,
                     )
                     comfyui_prompt_id = _submit_comfyui_workflow(workflow_data["prompt"])
 
@@ -835,6 +1496,36 @@ async def _generate_scene_impl(scene_id: str):
 
                 video_filename = result["output_files"][0]
                 video_path = str(COMFYUI_OUTPUT_DIR / video_filename)
+
+                # FramePack V2V refinement for Wan shots
+                if shot_engine == "wan" and video_path:
+                    try:
+                        from .framepack_refine import refine_wan_video
+                        # Auto-detect character HunyuanVideo LoRA
+                        _fp_lora = None
+                        if character_slug:
+                            for _suffix in ("_framepack_lora", "_framepack"):
+                                _lp = Path(f"/opt/ComfyUI/models/loras/{character_slug}{_suffix}.safetensors")
+                                if _lp.exists():
+                                    _fp_lora = _lp.name
+                                    break
+                        refined = await refine_wan_video(
+                            wan_video_path=video_path,
+                            prompt_text=current_prompt,
+                            negative_text=current_negative,
+                            denoise_strength=0.4,
+                            total_seconds=shot_seconds,
+                            steps=25,
+                            seed=shot_seed,
+                            guidance_scale=shot_guidance,
+                            lora_name=_fp_lora,
+                            output_prefix=f"{_file_prefix}_refined",
+                        )
+                        if refined:
+                            video_path = refined
+                            logger.info(f"Shot {shot_id}: FramePack V2V refinement done → {Path(refined).name}")
+                    except Exception as e:
+                        logger.warning(f"Shot {shot_id}: V2V refinement failed: {e}, using raw Wan output")
 
                 # Post-process all video outputs: interpolation + upscale + color grade
                 # Wan gets upscale (480→960), FramePack gets interpolation + color only
@@ -877,12 +1568,13 @@ async def _generate_scene_impl(scene_id: str):
                 prev_last_frame = last_frame
                 prev_character = character_slug
 
+                _review = 'approved' if auto_approve else 'pending_review'
                 await conn.execute("""
                     UPDATE shots SET status = 'completed', output_video_path = $2,
                            last_frame_path = $3, generation_time_seconds = $4,
-                           review_status = 'pending_review'
+                           review_status = $5
                     WHERE id = $1
-                """, shot_id, video_path, last_frame, gen_time)
+                """, shot_id, video_path, last_frame, gen_time, _review)
 
                 # Save continuity frame for cross-scene reuse
                 if character_slug and last_frame and project_id:
@@ -900,7 +1592,7 @@ async def _generate_scene_impl(scene_id: str):
                     except Exception as e:
                         logger.warning(f"Shot {shot_id}: failed to save continuity frame: {e}")
 
-                logger.info(f"Shot {shot_id}: generated in {gen_time:.0f}s → pending_review")
+                logger.info(f"Shot {shot_id}: generated in {gen_time:.0f}s → {_review}")
 
                 await event_bus.emit(SHOT_GENERATED, {
                     "shot_id": str(shot_id),

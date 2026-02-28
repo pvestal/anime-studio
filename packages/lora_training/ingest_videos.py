@@ -28,10 +28,50 @@ from .ingest_helpers import (
     ClipClassifyLocalRequest,
 )
 
+from packages.core.db import connect_direct
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 import re
+
+
+async def _persist_clips_to_db(clips: list[dict], source_video: str | None = None):
+    """Persist extracted video clips to the character_clips table.
+
+    Each clip dict has: path, timestamp, similarity, character, frame_index.
+    Uses ON CONFLICT to update similarity if a clip at the same path already exists.
+    """
+    if not clips:
+        return 0
+    conn = await connect_direct()
+    try:
+        inserted = 0
+        for clip in clips:
+            try:
+                await conn.execute("""
+                    INSERT INTO character_clips
+                        (character_slug, clip_path, source_video, timestamp_seconds,
+                         similarity, frame_index)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (clip_path) DO UPDATE SET
+                        similarity = EXCLUDED.similarity,
+                        source_video = EXCLUDED.source_video
+                """,
+                    clip["character"],
+                    clip["path"],
+                    source_video or clip.get("source_video"),
+                    clip.get("timestamp"),
+                    clip.get("similarity"),
+                    clip.get("frame_index"),
+                )
+                inserted += 1
+            except Exception as e:
+                logger.debug(f"Failed to persist clip {clip.get('path')}: {e}")
+        logger.info(f"Persisted {inserted}/{len(clips)} clips to character_clips table")
+        return inserted
+    finally:
+        await conn.close()
 
 
 @router.post("/ingest/video")
@@ -690,6 +730,12 @@ async def _clip_classify_task(
             for s in saved_slugs:
                 per_char_saved[s] = per_char_saved.get(s, 0) + 1
 
+        # Persist extracted clips to DB for V2V pipeline
+        clips_persisted = 0
+        extracted_clips = result.get("clips", [])
+        if extracted_clips:
+            clips_persisted = await _persist_clips_to_db(extracted_clips, source_video=req.path)
+
         _ingest_progress["clip-classify"] = {
             "active": False,
             "stage": "complete",
@@ -700,16 +746,18 @@ async def _clip_classify_task(
             "per_character": result["per_character"],
             "per_character_saved": per_char_saved,
             "duplicates": duplicates,
-            "clips_extracted": len(result.get("clips", [])),
+            "clips_extracted": len(extracted_clips),
+            "clips_persisted": clips_persisted,
             "reference_characters": result["reference_characters"],
             "message": (
                 f"Done. {result['total_matched']} matched, "
-                f"{sum(per_char_saved.values())} saved, {duplicates} dupes."
+                f"{sum(per_char_saved.values())} saved, {duplicates} dupes, "
+                f"{clips_persisted} clips persisted."
             ),
         }
         logger.info(
             f"CLIP classify complete: {result['total_matched']} matched, "
-            f"{sum(per_char_saved.values())} saved"
+            f"{sum(per_char_saved.values())} saved, {clips_persisted} clips persisted"
         )
 
     except Exception as e:
@@ -832,6 +880,14 @@ async def _clip_classify_local_task(
             for s in saved_slugs:
                 per_char_saved[s] = per_char_saved.get(s, 0) + 1
 
+        # Persist extracted clips to DB for V2V pipeline
+        clips_persisted = 0
+        extracted_clips = result.get("clips", [])
+        if extracted_clips:
+            clips_persisted = await _persist_clips_to_db(
+                extracted_clips, source_video=req.source_video,
+            )
+
         _ingest_progress["clip-classify"] = {
             "active": False,
             "stage": "complete",
@@ -842,10 +898,13 @@ async def _clip_classify_local_task(
             "per_character": result["per_character"],
             "per_character_saved": per_char_saved,
             "duplicates": duplicates,
+            "clips_extracted": len(extracted_clips),
+            "clips_persisted": clips_persisted,
             "reference_characters": result["reference_characters"],
             "message": (
                 f"Done. {result['total_matched']} matched, "
-                f"{sum(per_char_saved.values())} saved, {duplicates} dupes."
+                f"{sum(per_char_saved.values())} saved, {duplicates} dupes, "
+                f"{clips_persisted} clips persisted."
             ),
         }
 
