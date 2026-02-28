@@ -1,42 +1,23 @@
 <template>
   <div>
-    <!-- Sub-tab toggle -->
+    <!-- Sub-tab navigation -->
     <div style="display: flex; gap: 0; margin-bottom: 16px; border-bottom: 1px solid var(--border-primary);">
-      <button
-        class="cast-subtab"
-        :class="{ active: subtab === 'characters' }"
-        @click="subtab = 'characters'"
-      >
+      <RouterLink to="/cast/characters" class="cast-subtab" active-class="" exact-active-class="active">
         Characters
-      </button>
-      <button
-        class="cast-subtab"
-        :class="{ active: subtab === 'ingest' }"
-        @click="subtab = 'ingest'"
-      >
+      </RouterLink>
+      <RouterLink to="/cast/ingest" class="cast-subtab" active-class="" exact-active-class="active">
         Ingest
-      </button>
-      <button
-        class="cast-subtab"
-        :class="{ active: subtab === 'voice' }"
-        @click="subtab = 'voice'"
-      >
+      </RouterLink>
+      <RouterLink to="/cast/voice" class="cast-subtab" active-class="" exact-active-class="active">
         Voice
-      </button>
+      </RouterLink>
     </div>
 
-    <CharactersTab v-if="subtab === 'characters'" :hide-sub-tabs="true" initial-sub-tab="characters" />
-    <CharactersTab v-if="subtab === 'ingest'" :hide-sub-tabs="true" initial-sub-tab="ingest" />
-    <VoiceTab v-if="subtab === 'voice'" />
+    <RouterView :key="$route.path" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import CharactersTab from './CharactersTab.vue'
-import VoiceTab from './VoiceTab.vue'
-
-const subtab = ref<'characters' | 'ingest' | 'voice'>('characters')
 </script>
 
 <style scoped>
@@ -50,6 +31,7 @@ const subtab = ref<'characters' | 'ingest' | 'voice'>('characters')
   font-size: 13px;
   font-family: var(--font-primary);
   transition: all 150ms ease;
+  text-decoration: none;
 }
 .cast-subtab:hover {
   color: var(--accent-primary);
