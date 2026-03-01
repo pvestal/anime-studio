@@ -25,6 +25,7 @@ from packages.voice_pipeline.cloning import (
 from packages.voice_pipeline.synthesis import (
     synthesize_dialogue, get_voice_models,
     synthesize_scene_dialogue, generate_dialogue_from_story,
+    synthesize_episode_dialogue,
 )
 
 from .voice_samples import router as samples_router
@@ -245,6 +246,68 @@ async def generate_scene_dialogue(scene_id: str, body: VoiceSceneDialogueRequest
         dialogue_list=dialogue_list,
         pause_seconds=body.pause_seconds or 0.5,
     )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.post("/shot/{shot_id}/synthesize")
+async def synthesize_shot_dialogue(shot_id: str, engine: str = None):
+    """Synthesize dialogue for a specific shot using the character's voice.
+
+    Reads dialogue_text and dialogue_character_slug from the shot record,
+    synthesizes audio, and returns the audio URL for playback.
+    """
+    conn = await connect_direct()
+    try:
+        row = await conn.fetchrow(
+            "SELECT dialogue_text, dialogue_character_slug FROM shots WHERE id = $1::uuid",
+            shot_id,
+        )
+    finally:
+        await conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Shot not found")
+    if not row["dialogue_text"] or not row["dialogue_character_slug"]:
+        raise HTTPException(status_code=400, detail="Shot has no dialogue text or character assigned")
+
+    result = await synthesize_dialogue(
+        character_slug=row["dialogue_character_slug"],
+        text=row["dialogue_text"],
+        engine=engine,
+    )
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    # Record in DB
+    import uuid as _uuid
+    job_id = f"synth_{_uuid.uuid4().hex[:8]}"
+    conn = await connect_direct()
+    try:
+        await conn.execute("""
+            INSERT INTO voice_synthesis_jobs
+                (job_id, character_slug, engine, text, output_path,
+                 duration_seconds, status, created_at, completed_at)
+            VALUES ($1, $2, $3, $4, $5, $6, 'completed', NOW(), NOW())
+        """, job_id, row["dialogue_character_slug"], result.get("engine_used", ""),
+            row["dialogue_text"], result.get("output_path", ""),
+            result.get("duration_seconds", 0))
+    finally:
+        await conn.close()
+
+    result["job_id"] = job_id
+    return result
+
+
+@router.post("/episode/{episode_id}/synthesize-all")
+async def synthesize_all_episode_dialogue(episode_id: str):
+    """Synthesize dialogue for all scenes in an episode.
+
+    Processes each scene in episode order. Skips scenes that already have
+    valid dialogue audio. Returns per-scene results.
+    """
+    result = await synthesize_episode_dialogue(episode_id)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result

@@ -130,7 +130,7 @@ async def diarize_project(project_slug: str) -> dict:
 
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1",
-        use_auth_token=hf_token,
+        token=hf_token,
     )
 
     # Use GPU if available (prefer AMD ROCm, fallback NVIDIA CUDA)
@@ -140,7 +140,13 @@ async def diarize_project(project_slug: str) -> dict:
     elif torch.cuda.is_available():
         pipeline.to(torch.device("cuda"))
 
-    diarization = pipeline(str(full_audio))
+    raw_output = pipeline(str(full_audio))
+
+    # pyannote 4.x returns DiarizeOutput; extract the Annotation
+    if hasattr(raw_output, 'speaker_diarization'):
+        diarization = raw_output.speaker_diarization
+    else:
+        diarization = raw_output  # pyannote 3.x returns Annotation directly
 
     # Build speaker segments
     speakers: dict[str, list[dict]] = {}
@@ -224,7 +230,7 @@ def extract_speaker_embedding(audio_path: str, start: float, end: float) -> list
 
         inference = Inference(
             "pyannote/embedding",
-            use_auth_token=hf_token,
+            token=hf_token,
             window="whole",
         )
 
