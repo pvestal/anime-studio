@@ -1,4 +1,13 @@
-"""Database schema migrations — all ensure_* / CREATE TABLE / ALTER TABLE logic."""
+"""Database schema migrations — all ensure_* / CREATE TABLE / ALTER TABLE logic.
+
+Migration strategy: idempotent startup migrations
+--------------------------------------------------
+All migrations run on every app startup via run_migrations(). Each statement
+uses IF NOT EXISTS / ADD COLUMN IF NOT EXISTS so repeated execution is safe.
+This avoids the overhead of a migration framework (Alembic) for a single-
+developer project. If the team grows or schema changes become contentious,
+consider switching to numbered migration files with a version table.
+"""
 
 import logging
 

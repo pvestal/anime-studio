@@ -14,6 +14,9 @@ from packages.core.config import BASE_PATH
 
 logger = logging.getLogger(__name__)
 
+# Valid image statuses for approval_status.json
+IMAGE_STATUSES = {"pending", "approved", "rejected", "flagged", "hidden"}
+
 # --- Training job storage (file-based until DB wiring is needed) ---
 
 TRAINING_JOBS_FILE = BASE_PATH.parent / "training_jobs.json"
@@ -277,6 +280,8 @@ def register_pending_image(character_slug: str, image_name: str):
 
 def register_image_status(character_slug: str, image_name: str, status: str):
     """Register a single image with given status in approval_status.json."""
+    if status not in IMAGE_STATUSES:
+        raise ValueError(f"Invalid image status '{status}'. Must be one of: {sorted(IMAGE_STATUSES)}")
     approval_file = BASE_PATH / character_slug / "approval_status.json"
     approval_status = {}
     if approval_file.exists():

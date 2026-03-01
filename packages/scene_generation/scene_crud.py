@@ -25,6 +25,7 @@ from .builder import (
     extract_last_frame, concat_videos, copy_to_comfyui_input,
     poll_comfyui_completion, generate_scene, apply_scene_audio,
 )
+from .engine_selector import VALID_ENGINES
 from .framepack import (
     build_framepack_workflow, _submit_comfyui_workflow,
     MOTION_PRESETS,
@@ -1448,7 +1449,13 @@ class AssignSourceVideoRequest(BaseModel):
 
 @router.post("/scenes/{scene_id}/shots/{shot_id}/assign-source-video")
 async def assign_source_video(scene_id: str, shot_id: str, body: AssignSourceVideoRequest):
-    """Manually assign a source video clip to a shot for V2V style transfer."""
+    """Manually assign a source video clip to a shot for V2V style transfer.
+
+    Note: source_video_path is stored as a TEXT column on shots rather than a
+    normalized video_sources table. At current scale (<20 clips across all
+    projects), normalization adds complexity without benefit. Revisit if clip
+    count exceeds ~100 or if we need per-clip metadata (duration, codec, etc.).
+    """
     clip = Path(body.clip_path)
     if not clip.exists():
         raise HTTPException(status_code=404, detail=f"Clip not found: {body.clip_path}")
@@ -1473,6 +1480,38 @@ async def assign_source_video(scene_id: str, shot_id: str, body: AssignSourceVid
             "source_video_path": body.clip_path,
             "video_engine": "reference_v2v",
         }
+    finally:
+        await conn.close()
+
+
+class OverrideEngineRequest(BaseModel):
+    engine: str
+
+
+@router.post("/scenes/{scene_id}/shots/{shot_id}/override-engine")
+async def override_shot_engine(scene_id: str, shot_id: str, body: OverrideEngineRequest):
+    """Manually override the video engine for a shot, bypassing automatic selection."""
+    if body.engine not in VALID_ENGINES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid engine '{body.engine}'. Must be one of: {sorted(VALID_ENGINES)}",
+        )
+
+    sid = uuid.UUID(scene_id)
+    shot_uuid = uuid.UUID(shot_id)
+    conn = await connect_direct()
+    try:
+        shot = await conn.fetchrow(
+            "SELECT id FROM shots WHERE id = $1 AND scene_id = $2", shot_uuid, sid,
+        )
+        if not shot:
+            raise HTTPException(status_code=404, detail="Shot not found in this scene")
+
+        await conn.execute(
+            "UPDATE shots SET video_engine = $1 WHERE id = $2",
+            body.engine, shot_uuid,
+        )
+        return {"shot_id": shot_id, "video_engine": body.engine}
     finally:
         await conn.close()
 

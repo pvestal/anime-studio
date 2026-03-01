@@ -24,6 +24,12 @@ from packages.core.config import BASE_PATH
 logger = logging.getLogger(__name__)
 
 # --- Thresholds ---
+# MATCH_THRESHOLD: minimum cosine similarity for a frame to be assigned to a character.
+# AMBIGUITY_MARGIN: if top-2 scores differ by less than this, the frame is "ambiguous"
+#   and deferred to the temporal verification pass for context-aware resolution.
+# RESCUE_THRESHOLD: during temporal verification, nearby unmatched frames can be
+#   rescued if they score above this lower bar AND adjacent frames match the same character.
+# HIGH_CONFIDENCE: above this score, frames are auto-approved without vision review.
 MATCH_THRESHOLD = 0.75
 AMBIGUITY_MARGIN = 0.05
 RESCUE_THRESHOLD = 0.70

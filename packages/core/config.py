@@ -6,6 +6,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Application environment: "dev" (default) or "prod"
+APP_ENV = os.getenv("APP_ENV", "dev")
+
 # Resolve paths relative to the project root (two levels up from this file)
 _PACKAGE_DIR = Path(__file__).resolve().parent          # packages/core/
 _PACKAGES_DIR = _PACKAGE_DIR.parent                     # packages/

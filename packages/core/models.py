@@ -205,6 +205,16 @@ class BulkRejectRequest(BaseModel):
     dry_run: bool = True
 
 
+class BulkStatusItem(BaseModel):
+    character_slug: str
+    image_name: str
+
+
+class BulkStatusRequest(BaseModel):
+    images: List[BulkStatusItem]
+    status: str  # "approved", "rejected", "pending", "flagged", "hidden"
+
+
 # --- Scene Builder Models ---
 
 class SceneCreateRequest(BaseModel):

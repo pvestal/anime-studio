@@ -19,6 +19,13 @@ LORA_DIR = Path("/opt/ComfyUI/models/loras")
 VALID_ENGINES = {"framepack", "framepack_f1", "ltx", "wan", "wan22", "reference_v2v"}
 ESTABLISHING_SHOT_TYPES = {"establishing", "wide_establishing", "aerial", "environment"}
 
+# GPU VRAM budget (RTX 3060 12 GB, single GPU):
+#   framepack / reference_v2v: ~10 GB (HunyuanVideo backbone) — exclusive
+#   wan / wan22 GGUF:          ~6-8 GB (1.3B quantized)
+#   ltx:                       ~8 GB
+#   CLIP classifier:           ~400 MB (coexists with any engine)
+# builder.py uses Semaphore(1) to serialize GPU jobs — correct for 12 GB.
+
 
 @dataclass
 class EngineSelection:

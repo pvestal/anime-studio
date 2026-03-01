@@ -879,7 +879,7 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
         scene_row = await conn.fetchrow("""
             SELECT s.project_id, s.scene_number, e.episode_number,
                    REGEXP_REPLACE(LOWER(REPLACE(p.name, ' ', '_')), '[^a-z0-9_]', '', 'g') as project_slug,
-                   p.genre, p.content_rating
+                   p.genre, p.content_rating, p.video_lora
             FROM scenes s
             LEFT JOIN episodes e ON s.episode_id = e.id
             LEFT JOIN projects p ON s.project_id = p.id
@@ -889,6 +889,7 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
         scene_number = scene_row["scene_number"] if scene_row else None
         episode_number = scene_row["episode_number"] if scene_row else None
         project_slug = scene_row["project_slug"] if scene_row else "proj"
+        project_video_lora = scene_row.get("video_lora") if scene_row else None
         genre_profile = _get_genre_profile(
             scene_row.get("genre") if scene_row else None,
             scene_row.get("content_rating") if scene_row else None,
@@ -930,8 +931,8 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
             )
 
         # Step 2: Run engine selector with source image + video info available
-        from .engine_selector import select_engine as _pre_select_engine, _find_wan_lora
-        _pre_wan_lora = _find_wan_lora()
+        from .engine_selector import select_engine as _pre_select_engine
+        _pre_wan_lora = project_video_lora  # From projects.video_lora column (project-scoped)
         for _s in shots:
             _s_chars = _s.get("characters_present")
             _s_char_list = list(_s_chars) if isinstance(_s_chars, list) else []
@@ -1013,7 +1014,6 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                 from .framepack import build_framepack_workflow, _submit_comfyui_workflow
                 from .ltx_video import build_ltx_workflow, _submit_comfyui_workflow as _submit_ltx_workflow
                 from .wan_video import build_wan_t2v_workflow, build_wan22_workflow, _submit_comfyui_workflow as _submit_wan_workflow
-                from .engine_selector import _find_wan_lora
                 import time as _time_inner
 
                 shot_dict = dict(shot)
@@ -1022,8 +1022,8 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                 if chars and isinstance(chars, list) and len(chars) > 0:
                     character_slug = chars[0]
 
-                # Detect project-level Wan 2.2 LoRA (e.g. furry LoRA)
-                _project_wan_lora = _find_wan_lora()
+                # Use project-level video_lora from DB (project-scoped, not global)
+                _project_wan_lora = project_video_lora
 
                 # Auto-select engine based on shot characteristics
                 from .engine_selector import select_engine
@@ -1377,11 +1377,13 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
 
                 attempt_start = _time_inner.time()
 
-                # Build structured filename prefix: {project}_ep{N}_sc{N}_sh{N}_{engine}
+                # Build structured filename prefix: {project}_ep{N}_sc{N}_sh{N}_{engine}_{hash}
+                # The hash is the first 8 chars of the shot UUID for disk→DB traceability.
                 _ep = f"ep{episode_number:02d}" if episode_number else "ep00"
                 _sc = f"sc{scene_number:02d}" if scene_number else "sc00"
                 _sh = f"sh{shot_dict.get('shot_number', 0):02d}"
-                _file_prefix = f"{project_slug}_{_ep}_{_sc}_{_sh}_{shot_engine}"
+                _shot_hash = str(shot_id).replace("-", "")[:8]
+                _file_prefix = f"{project_slug}_{_ep}_{_sc}_{_sh}_{shot_engine}_{_shot_hash}"
 
                 # Persist the final assembled prompts so they're visible in the UI
                 await conn.execute(

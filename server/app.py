@@ -22,7 +22,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from packages.core.auth import AuthMiddleware
-from packages.core.db import init_pool, run_migrations
+from packages.core.config import APP_ENV
+from packages.core.db import init_pool, get_pool, run_migrations
+from packages.core.logging_config import setup_logging
 from packages.core.events import event_bus
 from packages.core.gpu_router import get_system_status
 import packages.core.learning as learning  # registers EventBus handlers on import
@@ -35,6 +37,7 @@ from packages.lora_training.feedback import reconcile_training_jobs
 from packages.story.router import router as story_router
 from packages.visual_pipeline.router import router as visual_router
 from packages.scene_generation.router import router as scene_router
+from packages.scene_generation.full_pipeline import router as pipeline_router
 from packages.lora_training.router import router as training_router
 from packages.audio_composition.router import router as audio_router
 from packages.echo_integration.router import router as echo_router
@@ -43,8 +46,9 @@ from packages.episode_assembly.router import router as episode_router
 from packages.core.graph_router import router as graph_router
 from packages.core.orchestrator_router import router as orchestrator_router
 from packages.narrative_state import narrative_router
+from packages.interactive import interactive_router
 
-logging.basicConfig(level=logging.INFO)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Tower Anime Studio", version="3.5")
@@ -66,6 +70,7 @@ app.include_router(audio_router,    prefix="/api/audio",    tags=["audio"])
 
 # Routers whose decorator paths already include their domain prefix:
 app.include_router(scene_router,   prefix="/api", tags=["scenes"])      # /api/scenes/*
+app.include_router(pipeline_router, prefix="/api", tags=["pipeline"])    # /api/scenes/produce-episode
 app.include_router(echo_router,    prefix="/api", tags=["echo"])        # /api/echo/*
 app.include_router(episode_router, prefix="/api", tags=["episodes"])    # /api/episodes/*
 
@@ -80,6 +85,9 @@ app.include_router(orchestrator_router, prefix="/api/system", tags=["orchestrato
 
 # Narrative State Machine:
 app.include_router(narrative_router, prefix="/api/narrative", tags=["narrative"])  # /api/narrative/*
+
+# Interactive Visual Novel:
+app.include_router(interactive_router, prefix="/api/interactive", tags=["interactive"])  # /api/interactive/*
 
 
 @app.on_event("startup")
@@ -100,11 +108,19 @@ async def startup():
     from packages.narrative_state.hooks import register_nsm_handlers
     register_nsm_handlers()
 
+    # Register voice pipeline event handlers (training completion → re-synthesis)
+    from packages.voice_pipeline.event_handlers import register_voice_event_handlers
+    register_voice_event_handlers()
+
     # Recover any shots stuck in 'generating' from before this restart
     from packages.scene_generation.builder import recover_interrupted_generations
     await recover_interrupted_generations()
 
-    logger.info("Tower Anime Studio v3.5 started — 9 packages + graph + orchestrator + NSM mounted")
+    # Start interactive session cleanup loop
+    from packages.interactive.session_store import store as interactive_store
+    interactive_store.start_cleanup()
+
+    logger.info("Tower Anime Studio v3.5 started — 10 packages + graph + orchestrator + NSM + interactive mounted")
 
 
 # ── System Endpoints ─────────────────────────────────────────────────────
@@ -112,7 +128,20 @@ async def startup():
 
 @app.get("/api/system/health")
 async def health():
-    return {"status": "healthy", "service": "tower-anime-studio", "version": "3.5"}
+    return {"status": "healthy", "service": "tower-anime-studio", "version": "3.5", "env": APP_ENV}
+
+
+@app.get("/api/system/db-health")
+async def db_health():
+    """Database connectivity check — returns healthy if SELECT 1 succeeds."""
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        return {"status": "healthy", "db_check": "ok"}
+    except Exception as e:
+        logger.error(f"DB health check failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Database unhealthy: {e}")
 
 
 @app.get("/api/system/gpu/status")

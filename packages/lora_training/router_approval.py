@@ -17,10 +17,13 @@ from packages.core.models import (
     ReassignRequest,
     BulkReassignRequest,
     BulkRejectRequest,
+    BulkStatusRequest,
 )
 from .feedback import (
     record_rejection,
     queue_regeneration,
+    register_image_status,
+    IMAGE_STATUSES,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,6 +132,9 @@ async def get_pending_approvals():
                     with open(meta_path) as f:
                         meta = json.load(f)
                     entry["metadata"] = meta
+                    # Override checkpoint from per-image meta if present
+                    if meta.get("checkpoint_model"):
+                        entry["checkpoint_model"] = meta["checkpoint_model"]
                     # For unclassified images, use per-image project_name
                     if slug == "_unclassified" and meta.get("project_name"):
                         entry["project_name"] = meta["project_name"]
@@ -469,4 +475,30 @@ async def bulk_reject(req: BulkRejectRequest):
         "total_rejected": total_matched,
         "by_character": {slug: len(imgs) for slug, imgs in all_results.items()},
         "rejected_images": all_results,
+    }
+
+
+@router.post("/approval/bulk-status")
+async def bulk_set_status(req: BulkStatusRequest):
+    """Set status for a batch of images at once."""
+    if req.status not in IMAGE_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status '{req.status}'. Must be one of: {sorted(IMAGE_STATUSES)}",
+        )
+
+    results = []
+    errors = []
+    for item in req.images:
+        try:
+            register_image_status(item.character_slug, item.image_name, req.status)
+            results.append({"character_slug": item.character_slug, "image_name": item.image_name})
+        except Exception as e:
+            errors.append({"character_slug": item.character_slug, "image_name": item.image_name, "error": str(e)})
+
+    return {
+        "status": req.status,
+        "updated_count": len(results),
+        "error_count": len(errors),
+        "errors": errors,
     }
