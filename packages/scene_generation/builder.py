@@ -19,7 +19,7 @@ from packages.core.events import event_bus, SHOT_GENERATED
 
 from .framepack import build_framepack_workflow, _submit_comfyui_workflow
 from .ltx_video import build_ltx_workflow, _submit_comfyui_workflow as _submit_ltx_workflow
-from .wan_video import build_wan_t2v_workflow, _submit_comfyui_workflow as _submit_wan_workflow
+from .wan_video import build_wan_t2v_workflow, build_wan22_workflow, _submit_comfyui_workflow as _submit_wan_workflow
 from .image_recommender import recommend_for_scene, batch_read_metadata
 
 # Re-export from sub-modules so existing imports keep working
@@ -930,7 +930,8 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
             )
 
         # Step 2: Run engine selector with source image + video info available
-        from .engine_selector import select_engine as _pre_select_engine
+        from .engine_selector import select_engine as _pre_select_engine, _find_wan_lora
+        _pre_wan_lora = _find_wan_lora()
         for _s in shots:
             _s_chars = _s.get("characters_present")
             _s_char_list = list(_s_chars) if isinstance(_s_chars, list) else []
@@ -942,6 +943,7 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                 characters_present=_s_char_list,
                 has_source_image=_s_has_source,
                 has_source_video=_s_has_video,
+                project_wan_lora=_pre_wan_lora,
             )
             if _sel.engine != (_s.get("video_engine") or "framepack"):
                 await conn.execute(
@@ -1010,7 +1012,8 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                 from .video_qc import check_engine_blacklist
                 from .framepack import build_framepack_workflow, _submit_comfyui_workflow
                 from .ltx_video import build_ltx_workflow, _submit_comfyui_workflow as _submit_ltx_workflow
-                from .wan_video import build_wan_t2v_workflow, _submit_comfyui_workflow as _submit_wan_workflow
+                from .wan_video import build_wan_t2v_workflow, build_wan22_workflow, _submit_comfyui_workflow as _submit_wan_workflow
+                from .engine_selector import _find_wan_lora
                 import time as _time_inner
 
                 shot_dict = dict(shot)
@@ -1018,6 +1021,9 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                 chars = shot_dict.get("characters_present")
                 if chars and isinstance(chars, list) and len(chars) > 0:
                     character_slug = chars[0]
+
+                # Detect project-level Wan 2.2 LoRA (e.g. furry LoRA)
+                _project_wan_lora = _find_wan_lora()
 
                 # Auto-select engine based on shot characteristics
                 from .engine_selector import select_engine
@@ -1030,6 +1036,7 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                     characters_present=char_list,
                     has_source_image=has_source,
                     has_source_video=has_source_video,
+                    project_wan_lora=_project_wan_lora,
                 )
                 shot_engine = engine_sel.engine
                 # Persist engine selection to DB
@@ -1090,20 +1097,25 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
 
                 # Fetch project style for visual anchoring
                 style_anchor = ""
+                _project_width = None
+                _project_height = None
                 try:
                     _style_row = await conn.fetchrow(
-                        "SELECT gs.checkpoint_model, gs.prompt_format FROM projects p "
+                        "SELECT gs.checkpoint_model, gs.prompt_format, gs.width, gs.height FROM projects p "
                         "JOIN generation_styles gs ON p.default_style = gs.style_name "
                         "WHERE p.id = $1", project_id,
                     )
                     if _style_row:
                         ckpt = (_style_row["checkpoint_model"] or "").lower()
-                        if "realistic" in ckpt or "cyber" in ckpt:
+                        if "realistic" in ckpt or "cyber" in ckpt or "basil" in ckpt or "lazymix" in ckpt:
                             style_anchor = "photorealistic, live action film, cinematic lighting"
                         elif "cartoon" in ckpt or "pixar" in ckpt:
                             style_anchor = "3D animated, Pixar style, cinematic lighting"
                         elif "counterfeit" in ckpt or "noob" in ckpt:
                             style_anchor = "anime style, detailed animation, cinematic"
+                        # Store project resolution for Wan T2V aspect ratio
+                        _project_width = _style_row["width"]
+                        _project_height = _style_row["height"]
                 except Exception:
                     pass
 
@@ -1135,6 +1147,42 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                             logger.info(f"Shot {shot_id}: FramePack prompt ({len(current_prompt)} chars): {current_prompt[:120]}...")
                     except Exception as e:
                         logger.warning(f"Shot {shot_id}: design_prompt lookup failed: {e}")
+                elif shot_engine == "wan22" and chars:
+                    # Wan 2.2 5B: richer prompt capacity than 1.3B.
+                    # Character → action → scene context → style (5B handles longer prompts well).
+                    try:
+                        char_descriptions = []
+                        for cslug in chars:
+                            char_row = await _find_character(cslug)
+                            if char_row and char_row["design_prompt"]:
+                                cname = char_row["name"]
+                                appearance = _condense_for_video(char_row["design_prompt"], genre_profile, shot_engine)
+                                char_descriptions.append(f"{cname} ({appearance})")
+                        prompt_parts = []
+                        # 1. Character descriptions (5B has enough attention for full descriptions)
+                        if char_descriptions:
+                            prompt_parts.append("; ".join(char_descriptions))
+                        # 2. Action/motion
+                        if motion_prompt and motion_prompt.lower() != "static":
+                            prompt_parts.append(motion_prompt)
+                        # 3. Scene description (more room with 5B)
+                        if scene_desc and genre_profile.get("include_scene_desc", True):
+                            prompt_parts.append(scene_desc[:200])
+                        # 4. Scene context
+                        if scene_location:
+                            setting = scene_location
+                            if scene_time:
+                                setting += f", {scene_time}"
+                            prompt_parts.append(setting)
+                        # 5. Style anchor
+                        if style_anchor:
+                            prompt_parts.append(style_anchor)
+                        if scene_mood:
+                            prompt_parts.append(f"{scene_mood} mood")
+                        current_prompt = ". ".join(prompt_parts)
+                        logger.info(f"Shot {shot_id}: Wan22 prompt ({len(current_prompt)} chars): {current_prompt[:120]}...")
+                    except Exception as e:
+                        logger.warning(f"Shot {shot_id}: Wan22 prompt build failed: {e}")
                 elif shot_engine == "wan" and chars:
                     # Wan T2V: ACTION FIRST, then condensed characters, then context.
                     # Wan 1.3B has limited attention — explicit terms must be near the start.
@@ -1230,6 +1278,10 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                 first_frame_path = None
                 if shot_engine == "wan":
                     logger.info(f"Shot {shot_id}: Wan T2V — no source image needed")
+                elif shot_engine == "wan22" and is_multi_char:
+                    # Wan 2.2 multi-char: T2V mode, no source image needed
+                    logger.info(f"Shot {shot_id}: Wan22 T2V (multi-char) — no source image needed")
+                # wan22 solo shots fall through to source image selection below (I2V mode)
                 elif is_multi_char and shot_engine in ("framepack", "framepack_f1"):
                     # Multi-character shot: generate composite source image
                     try:
@@ -1309,11 +1361,15 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                             # Priority 3: fall back to auto-assigned source image
                             source_path = shot_dict.get("source_image_path")
                             if not source_path:
-                                logger.error(f"Shot {shot_id}: no source image and no continuity frame available")
-                                await conn.execute(
-                                    "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
-                                    shot_id, "No source image available (auto-assignment failed or no characters_present)")
-                                continue
+                                if shot_engine == "wan22":
+                                    # Wan 2.2: graceful fallback to T2V mode (no ref image)
+                                    logger.info(f"Shot {shot_id}: Wan22 no source image → T2V fallback")
+                                else:
+                                    logger.error(f"Shot {shot_id}: no source image and no continuity frame available")
+                                    await conn.execute(
+                                        "UPDATE shots SET status = 'failed', error_message = $2 WHERE id = $1",
+                                        shot_id, "No source image available (auto-assignment failed or no characters_present)")
+                                    continue
                             image_filename = await copy_to_comfyui_input(source_path)
                             first_frame_path = str(BASE_PATH / source_path) if not Path(source_path).is_absolute() else source_path
                             if prev_character and character_slug != prev_character:
@@ -1435,6 +1491,38 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                     })
                     continue
 
+                elif shot_engine == "wan22":
+                    fps = 16
+                    num_frames = max(9, int(shot_seconds * fps) + 1)
+                    import hashlib as _hashlib
+                    if not shot_seed:
+                        _scene_seed_bytes = _hashlib.sha256(str(scene_id).encode()).digest()
+                        _scene_base_seed = int.from_bytes(_scene_seed_bytes[:8], "big") % (2**63)
+                        shot_seed = _scene_base_seed + (shot_dict.get("shot_number", 0) or 0)
+                    wan_cfg = max(shot_guidance, 7.5)  # higher CFG keeps prompt control over LoRA
+                    wan_w, wan_h = 480, 720
+                    if _project_width and _project_height and _project_width > _project_height:
+                        wan_w, wan_h = 720, 480
+                    # Get LoRA from engine selector (set by _find_wan_lora)
+                    _wan22_lora = engine_sel.lora_name
+                    _wan22_lora_str = engine_sel.lora_strength
+                    # I2V mode: pass ref_image if we have a source image
+                    _wan22_ref = image_filename if image_filename else None
+                    logger.info(
+                        f"Shot {shot_id}: Wan22 dims={wan_w}x{wan_h} lora={_wan22_lora} "
+                        f"ref_image={_wan22_ref is not None} seed={shot_seed} cfg={wan_cfg} frames={num_frames}"
+                    )
+                    workflow, prefix = build_wan22_workflow(
+                        prompt_text=current_prompt, num_frames=num_frames, fps=fps,
+                        steps=shot_steps, seed=shot_seed, cfg=wan_cfg,
+                        width=wan_w, height=wan_h,
+                        negative_text=current_negative,
+                        output_prefix=_file_prefix,
+                        lora_name=_wan22_lora,
+                        lora_strength=_wan22_lora_str,
+                        ref_image=_wan22_ref,
+                    )
+                    comfyui_prompt_id = _submit_wan_workflow(workflow)
                 elif shot_engine == "wan":
                     fps = 16
                     num_frames = max(9, int(shot_seconds * fps) + 1)
@@ -1447,9 +1535,16 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                         shot_seed = _scene_base_seed + (shot_dict.get("shot_number", 0) or 0)
                     # Higher CFG for better style compliance
                     wan_cfg = max(shot_guidance, 7.5)
+                    # Map project resolution to Wan-safe dims (must be multiples of 16)
+                    # Wan native is 480x720; scale proportionally for landscape/portrait
+                    wan_w, wan_h = 480, 720  # default portrait
+                    if _project_width and _project_height and _project_width > _project_height:
+                        wan_w, wan_h = 720, 480  # landscape
+                    logger.info(f"Shot {shot_id}: Wan dims={wan_w}x{wan_h} (project={_project_width}x{_project_height})")
                     workflow, prefix = build_wan_t2v_workflow(
                         prompt_text=current_prompt, num_frames=num_frames, fps=fps,
                         steps=shot_steps, seed=shot_seed, cfg=wan_cfg,
+                        width=wan_w, height=wan_h,
                         use_gguf=True,
                         negative_text=current_negative,
                         output_prefix=_file_prefix,
@@ -1497,8 +1592,8 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                 video_filename = result["output_files"][0]
                 video_path = str(COMFYUI_OUTPUT_DIR / video_filename)
 
-                # FramePack V2V refinement for Wan shots
-                if shot_engine == "wan" and video_path:
+                # FramePack V2V refinement for Wan shots (2.1 and 2.2)
+                if shot_engine in ("wan", "wan22") and video_path:
                     try:
                         from .framepack_refine import refine_wan_video
                         # Auto-detect character HunyuanVideo LoRA
@@ -1531,7 +1626,7 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                 # Wan gets upscale (480→960), FramePack gets interpolation + color only
                 try:
                     from .video_postprocess import postprocess_wan_video
-                    do_upscale = shot_engine == "wan"  # Wan is 480p, needs upscale
+                    do_upscale = shot_engine in ("wan", "wan22")  # Wan is 480p, needs upscale
                     processed = await postprocess_wan_video(
                         video_path,
                         upscale=do_upscale,

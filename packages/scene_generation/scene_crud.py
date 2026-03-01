@@ -1406,7 +1406,7 @@ class SelectEngineRequest(BaseModel):
     lora_strength: float = 0.8
 
 
-KNOWN_ENGINES = {"framepack", "framepack_f1", "ltx", "wan", "reference_v2v"}
+KNOWN_ENGINES = {"framepack", "framepack_f1", "ltx", "wan", "wan22", "reference_v2v"}
 
 
 @router.post("/scenes/{scene_id}/shots/{shot_id}/select-engine")
