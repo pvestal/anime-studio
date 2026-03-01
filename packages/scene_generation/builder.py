@@ -1403,13 +1403,24 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                         )
                         continue
 
-                    # Auto-detect HunyuanVideo LoRA for the character
+                    # Auto-detect kohya-format FramePack LoRA for the character
+                    # Only attach LoRAs that use lora_unet_ key format (kohya/comfyui)
                     _fp_lora = None
                     if character_slug:
                         for _suffix in ("_framepack_lora", "_framepack"):
                             _lp = Path(f"/opt/ComfyUI/models/loras/{character_slug}{_suffix}.safetensors")
                             if _lp.exists():
-                                _fp_lora = _lp.name
+                                # Validate LoRA format — must be kohya/comfyui format
+                                try:
+                                    from safetensors import safe_open
+                                    with safe_open(str(_lp), framework="pt") as _sf:
+                                        _k0 = list(_sf.keys())[0] if _sf.keys() else ""
+                                    if _k0.startswith("lora_unet_"):
+                                        _fp_lora = _lp.name
+                                    else:
+                                        logger.warning(f"Skipping incompatible LoRA {_lp.name} (not kohya format, key: {_k0[:60]})")
+                                except Exception as _le:
+                                    logger.warning(f"Could not validate LoRA {_lp.name}: {_le}")
                                 break
 
                     from .framepack_refine import refine_wan_video
@@ -1598,13 +1609,22 @@ async def _generate_scene_impl(scene_id: str, auto_approve: bool = False):
                 if shot_engine in ("wan", "wan22") and video_path:
                     try:
                         from .framepack_refine import refine_wan_video
-                        # Auto-detect character HunyuanVideo LoRA
+                        # Auto-detect kohya-format FramePack LoRA for refinement
                         _fp_lora = None
                         if character_slug:
                             for _suffix in ("_framepack_lora", "_framepack"):
                                 _lp = Path(f"/opt/ComfyUI/models/loras/{character_slug}{_suffix}.safetensors")
                                 if _lp.exists():
-                                    _fp_lora = _lp.name
+                                    try:
+                                        from safetensors import safe_open
+                                        with safe_open(str(_lp), framework="pt") as _sf:
+                                            _k0 = list(_sf.keys())[0] if _sf.keys() else ""
+                                        if _k0.startswith("lora_unet_"):
+                                            _fp_lora = _lp.name
+                                        else:
+                                            logger.warning(f"Skipping incompatible LoRA {_lp.name} for refinement")
+                                    except Exception:
+                                        pass
                                     break
                         refined = await refine_wan_video(
                             wan_video_path=video_path,
