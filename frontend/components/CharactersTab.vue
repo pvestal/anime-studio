@@ -44,10 +44,13 @@
         </div>
         <div v-if="ingestTargetMode === 'character'" style="flex: 1;">
           <label style="font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 6px;">Character</label>
-          <select v-model="ingestSelectedCharacter" style="min-width: 280px;">
-            <option value="">Select a character...</option>
-            <option v-for="c in charactersStore.characters" :key="c.slug" :value="c.slug">{{ c.name }} ({{ c.project_name }})</option>
-          </select>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <select v-model="ingestSelectedCharacter" style="min-width: 280px; flex: 1;">
+              <option value="">Select a character...</option>
+              <option v-for="c in charactersStore.characters" :key="c.slug" :value="c.slug">{{ c.name }} ({{ c.project_name }})</option>
+            </select>
+            <button class="btn" style="font-size: 12px; padding: 5px 10px; white-space: nowrap; color: var(--accent-primary); border-color: var(--accent-primary);" @click="showIngestNewChar = !showIngestNewChar">+ New</button>
+          </div>
         </div>
         <div v-else style="flex: 1;">
           <label style="font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 6px;">Project <span style="font-size: 11px; color: var(--text-muted);">(frames distributed to all characters)</span></label>
@@ -58,13 +61,43 @@
         </div>
       </div>
 
+      <!-- Quick-create character (inline on Ingest tab) -->
+      <div v-if="showIngestNewChar" class="card" style="margin-bottom: 16px; border-left: 3px solid var(--accent-primary); padding: 12px 14px;">
+        <div style="font-size: 13px; font-weight: 500; margin-bottom: 8px;">Quick Add Character</div>
+        <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+          <div style="min-width: 160px;">
+            <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 3px;">Name *</label>
+            <input v-model="newCharName" type="text" placeholder="Character name" class="field-input" />
+          </div>
+          <div style="min-width: 180px;">
+            <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 3px;">Project *</label>
+            <select v-model="newCharProject" class="field-input">
+              <option value="">Select project...</option>
+              <option v-for="p in projectStore.projects" :key="p.id" :value="p.name">{{ p.name }}</option>
+            </select>
+          </div>
+          <div style="flex: 1; min-width: 200px;">
+            <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 3px;">Design Prompt (optional)</label>
+            <AppearanceBuilder v-model="newCharDesignPrompt" />
+          </div>
+          <div style="display: flex; gap: 4px;">
+            <button class="btn" style="font-size: 12px; padding: 5px 12px; color: var(--accent-primary); border-color: var(--accent-primary);" :disabled="!newCharName.trim() || !newCharProject || creatingCharacter" @click="createIngestCharacter">
+              {{ creatingCharacter ? 'Creating...' : 'Create' }}
+            </button>
+            <button class="btn" style="font-size: 12px; padding: 5px 8px;" @click="showIngestNewChar = false">Cancel</button>
+          </div>
+        </div>
+        <div v-if="newCharError" style="margin-top: 6px; font-size: 11px; color: var(--status-error);">{{ newCharError }}</div>
+      </div>
+
       <!-- Ingestion Progress Banner (always visible when active or recently completed) -->
       <div v-if="ingestProgress.active || ingestProgress.stage === 'complete' || ingestProgress.stage === 'error'" style="margin-bottom: 16px; padding: 14px 16px; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: 6px; border-left: 4px solid var(--accent-primary);">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
           <span style="font-weight: 600; font-size: 14px;">
             <template v-if="ingestProgress.stage === 'downloading'">Downloading Video</template>
+            <template v-else-if="ingestProgress.stage === 'extracting'">Extracting Frames</template>
             <template v-else-if="ingestProgress.stage === 'hashing'">Deduplicating Frames</template>
-            <template v-else-if="ingestProgress.stage === 'classifying'">Classifying & Verifying</template>
+            <template v-else-if="ingestProgress.stage === 'classifying'">Classifying & Assigning</template>
             <template v-else-if="ingestProgress.stage === 'analyzing'">Building Source Analysis</template>
             <template v-else-if="ingestProgress.stage === 'registering'">Registering Images</template>
             <template v-else-if="ingestProgress.stage === 'complete'">Ingestion Complete</template>
@@ -75,7 +108,10 @@
             {{ ingestProgress.frame_current }} / {{ ingestProgress.frame_total }} frames
           </span>
         </div>
-        <div v-if="ingestProgress.frame_total && ingestProgress.active" style="width: 100%; height: 8px; background: var(--bg-primary); border-radius: 4px; overflow: hidden; margin-bottom: 8px;">
+        <div v-if="ingestProgress.active && !ingestProgress.frame_total" style="width: 100%; height: 8px; background: var(--bg-primary); border-radius: 4px; overflow: hidden; margin-bottom: 8px;">
+          <div style="width: 30%; height: 100%; background: var(--accent-primary); border-radius: 4px; animation: indeterminate 1.5s ease-in-out infinite;"></div>
+        </div>
+        <div v-else-if="ingestProgress.frame_total && ingestProgress.active" style="width: 100%; height: 8px; background: var(--bg-primary); border-radius: 4px; overflow: hidden; margin-bottom: 8px;">
           <div :style="{ width: Math.round(100 * (ingestProgress.frame_current || 0) / ingestProgress.frame_total) + '%', height: '100%', background: 'var(--accent-primary)', transition: 'width 0.5s ease' }"></div>
         </div>
         <div style="font-size: 12px; color: var(--text-secondary);">{{ ingestProgress.message }}</div>
@@ -329,7 +365,7 @@
             @accept="newCharDesignPrompt = $event.suggestion"
           />
         </div>
-        <textarea v-model="newCharDesignPrompt" rows="2" placeholder="1girl, silver hair, red eyes, dark armor, full body..." style="width: 100%; padding: 6px 8px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-primary); border-radius: 3px; resize: vertical; font-family: var(--font-primary);"></textarea>
+        <AppearanceBuilder v-model="newCharDesignPrompt" />
       </div>
       <div style="display: flex; gap: 6px; margin-top: 10px;">
         <div style="display: flex; gap: 6px;">
@@ -449,6 +485,7 @@ import CharacterCard from './characters/CharacterCard.vue'
 import CharacterDetailPanel from './characters/CharacterDetailPanel.vue'
 import EchoAssistButton from './EchoAssistButton.vue'
 import CreateTab from './CreateTab.vue'
+import AppearanceBuilder from './characters/AppearanceBuilder.vue'
 
 const props = withDefaults(defineProps<{
   hideSubTabs?: boolean
@@ -486,6 +523,7 @@ const newCharError = ref('')
 const detailCharacter = ref<Character | null>(null)
 
 // --- Ingest state ---
+const showIngestNewChar = ref(false)
 const ingestTargetMode = ref<'character' | 'project'>('project')
 const ingestSelectedCharacter = ref('')
 const ingestSelectedProject = ref('')
@@ -661,15 +699,27 @@ async function uploadMovie() {
   movieUploadPct.value = 0
   movieUploadResult.value = ''
   ingestError.value = ''
+  // Health check before upload
+  try {
+    const health = await fetch('/api/training/ingest/movies', { signal: AbortSignal.timeout(5000) })
+    if (!health.ok) throw new Error(`API returned ${health.status}`)
+  } catch {
+    ingestError.value = 'Anime Studio API is not responding. Check if the service is running.'
+    movieUploading.value = false
+    return
+  }
   try {
     const result = await api.uploadMovie(movieFile.value, ingestSelectedProject.value, (pct) => {
       movieUploadPct.value = pct
     })
     movieUploaded.value = true
-    movieUploadResult.value = `Uploaded ${result.filename} (${result.size_mb} MB)`
+    movieUploadResult.value = `Uploaded ${result.filename} (${result.size_mb} MB) — starting extraction...`
     movieExtractPath.value = result.path
-    // Refresh movies list
     await loadMoviesList()
+    // Auto-start extraction immediately after upload
+    await api.extractMovie(result.path, ingestSelectedProject.value, movieMaxFrames.value)
+    movieUploadResult.value = `Uploaded ${result.filename} (${result.size_mb} MB)`
+    startProgressPolling()
   } catch (e: any) {
     ingestError.value = e.message || 'Movie upload failed'
   } finally {
@@ -838,6 +888,30 @@ function openNewCharForm() {
   newCharProject.value = filterProject.value || (projectStore.projects.length === 1 ? projectStore.projects[0].name : '')
 }
 
+async function createIngestCharacter() {
+  if (!newCharName.value.trim() || !newCharProject.value) return
+  creatingCharacter.value = true
+  newCharError.value = ''
+  try {
+    const result = await api.createCharacter({
+      name: newCharName.value.trim(),
+      project_name: newCharProject.value,
+      design_prompt: newCharDesignPrompt.value.trim() || undefined,
+    })
+    showIngestNewChar.value = false
+    // Auto-select the new character in the ingest dropdown
+    ingestSelectedCharacter.value = result.slug
+    newCharName.value = ''
+    newCharProject.value = ''
+    newCharDesignPrompt.value = ''
+    await charactersStore.fetchCharacters()
+  } catch (error: any) {
+    newCharError.value = error.message || 'Failed to create character'
+  } finally {
+    creatingCharacter.value = false
+  }
+}
+
 async function createNewCharacter() {
   if (!newCharName.value.trim() || !newCharProject.value) return
   creatingCharacter.value = true
@@ -865,6 +939,10 @@ async function createNewCharacter() {
 </script>
 
 <style scoped>
+@keyframes indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
 .sub-tab {
   padding: 8px 20px;
   border: 1px solid var(--border-primary);

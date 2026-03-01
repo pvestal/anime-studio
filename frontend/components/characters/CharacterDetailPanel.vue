@@ -115,49 +115,49 @@
             <div class="field-row">
               <div class="field" style="flex: 1;">
                 <label>Species</label>
-                <input v-model="appearance.species" class="input" placeholder="human, elf, android..." />
+                <PillSelect v-model="appearance.species" :options="['human', 'elf', 'android', 'demon', 'catgirl', 'vampire', 'dragon']" placeholder="human, elf, android..." />
               </div>
               <div class="field" style="flex: 1;">
                 <label>Body Type</label>
-                <input v-model="appearance.body_type" class="input" placeholder="lean, muscular..." />
+                <PillSelect v-model="appearance.body_type" :options="['slim', 'athletic', 'muscular', 'curvy', 'petite', 'lean']" placeholder="lean, muscular..." />
               </div>
             </div>
 
             <div class="sub-section-label">Hair</div>
             <div class="field-row">
-              <div class="field" style="flex: 1;"><label>Color</label><input v-model="appearance.hair.color" class="input" /></div>
-              <div class="field" style="flex: 1;"><label>Style</label><input v-model="appearance.hair.style" class="input" /></div>
-              <div class="field" style="flex: 1;"><label>Length</label><input v-model="appearance.hair.length" class="input" /></div>
+              <div class="field" style="flex: 1;"><label>Color</label><PillSelect v-model="appearance.hair.color" :options="['black', 'brown', 'blonde', 'red', 'silver', 'white', 'pink', 'blue', 'purple', 'green']" /></div>
+              <div class="field" style="flex: 1;"><label>Style</label><PillSelect v-model="appearance.hair.style" :options="['long', 'short', 'ponytail', 'twin tails', 'braids', 'bob', 'spiky', 'wavy', 'messy', 'straight']" /></div>
+              <div class="field" style="flex: 1;"><label>Length</label><PillSelect v-model="appearance.hair.length" :options="['short', 'medium', 'long', 'very long']" /></div>
             </div>
 
             <div class="sub-section-label">Eyes</div>
             <div class="field-row">
-              <div class="field" style="flex: 1;"><label>Color</label><input v-model="appearance.eyes.color" class="input" /></div>
-              <div class="field" style="flex: 1;"><label>Shape</label><input v-model="appearance.eyes.shape" class="input" /></div>
-              <div class="field" style="flex: 1;"><label>Special</label><input v-model="appearance.eyes.special" class="input" /></div>
+              <div class="field" style="flex: 1;"><label>Color</label><PillSelect v-model="appearance.eyes.color" :options="['brown', 'blue', 'green', 'red', 'purple', 'gold', 'amber', 'heterochromia']" /></div>
+              <div class="field" style="flex: 1;"><label>Shape</label><PillSelect v-model="appearance.eyes.shape" :options="['round', 'almond', 'narrow', 'large', 'sharp']" /></div>
+              <div class="field" style="flex: 1;"><label>Special</label><PillSelect v-model="appearance.eyes.special" :options="['glowing', 'slit pupils', 'eye patch', 'blindfold', 'cybernetic', 'scarred', 'gradient iris']" /></div>
             </div>
 
             <div class="sub-section-label">Skin</div>
             <div class="field-row">
-              <div class="field" style="flex: 1;"><label>Tone</label><input v-model="appearance.skin.tone" class="input" /></div>
-              <div class="field" style="flex: 1;"><label>Markings</label><input v-model="appearance.skin.markings" class="input" /></div>
+              <div class="field" style="flex: 1;"><label>Tone</label><PillSelect v-model="appearance.skin.tone" :options="['fair', 'light', 'tan', 'olive', 'brown', 'dark', 'pale', 'porcelain']" /></div>
+              <div class="field" style="flex: 1;"><label>Markings</label><PillSelect v-model="appearance.skin.markings" :options="['scar', 'tattoo', 'freckles', 'birthmark', 'tribal markings', 'cybernetic lines', 'none']" /></div>
             </div>
 
             <div class="sub-section-label">Face</div>
             <div class="field-row">
-              <div class="field" style="flex: 1;"><label>Shape</label><input v-model="appearance.face.shape" class="input" /></div>
-              <div class="field" style="flex: 1;"><label>Features</label><input v-model="appearance.face.features" class="input" /></div>
+              <div class="field" style="flex: 1;"><label>Shape</label><PillSelect v-model="appearance.face.shape" :options="['round', 'oval', 'angular', 'heart', 'square', 'sharp jawline', 'soft']" /></div>
+              <div class="field" style="flex: 1;"><label>Features</label><PillSelect v-model="appearance.face.features" :options="['sharp features', 'soft features', 'high cheekbones', 'strong jaw', 'delicate', 'rugged', 'boyish', 'mature']" /></div>
             </div>
 
             <div class="sub-section-label">Body</div>
             <div class="field-row">
-              <div class="field" style="flex: 1;"><label>Build</label><input v-model="appearance.body.build" class="input" /></div>
-              <div class="field" style="flex: 1;"><label>Height</label><input v-model="appearance.body.height" class="input" /></div>
+              <div class="field" style="flex: 1;"><label>Build</label><PillSelect v-model="appearance.body.build" :options="['slim', 'athletic', 'muscular', 'toned', 'stocky', 'broad', 'lithe', 'heavyset']" /></div>
+              <div class="field" style="flex: 1;"><label>Height</label><PillSelect v-model="appearance.body.height" :options="['short', 'average', 'tall', 'very tall', 'petite', 'towering']" /></div>
             </div>
             <div class="field-row">
-              <div class="field" style="flex: 1;"><label>Bust</label><input v-model="appearance.body.bust" class="input" /></div>
-              <div class="field" style="flex: 1;"><label>Waist</label><input v-model="appearance.body.waist" class="input" /></div>
-              <div class="field" style="flex: 1;"><label>Hips</label><input v-model="appearance.body.hips" class="input" /></div>
+              <div class="field" style="flex: 1;"><label>Bust</label><PillSelect v-model="appearance.body.bust" :options="['flat', 'small', 'medium', 'large', 'huge']" /></div>
+              <div class="field" style="flex: 1;"><label>Waist</label><PillSelect v-model="appearance.body.waist" :options="['narrow', 'slim', 'average', 'wide']" /></div>
+              <div class="field" style="flex: 1;"><label>Hips</label><PillSelect v-model="appearance.body.hips" :options="['narrow', 'average', 'wide', 'thick']" /></div>
             </div>
 
             <div class="sub-section-label">Key Colors</div>
@@ -184,11 +184,11 @@
             <div class="field-row">
               <div class="field" style="flex: 1;">
                 <label>Default Outfit</label>
-                <input v-model="appearance.clothing.default_outfit" class="input" placeholder="leather jacket, ripped jeans..." />
+                <PillSelect v-model="appearance.clothing.default_outfit" :options="['school uniform', 'armor', 'kimono', 'leather jacket', 'dress', 'suit', 'casual', 'military', 'maid outfit', 'hoodie', 'robes', 'swimsuit', 'bodysuit']" placeholder="leather jacket, ripped jeans..." />
               </div>
               <div class="field" style="flex: 1;">
                 <label>Style</label>
-                <input v-model="appearance.clothing.style" class="input" placeholder="post-apocalyptic punk..." />
+                <PillSelect v-model="appearance.clothing.style" :options="['gothic', 'cyberpunk', 'fantasy', 'medieval', 'modern', 'punk', 'elegant', 'streetwear', 'steampunk', 'military', 'traditional']" placeholder="post-apocalyptic punk..." />
               </div>
             </div>
 
@@ -198,7 +198,7 @@
             </div>
             <div v-for="(w, i) in appearance.weapons" :key="i" class="field-row" style="align-items: flex-end;">
               <div class="field" style="flex: 1;"><label v-if="i === 0">Name</label><input v-model="w.name" class="input" /></div>
-              <div class="field" style="flex: 1;"><label v-if="i === 0">Type</label><input v-model="w.type" class="input" /></div>
+              <div class="field" style="flex: 1;"><label v-if="i === 0">Type</label><PillSelect v-model="w.type" :options="['sword', 'katana', 'axe', 'spear', 'bow', 'gun', 'staff', 'dagger', 'scythe', 'hammer', 'shield', 'magic']" /></div>
               <div class="field" style="flex: 2;"><label v-if="i === 0">Description</label><input v-model="w.description" class="input" /></div>
               <button class="btn" style="font-size: 10px; padding: 2px 6px; color: var(--status-error);" @click="appearance.weapons.splice(i, 1)">&times;</button>
             </div>
@@ -216,14 +216,14 @@
             <span style="font-size: 10px;">{{ sections.intimate ? '\u25BC' : '\u25B6' }}</span>
             Intimate
           </button>
-          <div v-if="sections.intimate" class="section-body">
+          <div v-if="sections.intimate && appearance.sexual" class="section-body">
             <div class="field-row">
-              <div class="field" style="flex: 1;"><label>Orientation</label><input v-model="appearance.sexual.orientation" class="input" /></div>
-              <div class="field" style="flex: 1;"><label>Preferences</label><input v-model="appearance.sexual.preferences" class="input" /></div>
+              <div class="field" style="flex: 1;"><label>Orientation</label><PillSelect v-model="appearance.sexual!.orientation" :options="['straight', 'gay', 'bisexual', 'asexual', 'pansexual']" /></div>
+              <div class="field" style="flex: 1;"><label>Preferences</label><PillSelect v-model="appearance.sexual!.preferences" :options="['dominant', 'submissive', 'switch', 'romantic', 'playful', 'aggressive', 'gentle']" /></div>
             </div>
             <div class="field">
               <label>Physical Traits</label>
-              <input v-model="appearance.sexual.physical_traits" class="input" placeholder="athletic build, toned abs..." />
+              <PillSelect v-model="appearance.sexual!.physical_traits" :options="['toned abs', 'athletic build', 'soft curves', 'muscular', 'slender', 'voluptuous', 'androgynous']" placeholder="athletic build, toned abs..." />
             </div>
           </div>
         </div>
@@ -423,6 +423,7 @@ import { api } from '@/api/client'
 import EchoAssistButton from '../EchoAssistButton.vue'
 import ChipInput from './ChipInput.vue'
 import KeyValueEditor from './KeyValueEditor.vue'
+import PillSelect from './PillSelect.vue'
 
 interface CharacterStats {
   total: number
@@ -482,16 +483,28 @@ function makeAppearance(data?: AppearanceData | null): AppearanceData {
 
 const appearance = reactive<AppearanceData>(makeAppearance())
 
-// Snapshot for dirty tracking
-let snapshot = ''
+// Snapshot for dirty tracking — use deep watch to guarantee reactivity
+const snapshot = ref('')
+const currentState = ref('')
 
-function takeSnapshot() {
-  snapshot = JSON.stringify({ profile: { ...profile }, appearance: { ...appearance } })
+function serializeState() {
+  return JSON.stringify({ profile, appearance })
 }
 
+function takeSnapshot() {
+  const s = serializeState()
+  snapshot.value = s
+  currentState.value = s
+}
+
+// Deep watch both reactive objects to update currentState
+watch([() => ({ ...profile }), () => JSON.stringify(appearance)], () => {
+  currentState.value = serializeState()
+}, { deep: true })
+
 const isDirty = computed(() => {
-  if (!snapshot) return false
-  return JSON.stringify({ profile: { ...profile }, appearance: { ...appearance } }) !== snapshot
+  if (!snapshot.value) return false
+  return currentState.value !== snapshot.value
 })
 
 // Section visibility
@@ -502,6 +515,30 @@ const sections = reactive({
   intimate: false,
   designPrompt: true,
 })
+
+// --- Parse design_prompt into appearance fields when appearance_data is empty ---
+const HAIR_COLORS = ['black', 'brown', 'blonde', 'red', 'silver', 'white', 'pink', 'blue', 'purple', 'green']
+const HAIR_STYLES = ['long', 'short', 'medium', 'ponytail', 'twin tails', 'braids', 'bob', 'spiky', 'wavy', 'messy', 'straight']
+const EYE_COLORS = ['brown', 'blue', 'green', 'red', 'purple', 'gold', 'amber']
+const SPECIES_LIST = ['human', 'elf', 'android', 'demon', 'catgirl', 'vampire', 'dragon']
+const BODY_TYPES = ['slim', 'athletic', 'muscular', 'curvy', 'petite', 'lean', 'tall']
+
+function parseDesignPromptIntoAppearance(prompt: string, app: AppearanceData) {
+  if (!prompt) return
+  const tags = prompt.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
+  for (const tag of tags) {
+    const hc = HAIR_COLORS.find(c => tag.includes(`${c} hair`))
+    if (hc && app.hair) { app.hair.color = app.hair.color || hc; continue }
+    const hs = HAIR_STYLES.find(s => tag.includes(`${s} hair`))
+    if (hs && app.hair) { app.hair.style = app.hair.style || hs; continue }
+    const ec = EYE_COLORS.find(c => tag.includes(`${c} eyes`))
+    if (ec && app.eyes) { app.eyes.color = app.eyes.color || ec; continue }
+    const sp = SPECIES_LIST.find(s => tag === s)
+    if (sp) { app.species = app.species || sp; continue }
+    const bt = BODY_TYPES.find(b => tag === b || tag === `${b} body`)
+    if (bt) { app.body_type = app.body_type || bt; continue }
+  }
+}
 
 // --- Load full detail ---
 async function loadDetail() {
@@ -517,6 +554,10 @@ async function loadDetail() {
     profile.personality_tags = detail.personality_tags || []
 
     Object.assign(appearance, makeAppearance(detail.appearance_data))
+    // When appearance_data is empty, seed from design_prompt
+    if (!detail.appearance_data && detail.design_prompt) {
+      parseDesignPromptIntoAppearance(detail.design_prompt, appearance)
+    }
     takeSnapshot()
   } catch (err) {
     console.error('Failed to load character detail:', err)

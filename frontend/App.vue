@@ -53,6 +53,7 @@ const navLinks = computed(() => [
   { to: '/produce', label: 'Produce' },
   { to: '/review', label: 'Review', count: approvalStore.pendingImages.length },
   { to: '/publish', label: 'Publish' },
+  { to: '/play', label: 'Play' },
 ])
 </script>
 

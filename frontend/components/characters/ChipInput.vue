@@ -33,7 +33,7 @@ const emit = defineEmits<{
 }>()
 
 const inputText = ref('')
-const inputEl = ref<HTMLInputElement>()
+const inputEl = ref<HTMLInputElement>() // eslint-disable-line @typescript-eslint/no-unused-vars -- template ref
 
 function add() {
   const val = inputText.value.trim()

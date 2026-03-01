@@ -21,6 +21,7 @@ import { echoApi } from './echo'
 import { learningApi } from './learning'
 import { voiceApi } from './voice'
 import { episodesApi } from './episodes'
+import { interactiveApi } from './interactive'
 
 // Re-export shared infrastructure
 export { ApiError, createRequest } from './base'
@@ -34,6 +35,7 @@ export { echoApi } from './echo'
 export { learningApi } from './learning'
 export { voiceApi } from './voice'
 export { episodesApi } from './episodes'
+export { interactiveApi } from './interactive'
 
 /**
  * Composed api object — merges every domain API into a single namespace.
@@ -48,4 +50,5 @@ export const api = {
   ...learningApi,
   ...voiceApi,
   ...episodesApi,
+  ...interactiveApi,
 }

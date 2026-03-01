@@ -25,6 +25,10 @@
         >
           Model file not found on disk
         </span>
+        <div v-if="preambleMismatch" class="preamble-warning">
+          <span>Style preamble may not match this model's expected format.</span>
+          <button class="btn-apply-defaults" @click="applyProfileDefaults">Apply model defaults</button>
+        </div>
       </div>
       <div>
         <label class="field-label">CFG Scale</label>
@@ -225,6 +229,29 @@ const selectedProfile = computed(() => {
 })
 
 const reason = ref('')
+const preambleMismatch = ref(false)
+
+// When checkpoint changes, check if preamble matches the new model's expected format
+watch(() => editStyle.checkpoint_model, (newModel, oldModel) => {
+  if (!newModel || !oldModel) return  // skip initial load
+  const profile = props.checkpoints.find(c => c.filename === newModel)
+  if (!profile?.quality_prefix) return
+  // Flag mismatch if current preamble doesn't start with the new model's prefix
+  const currentPreamble = (editStyle.positive_prompt_template || '').trim()
+  const expectedPrefix = (profile.quality_prefix || '').trim()
+  preambleMismatch.value = currentPreamble !== '' && !currentPreamble.startsWith(expectedPrefix.slice(0, 20))
+})
+
+function applyProfileDefaults() {
+  const profile = props.checkpoints.find(c => c.filename === editStyle.checkpoint_model)
+  if (!profile) return
+  if (profile.quality_prefix) editStyle.positive_prompt_template = profile.quality_prefix
+  if (profile.quality_negative) editStyle.negative_prompt_template = profile.quality_negative
+  if (profile.default_cfg) editStyle.cfg_scale = profile.default_cfg
+  if (profile.default_steps) editStyle.steps = profile.default_steps
+  if (profile.default_sampler) editStyle.sampler = profile.default_sampler
+  preambleMismatch.value = false
+}
 
 function handleSave() {
   const data: StyleUpdate = { ...editStyle }
@@ -399,6 +426,33 @@ watch(() => props.projectId, (id) => {
   color: #fff;
   text-transform: uppercase;
   letter-spacing: 0.3px;
+}
+.preamble-warning {
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 170, 0, 0.1);
+  border: 1px solid var(--status-warning);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--status-warning);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn-apply-defaults {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: var(--status-warning);
+  color: #000;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: var(--font-primary);
+  white-space: nowrap;
+}
+.btn-apply-defaults:hover {
+  opacity: 0.85;
 }
 .chip-muted {
   font-size: 10px;

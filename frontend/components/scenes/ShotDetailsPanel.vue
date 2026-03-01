@@ -290,6 +290,29 @@
       </div>
     </div>
 
+    <!-- Generation Prompt (what was actually sent to ComfyUI) -->
+    <div v-if="shot.generation_prompt" class="state-section">
+      <div
+        class="state-header"
+        @click="promptExpanded = !promptExpanded"
+      >
+        <span class="field-label" style="margin-bottom: 0; font-weight: 500; cursor: pointer;">
+          Generation Prompt {{ promptExpanded ? '▾' : '▸' }}
+        </span>
+        <span class="source-badge source-badge--auto" style="font-size: 9px;">{{ shot.video_engine || 'framepack' }}</span>
+      </div>
+      <div v-if="promptExpanded" class="state-card" style="font-size: 11px; line-height: 1.5;">
+        <div style="margin-bottom: 6px;">
+          <span class="state-label" style="display: block; margin-bottom: 2px;">Positive</span>
+          <div style="color: var(--text-primary); white-space: pre-wrap; word-break: break-word;">{{ shot.generation_prompt }}</div>
+        </div>
+        <div v-if="shot.generation_negative">
+          <span class="state-label" style="display: block; margin-bottom: 2px;">Negative</span>
+          <div style="color: var(--status-error); white-space: pre-wrap; word-break: break-word; opacity: 0.8;">{{ shot.generation_negative }}</div>
+        </div>
+      </div>
+    </div>
+
     <div v-if="shot.error_message" style="margin-top: 8px; padding: 8px; background: rgba(160,80,80,0.15); border-radius: 4px; font-size: 12px; color: var(--status-error);">
       Error: {{ shot.error_message }}
     </div>
@@ -332,6 +355,7 @@ const shotTypes = ['establishing', 'wide', 'medium', 'close-up', 'extreme_close-
 const cameraAngles = ['eye-level', 'high', 'low', 'dutch', 'pov']
 
 const stateExpanded = ref(false)
+const promptExpanded = ref(false)
 const characterStates = ref<CharacterSceneState[]>([])
 
 const synthBusy = ref(false)

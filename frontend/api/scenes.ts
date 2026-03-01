@@ -33,6 +33,7 @@ import { createRequest } from './base'
 const request = createRequest('/api/scenes')
 const genRequest = createRequest('/api')
 const audioRequest = createRequest('/api/audio')
+const voiceRequest = createRequest('/api/voice')
 const SCENES_BASE = '/api/scenes'
 const MUSIC_API = '/api/music'
 
@@ -318,5 +319,46 @@ export const scenesApi = {
     if (filters?.character_slug) params.set('character_slug', filters.character_slug)
     const qs = params.toString()
     return request(`/engine-stats${qs ? '?' + qs : ''}`)
+  },
+
+  // --- Voice Synthesis ---
+
+  async synthesizeShotDialogue(shotId: string, engine?: string): Promise<{
+    output_path: string; engine_used: string; duration_seconds: number;
+    character_slug: string; text: string; job_id: string
+  }> {
+    const qs = engine ? `?engine=${encodeURIComponent(engine)}` : ''
+    return voiceRequest(`/shot/${shotId}/synthesize${qs}`, { method: 'POST', timeoutMs: 130000 })
+  },
+
+  synthesisAudioUrl(jobId: string): string {
+    return `/api/voice/synthesis/${jobId}/audio`
+  },
+
+  sceneDialogueAudioUrl(sceneId: string): string {
+    return `${SCENES_BASE}/${sceneId}/dialogue-audio`
+  },
+
+  async getSceneDialogueStatus(sceneId: string): Promise<{
+    scene_id: string; has_dialogue_audio: boolean; dialogue_audio_path: string | null
+  }> {
+    return request(`/${sceneId}/dialogue-status`)
+  },
+
+  async synthesizeEpisodeDialogue(episodeId: string): Promise<{
+    episode_id: string; scenes_processed: number; scenes_skipped: number;
+    scenes_failed: number; total_scenes: number; results: Array<{
+      scene_id: string; position: number; title: string; status: string;
+      dialogue_audio_path?: string; error?: string; reason?: string
+    }>
+  }> {
+    return voiceRequest(`/episode/${episodeId}/synthesize-all`, { method: 'POST', timeoutMs: 300000 })
+  },
+
+  async getVoiceModels(characterSlug: string): Promise<{
+    character_slug: string; available_engines: Array<{ engine: string; quality: string }>;
+    preferred_engine: string | null; voice_preset: string | null
+  }> {
+    return voiceRequest(`/models/${characterSlug}`)
   },
 }

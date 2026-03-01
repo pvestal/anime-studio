@@ -1,22 +1,9 @@
 <template>
   <div>
-    <h2 style="font-size: 18px; font-weight: 500; margin-bottom: 16px;">Scene Builder</h2>
-    <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 24px;">
-      Compose shots into scenes with automatic continuity chaining and FramePack video generation.
-    </p>
-
-    <!-- Project selector -->
-    <div style="display: flex; gap: 16px; margin-bottom: 24px; align-items: flex-end;">
-      <div style="min-width: 260px;">
-        <label style="font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 6px;">Project</label>
-        <select v-model="selectedProjectId" style="width: 100%;">
-          <option :value="0">Select a project...</option>
-          <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-        </select>
-      </div>
-      <button v-if="selectedProjectId" class="btn btn-primary" @click="openNewScene">+ New Scene</button>
+    <div v-if="selectedProjectId" style="display: flex; gap: 8px; margin-bottom: 16px; align-items: center;">
+      <button class="btn btn-primary" @click="openNewScene">+ New Scene</button>
       <button
-        v-if="selectedProjectId && scenes.length > 0"
+        v-if="scenes.length > 0"
         class="btn"
         :disabled="generatingTraining"
         @click="generateTrainingFromScenes"
@@ -167,15 +154,24 @@ import EpisodeView from './scenes/EpisodeView.vue'
 
 const props = withDefaults(defineProps<{
   hideEpisodes?: boolean
+  projectId?: number
 }>(), {
   hideEpisodes: false,
+  projectId: 0,
 })
 
 const router = useRouter()
 const projectStore = useProjectStore()
 
 const projects = ref<Array<{ id: number; name: string }>>([])
-const selectedProjectId = ref(0)
+const selectedProjectId = ref(props.projectId || 0)
+
+// Sync with parent-provided projectId prop
+watch(() => props.projectId, (pid) => {
+  if (pid && pid !== selectedProjectId.value) {
+    selectedProjectId.value = pid
+  }
+})
 const scenes = ref<BuilderScene[]>([])
 const loading = ref(false)
 const saving = ref(false)

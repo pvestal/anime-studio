@@ -1,16 +1,8 @@
 <template>
   <div>
-    <!-- Project selector + actions -->
-    <div style="display: flex; gap: 16px; margin-bottom: 24px; align-items: flex-end; flex-wrap: wrap;">
-      <div style="min-width: 260px;">
-        <label style="font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 6px;">Project</label>
-        <select v-model="selectedProjectId" style="width: 100%; padding: 8px 12px; background: var(--bg-tertiary); border: 1px solid var(--border-primary); border-radius: 6px; color: var(--text-primary); font-size: 14px;">
-          <option :value="0">Select a project...</option>
-          <option v-for="p in projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-        </select>
-      </div>
+    <!-- Actions bar -->
+    <div v-if="projectId && scenes.length > 0" class="actions-bar">
       <button
-        v-if="selectedProjectId && scenes.length > 0"
         class="btn"
         style="font-size: 12px; color: var(--accent-primary);"
         :disabled="generatingAllDialogue"
@@ -18,20 +10,15 @@
       >
         {{ generatingAllDialogue ? 'Writing...' : 'Auto-Write All Dialogue' }}
       </button>
-      <button
-        v-if="selectedProjectId && scenes.length > 0"
-        class="btn"
-        style="font-size: 12px;"
-        @click="exportScript"
-      >
+      <button class="btn" style="font-size: 12px;" @click="exportScript">
         Export as Text
       </button>
     </div>
 
     <div v-if="loading" style="text-align: center; padding: 40px 0; color: var(--text-muted);">Loading scenes...</div>
 
-    <div v-else-if="!selectedProjectId" style="text-align: center; padding: 60px 0; color: var(--text-muted);">
-      Select a project to view the screenplay.
+    <div v-else-if="!projectId" style="text-align: center; padding: 60px 0; color: var(--text-muted);">
+      Select a project above to view the screenplay.
     </div>
 
     <div v-else-if="scenes.length === 0" style="text-align: center; padding: 60px 0; color: var(--text-muted);">
@@ -63,9 +50,21 @@
             <template v-if="shot.motion_prompt"> — {{ truncate(shot.motion_prompt, 80) }}</template>]
           </div>
 
-          <!-- Dialogue line (inline editable) -->
+          <!-- Dialogue line (inline editable) + play button -->
           <div v-if="shot.dialogue_character_slug" class="dialogue-block">
-            <div class="dialogue-character">{{ characterName(shot.dialogue_character_slug) }}</div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <div class="dialogue-character">{{ characterName(shot.dialogue_character_slug) }}</div>
+              <button
+                v-if="shot.dialogue_text"
+                class="play-btn"
+                :disabled="shotSynthBusy[shot.id]"
+                :title="shotSynthBusy[shot.id] ? 'Generating...' : 'Play this line'"
+                @click="playShotDialogue(shot.id)"
+              >
+                <span v-if="shotSynthBusy[shot.id]" class="spin">&#8635;</span>
+                <span v-else>&#9654;</span>
+              </button>
+            </div>
             <div
               class="dialogue-text"
               :contenteditable="true"
@@ -73,10 +72,40 @@
               @keydown.enter.prevent="($event.target as HTMLElement).blur()"
               v-text="shot.dialogue_text || ''"
             ></div>
+            <!-- Inline audio player for this shot -->
+            <audio
+              v-if="shotAudioUrls[shot.id]"
+              :ref="(el) => { if (el) shotAudioEls[shot.id] = el as HTMLAudioElement }"
+              :src="shotAudioUrls[shot.id]"
+              controls
+              preload="none"
+              class="shot-audio-player"
+            />
           </div>
         </div>
 
-        <!-- Scene audio -->
+        <!-- Scene combined dialogue player -->
+        <div v-if="sceneHasDialogue(scene)" class="scene-dialogue-player">
+          <button
+            class="play-scene-btn"
+            :disabled="sceneSynthBusy[scene.id]"
+            @click="playSceneDialogue(scene.id)"
+          >
+            <span v-if="sceneSynthBusy[scene.id]" class="spin">&#8635;</span>
+            <span v-else>&#9654;</span>
+            {{ sceneSynthBusy[scene.id] ? 'Synthesizing scene...' : 'Play Scene Dialogue' }}
+          </button>
+          <audio
+            v-if="sceneAudioUrls[scene.id]"
+            :ref="(el) => { if (el) sceneAudioEls[scene.id] = el as HTMLAudioElement }"
+            :src="sceneAudioUrls[scene.id]"
+            controls
+            preload="none"
+            class="scene-audio-player"
+          />
+        </div>
+
+        <!-- Scene music -->
         <div v-if="scene.audio?.track_name" class="scene-audio">
           &#9835; Music: "{{ scene.audio.track_name }}"
           <span v-if="scene.audio.track_artist"> by {{ scene.audio.track_artist }}</span>
@@ -90,15 +119,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { storyApi } from '@/api/story'
 import { scenesApi } from '@/api/scenes'
 import type { BuilderScene } from '@/types'
 
-interface ProjectInfo {
-  id: number
-  name: string
-}
+const props = withDefaults(defineProps<{
+  projectId?: number
+}>(), {
+  projectId: 0,
+})
 
 interface SceneWithShots extends Omit<BuilderScene, 'shots' | 'audio'> {
   scene_number?: number
@@ -119,36 +149,87 @@ interface SceneWithShots extends Omit<BuilderScene, 'shots' | 'audio'> {
   } | null
 }
 
-const selectedProjectId = ref(0)
-const projects = ref<ProjectInfo[]>([])
 const scenes = ref<BuilderScene[]>([])
 const scenesWithShots = ref<SceneWithShots[]>([])
 const loading = ref(false)
 const generatingAllDialogue = ref(false)
 const characters = ref<{ slug: string; name: string }[]>([])
+const projectName = ref('')
 
-// Load projects
-;(async () => {
-  try {
-    const resp = await storyApi.getProjects()
-    projects.value = (resp.projects || []).map((p: any) => ({ id: p.id, name: p.name }))
-  } catch (e) {
-    console.error('Failed to load projects:', e)
+// --- Audio playback state ---
+const shotSynthBusy = reactive<Record<string, boolean>>({})
+const shotAudioUrls = reactive<Record<string, string>>({})
+const shotAudioEls = reactive<Record<string, HTMLAudioElement>>({})
+const sceneSynthBusy = reactive<Record<string, boolean>>({})
+const sceneAudioUrls = reactive<Record<string, string>>({})
+const sceneAudioEls = reactive<Record<string, HTMLAudioElement>>({})
+
+function sceneHasDialogue(scene: SceneWithShots): boolean {
+  return scene.shots?.some(s => s.dialogue_character_slug && s.dialogue_text) ?? false
+}
+
+async function playShotDialogue(shotId: string) {
+  // If already loaded, just toggle play/pause
+  if (shotAudioUrls[shotId] && shotAudioEls[shotId]) {
+    const el = shotAudioEls[shotId]
+    if (el.paused) { el.play() } else { el.pause() }
+    return
   }
-})()
+  shotSynthBusy[shotId] = true
+  try {
+    const result = await scenesApi.synthesizeShotDialogue(shotId)
+    shotAudioUrls[shotId] = scenesApi.synthesisAudioUrl(result.job_id)
+    // Auto-play after element mounts
+    await new Promise(r => setTimeout(r, 150))
+    shotAudioEls[shotId]?.play()
+  } catch (e: any) {
+    console.error('Shot synthesis failed:', e)
+  } finally {
+    shotSynthBusy[shotId] = false
+  }
+}
+
+async function playSceneDialogue(sceneId: string) {
+  // If already loaded, toggle play/pause
+  if (sceneAudioUrls[sceneId] && sceneAudioEls[sceneId]) {
+    const el = sceneAudioEls[sceneId]
+    if (el.paused) { el.play() } else { el.pause() }
+    return
+  }
+  sceneSynthBusy[sceneId] = true
+  try {
+    // Synthesize if needed, then load audio URL
+    const resp = await fetch(`/api/scenes/${sceneId}/synthesize-dialogue`, { method: 'POST' })
+    if (resp.ok) {
+      sceneAudioUrls[sceneId] = scenesApi.sceneDialogueAudioUrl(sceneId)
+    } else {
+      console.error('Scene dialogue synthesis failed:', await resp.text())
+      return
+    }
+    await new Promise(r => setTimeout(r, 150))
+    sceneAudioEls[sceneId]?.play()
+  } catch (e: any) {
+    console.error('Scene dialogue playback failed:', e)
+  } finally {
+    sceneSynthBusy[sceneId] = false
+  }
+}
 
 // Load scenes + shots when project changes
-watch(selectedProjectId, async (pid) => {
+watch(() => props.projectId, async (pid) => {
   if (!pid) { scenes.value = []; scenesWithShots.value = []; return }
   loading.value = true
   try {
-    // Load characters for this project
-    const charResp = await storyApi.getCharacters()
-    const projDetail = projects.value.find(p => p.id === pid)
-    if (charResp.characters && projDetail) {
-      characters.value = charResp.characters
-        .filter((c: any) => c.project_name === projDetail.name)
-        .map((c: any) => ({ slug: c.slug, name: c.name }))
+    // Load characters and project name
+    const [charResp, projResp] = await Promise.all([
+      storyApi.getCharacters(),
+      storyApi.getProjects(),
+    ])
+    const proj = (projResp.projects || []).find((p: any) => p.id === pid)
+    projectName.value = proj?.name || ''
+    if (charResp.characters) {
+      const projChars = charResp.characters.filter((c: any) => c.project_id === pid)
+      characters.value = projChars.map((c: any) => ({ slug: c.slug, name: c.name }))
     }
 
     const data = await scenesApi.listScenes(pid)
@@ -194,7 +275,7 @@ async function onDialogueEdit(sceneId: string, shotId: string, newText: string) 
 }
 
 async function generateAllDialogue() {
-  if (!selectedProjectId.value) return
+  if (!props.projectId) return
   generatingAllDialogue.value = true
   try {
     for (const scene of scenesWithShots.value) {
@@ -241,7 +322,7 @@ function exportScript() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  const projName = projects.value.find(p => p.id === selectedProjectId.value)?.name || 'screenplay'
+  const projName = projectName.value || 'screenplay'
   a.download = `${projName.replace(/\s+/g, '_').toLowerCase()}_screenplay.txt`
   a.click()
   URL.revokeObjectURL(url)
@@ -249,6 +330,15 @@ function exportScript() {
 </script>
 
 <style scoped>
+.actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 0 4px;
+}
+
+/* --- Screenplay --- */
 .screenplay {
   max-width: 700px;
   margin: 0 auto;
@@ -346,5 +436,78 @@ function exportScript() {
   background: rgba(122, 162, 247, 0.06);
   border-radius: 4px;
   font-family: var(--font-primary);
+}
+.play-btn {
+  background: none;
+  border: 1px solid var(--border-primary);
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--accent-primary);
+  font-size: 10px;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 150ms, border-color 150ms;
+}
+.play-btn:hover:not(:disabled) {
+  background: rgba(122, 162, 247, 0.15);
+  border-color: var(--accent-primary);
+}
+.play-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.shot-audio-player {
+  margin-top: 4px;
+  height: 28px;
+  width: 100%;
+  border-radius: 4px;
+}
+.scene-dialogue-player {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(122, 162, 247, 0.06);
+  border-radius: 4px;
+  border: 1px solid var(--border-primary);
+  font-family: var(--font-primary);
+}
+.play-scene-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid var(--accent-primary);
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--accent-primary);
+  cursor: pointer;
+  font-family: var(--font-primary);
+  transition: background 150ms;
+}
+.play-scene-btn:hover:not(:disabled) {
+  background: rgba(122, 162, 247, 0.15);
+}
+.play-scene-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.scene-audio-player {
+  margin-top: 6px;
+  height: 32px;
+  width: 100%;
+  border-radius: 4px;
+}
+@keyframes spin-anim {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin {
+  display: inline-block;
+  animation: spin-anim 1s linear infinite;
 }
 </style>
