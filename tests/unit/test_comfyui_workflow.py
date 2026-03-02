@@ -64,8 +64,8 @@ class TestBuildComfyuiWorkflow:
             "p", "m.safetensors", generation_type="video", width=1024, height=1024,
         )
         assert wf["9"]["class_type"] == "VHS_VideoCombine"
-        # Video mode caps dimensions at 512
-        assert wf["5"]["inputs"]["width"] <= 512
-        assert wf["5"]["inputs"]["height"] <= 512
+        # Video mode caps dimensions at 768
+        assert wf["5"]["inputs"]["width"] <= 768
+        assert wf["5"]["inputs"]["height"] <= 768
         # Batch size should be 16 for video
         assert wf["5"]["inputs"]["batch_size"] == 16

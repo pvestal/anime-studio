@@ -428,8 +428,8 @@ def vision_issues_to_categories(review: dict) -> list[str]:
     # Not solo -> not_solo
     if not review.get("solo", True):
         cats.add("not_solo")
-    # Low clarity -> bad_quality
-    if review.get("clarity", 10) < 5:
+    # Low clarity -> bad_quality (6/10 minimum — 5 was too lenient, accepted fuzzy images)
+    if review.get("clarity", 10) < 6:
         cats.add("bad_quality")
     # Low character match -> wrong_appearance
     if review.get("character_match", 10) < 4:

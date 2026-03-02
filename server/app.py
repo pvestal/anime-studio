@@ -31,7 +31,10 @@ import packages.core.learning as learning  # registers EventBus handlers on impo
 import packages.core.auto_correction as auto_correction  # registers EventBus handler on import
 import packages.core.replenishment as replenishment  # registers EventBus handler on import
 import packages.core.orchestrator as orchestrator
-from packages.core.model_selector import recommend_params, detect_drift, character_quality_summary
+from packages.core.model_selector import (
+    recommend_params, detect_drift, character_quality_summary,
+    checkpoint_comparison, suggest_exploration, explore_checkpoints,
+)
 from packages.lora_training.feedback import reconcile_training_jobs
 
 from packages.story.router import router as story_router
@@ -226,6 +229,46 @@ async def get_quality_summary(project_name: str):
     """Per-character quality summary for a project."""
     summary = await character_quality_summary(project_name)
     return {"project_name": project_name, "characters": summary}
+
+
+# --- Model Exploration ---
+
+
+@app.get("/api/system/checkpoints/compare/{project_name}")
+async def get_checkpoint_comparison(project_name: str):
+    """Compare all checkpoints used in a project — ranked by quality and approval rate."""
+    comparison = await checkpoint_comparison(project_name)
+    return {"project_name": project_name, "checkpoints": comparison}
+
+
+@app.get("/api/system/checkpoints/suggest/{character_slug}")
+async def get_exploration_suggestions(character_slug: str, project_name: str = None):
+    """Suggest untested or under-tested checkpoints to try for a character."""
+    result = await suggest_exploration(character_slug, project_name or "")
+    return result
+
+
+@app.post("/api/system/checkpoints/explore/{character_slug}")
+async def run_checkpoint_exploration(
+    character_slug: str,
+    checkpoints: list[str] | None = None,
+    images_per_checkpoint: int = 2,
+):
+    """Run multi-checkpoint A/B test — generates images with each checkpoint.
+
+    Results flow through the normal vision review + approval pipeline.
+    Query /api/system/checkpoints/compare/{project} afterward to see rankings.
+    """
+    results = await explore_checkpoints(
+        character_slug=character_slug,
+        checkpoints=checkpoints,
+        images_per_checkpoint=images_per_checkpoint,
+    )
+    return {
+        "character_slug": character_slug,
+        "checkpoints_tested": len(results),
+        "results": results,
+    }
 
 
 # --- Auto-Correction & Quality Gates ---

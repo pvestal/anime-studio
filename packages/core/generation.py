@@ -37,6 +37,55 @@ from packages.visual_pipeline.comfyui import (
 
 logger = logging.getLogger(__name__)
 
+# --- CLIP token budget ---
+# CLIP's text encoder truncates at 77 tokens. We cap negative prompts at 75
+# (leaving 2 for BOS/EOS) to ensure the most important negatives survive.
+# SDXL uses dual CLIP but the primary encoder still truncates at 77.
+CLIP_TOKEN_LIMIT = 75
+
+
+def truncate_negative_prompt(negative: str, max_tokens: int = CLIP_TOKEN_LIMIT) -> str:
+    """Truncate a negative prompt to fit within CLIP's token limit.
+
+    Deduplicates terms first, then truncates from the end (keeping the
+    highest-priority terms that appear earliest in the string).
+    A rough token estimate: split on commas, each term ≈ 1-3 tokens.
+    We use word count as a more accurate proxy than comma-split.
+    """
+    if not negative:
+        return negative
+
+    # Deduplicate: split on commas, normalize whitespace, keep first occurrence
+    raw_terms = [t.strip() for t in negative.split(",") if t.strip()]
+    seen = set()
+    unique_terms = []
+    for term in raw_terms:
+        key = term.lower()
+        if key not in seen:
+            seen.add(key)
+            unique_terms.append(term)
+
+    # Estimate token count: each word ≈ 1 CLIP token (conservative).
+    # Build up terms until we'd exceed the limit.
+    result_terms = []
+    token_count = 0
+    for term in unique_terms:
+        words_in_term = len(term.split())
+        if token_count + words_in_term > max_tokens:
+            break
+        result_terms.append(term)
+        token_count += words_in_term
+
+    truncated = ", ".join(result_terms)
+    if len(result_terms) < len(unique_terms):
+        dropped = len(unique_terms) - len(result_terms)
+        logger.debug(
+            f"Negative prompt truncated: kept {len(result_terms)}/{len(unique_terms)} "
+            f"terms (~{token_count} tokens), dropped {dropped} overflow terms"
+        )
+    return truncated
+
+
 # --- Concurrency control ---
 # Only allow 2 ComfyUI jobs in-flight at once (1 rendering + 1 queued).
 # This prevents queue flooding and poll timeouts when multiple generate_batch
@@ -274,9 +323,12 @@ async def generate_batch(
     if char_neg:
         base_negative = f"{base_negative}, {char_neg}"
 
+    # Truncate negative prompt to CLIP token limit (dedup + trim overflow)
+    base_negative = truncate_negative_prompt(base_negative)
+
     # Sampler normalization — cascade: recommend_params > DB > profile defaults
     use_cfg = use_cfg or profile.get("default_cfg") or 7.0
-    use_steps = use_steps or profile.get("default_steps") or 25
+    use_steps = use_steps or profile.get("default_steps") or 30
     use_sampler = use_sampler or profile.get("default_sampler")
     use_scheduler = use_scheduler or profile.get("default_scheduler")
     norm_sampler, norm_scheduler = normalize_sampler(use_sampler, use_scheduler)

@@ -57,8 +57,11 @@ def build_comfyui_workflow(
     batch_size = 1
     if generation_type == "video":
         batch_size = 16
-        width = min(width, 512)
-        height = min(height, 512)
+        # Cap video resolution to 768 per dimension (was 512 — too blurry).
+        # Scene engines (FramePack, Wan, LTX) handle their own resolution;
+        # this only affects the legacy comfyui.py video path.
+        width = min(width, 768)
+        height = min(height, 768)
 
     workflow = {
         "3": {
