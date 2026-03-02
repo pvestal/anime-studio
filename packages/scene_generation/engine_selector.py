@@ -111,12 +111,13 @@ def select_engine(
     is_multi_char = len(characters_present) > 1
     lora_name, lora_slug, lora_arch = _pick_best_lora(characters_present) if characters_present else (None, None, None)
 
-    # Rule 0: Solo shot with reference video clip → reference_v2v (V2V style transfer)
-    # Attach FramePack LoRA if available for enhanced identity lock
-    if has_source_video and not is_multi_char and not is_establishing:
+    # Rule 0: Shot with reference video clip → reference_v2v (V2V style transfer)
+    # Works for both solo and multi-char shots — source video provides all characters.
+    # Attach FramePack LoRA if available for enhanced identity lock.
+    if has_source_video and not is_establishing:
         candidates.append(EngineSelection(
             engine="reference_v2v",
-            reason="solo shot with reference video clip, V2V style transfer"
+            reason=("multi-char" if is_multi_char else "solo") + " shot with reference video clip, V2V style transfer"
                 + (f" + FramePack LoRA ({lora_name})" if lora_arch == "framepack" else ""),
             lora_name=lora_name if lora_arch == "framepack" else None,
             lora_strength=0.8,

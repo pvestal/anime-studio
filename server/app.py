@@ -44,6 +44,7 @@ from packages.echo_integration.router import router as echo_router
 from packages.voice_pipeline.router import router as voice_router
 from packages.episode_assembly.router import router as episode_router
 from packages.core.graph_router import router as graph_router
+from packages.testing import testing_router
 from packages.core.orchestrator_router import router as orchestrator_router
 from packages.narrative_state import narrative_router
 from packages.interactive import interactive_router
@@ -88,6 +89,9 @@ app.include_router(narrative_router, prefix="/api/narrative", tags=["narrative"]
 
 # Interactive Visual Novel:
 app.include_router(interactive_router, prefix="/api/interactive", tags=["interactive"])  # /api/interactive/*
+
+# Prompt testing harness:
+app.include_router(testing_router, prefix="/api/testing", tags=["testing"])  # /api/testing/*
 
 
 @app.on_event("startup")
