@@ -248,11 +248,18 @@ async def get_exploration_suggestions(character_slug: str, project_name: str = N
     return result
 
 
+from pydantic import BaseModel, Field
+
+
+class ExploreRequest(BaseModel):
+    checkpoints: list[str] | None = Field(None, description="Checkpoint filenames to test. Auto-suggests if empty.")
+    images_per_checkpoint: int = Field(2, ge=1, le=5, description="Images to generate per checkpoint.")
+
+
 @app.post("/api/system/checkpoints/explore/{character_slug}")
 async def run_checkpoint_exploration(
     character_slug: str,
-    checkpoints: list[str] | None = None,
-    images_per_checkpoint: int = 2,
+    body: ExploreRequest = ExploreRequest(),
 ):
     """Run multi-checkpoint A/B test — generates images with each checkpoint.
 
@@ -261,8 +268,8 @@ async def run_checkpoint_exploration(
     """
     results = await explore_checkpoints(
         character_slug=character_slug,
-        checkpoints=checkpoints,
-        images_per_checkpoint=images_per_checkpoint,
+        checkpoints=body.checkpoints,
+        images_per_checkpoint=body.images_per_checkpoint,
     )
     return {
         "character_slug": character_slug,
