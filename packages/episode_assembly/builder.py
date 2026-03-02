@@ -33,6 +33,17 @@ async def _probe_duration(video_path: str) -> float:
     return float(stdout.decode().strip()) if stdout.decode().strip() else 5.0
 
 
+async def _probe_has_audio(video_path: str) -> bool:
+    """Check if a video file contains an audio stream via ffprobe."""
+    proc = await asyncio.create_subprocess_exec(
+        "ffprobe", "-v", "quiet", "-select_streams", "a",
+        "-show_entries", "stream=index", "-of", "csv=p=0", video_path,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, _ = await proc.communicate()
+    return bool(stdout.decode().strip())
+
+
 async def _concat_hardcut(video_paths: list[str], output_path: str) -> str:
     """Fallback: concatenate videos with hard cuts (no transitions)."""
     list_path = output_path.rsplit(".", 1)[0] + "_concat.txt"
@@ -92,20 +103,27 @@ async def assemble_episode(
         logger.info(f"Episode {episode_id}: all cut transitions, using fast concat")
         return await _concat_hardcut(scene_video_paths, output_path)
 
-    # Probe all video durations upfront
+    # Probe all video durations and audio presence upfront
     durations = []
+    has_audio = []
     for vp in scene_video_paths:
         durations.append(await _probe_duration(vp))
+        has_audio.append(await _probe_has_audio(vp))
+
+    any_has_audio = any(has_audio)
 
     # Build ffmpeg xfade filter chain
     inputs = []
     for vp in scene_video_paths:
         inputs.extend(["-i", vp])
 
-    filter_parts = []
+    n = len(scene_video_paths)
+    video_filter_parts = []
+    audio_filter_parts = []
     cumulative_duration = durations[0]
 
-    for i in range(len(scene_video_paths) - 1):
+    # --- Video xfade chain (unchanged logic) ---
+    for i in range(n - 1):
         xfade_type = transitions[i] if i < len(transitions) else _DEFAULT_EPISODE_TRANSITION
         if xfade_type == "cut":
             xfade_type = "fade"  # treat "cut" in mixed mode as quick fade
@@ -118,30 +136,66 @@ async def assemble_episode(
 
         src_label = "[0:v]" if i == 0 else f"[v{i}]"
         dst_label = f"[{i + 1}:v]"
-        out_label = "[vout]" if i == len(scene_video_paths) - 2 else f"[v{i + 1}]"
+        out_label = "[vout]" if i == n - 2 else f"[v{i + 1}]"
 
-        filter_parts.append(
+        video_filter_parts.append(
             f"{src_label}{dst_label}xfade=transition={xfade_type}:"
             f"duration={xfade_dur:.3f}:offset={offset:.3f}{out_label}"
         )
 
         cumulative_duration = offset + durations[i + 1]
 
-    filter_complex = ";".join(filter_parts)
+    # --- Audio crossfade chain (new) ---
+    if any_has_audio:
+        # For each input: normalize existing audio or inject silence
+        for i in range(n):
+            if has_audio[i]:
+                audio_filter_parts.append(
+                    f"[{i}:a]aformat=sample_rates=48000:channel_layouts=stereo[a{i}]"
+                )
+            else:
+                audio_filter_parts.append(
+                    f"anullsrc=r=48000:cl=stereo:d={durations[i]:.3f}[a{i}]"
+                )
+
+        # Build acrossfade chain matching xfade offsets
+        cumulative_duration_a = durations[0]
+        for i in range(n - 1):
+            xfade_dur = min(
+                _DEFAULT_EPISODE_TRANSITION_DURATION,
+                durations[i] * 0.4,
+                durations[i + 1] * 0.4,
+            )
+
+            a_src = f"[a{0}]" if i == 0 else f"[ac{i}]"
+            a_dst = f"[a{i + 1}]"
+            a_out = "[aout]" if i == n - 2 else f"[ac{i + 1}]"
+
+            audio_filter_parts.append(
+                f"{a_src}{a_dst}acrossfade=d={xfade_dur:.3f}:c1=tri:c2=tri{a_out}"
+            )
+
+            cumulative_duration_a = cumulative_duration_a - xfade_dur + durations[i + 1]
+
+    filter_complex = ";".join(video_filter_parts + audio_filter_parts)
 
     cmd = [
         "ffmpeg", "-y",
         *inputs,
         "-filter_complex", filter_complex,
         "-map", "[vout]",
+    ]
+    if any_has_audio:
+        cmd.extend(["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"])
+    cmd.extend([
         "-c:v", "libx264", "-preset", "fast", "-crf", "19",
         "-pix_fmt", "yuv420p",
         output_path,
-    ]
+    ])
 
     logger.info(
-        f"Episode {episode_id}: xfade assembly with {len(scene_video_paths)} scenes, "
-        f"transitions={transitions[:5]}"
+        f"Episode {episode_id}: xfade assembly with {n} scenes "
+        f"(audio={sum(has_audio)}/{n}), transitions={transitions[:5]}"
     )
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -150,12 +204,38 @@ async def assemble_episode(
     _, stderr = await proc.communicate()
 
     if proc.returncode != 0:
+        if any_has_audio:
+            # Fallback: try video-only xfade, then mux audio in second pass
+            logger.warning(
+                f"Episode xfade+audio failed, retrying video-only: {stderr.decode()[-200:]}"
+            )
+            video_only_path = output_path.rsplit(".", 1)[0] + "_vidonly.mp4"
+            cmd_v = [
+                "ffmpeg", "-y",
+                *inputs,
+                "-filter_complex", ";".join(video_filter_parts),
+                "-map", "[vout]",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "19",
+                "-pix_fmt", "yuv420p",
+                video_only_path,
+            ]
+            proc_v = await asyncio.create_subprocess_exec(
+                *cmd_v,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr_v = await proc_v.communicate()
+            if proc_v.returncode == 0:
+                # Move video-only to final output
+                os.replace(video_only_path, output_path)
+                logger.warning(f"Episode {episode_id}: assembled video-only (audio chain failed)")
+                return output_path
+
         logger.warning(
             f"Episode xfade failed, falling back to hard-cut: {stderr.decode()[-200:]}"
         )
         return await _concat_hardcut(scene_video_paths, output_path)
 
-    logger.info(f"Episode {episode_id} assembled: {output_path} from {len(scene_video_paths)} scenes")
+    logger.info(f"Episode {episode_id} assembled: {output_path} from {n} scenes (with audio)")
     return output_path
 
 

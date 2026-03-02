@@ -99,6 +99,7 @@ packages/
     framepack.py      # FramePack workflow building, I2V pipeline, motion presets
     ltx_video.py      # LTX-Video 2B workflow building, native LoRA support
     wan_video.py      # Wan 2.1 T2V workflow, GGUF support, environment/establishing shots
+    framepack_refine.py # FramePack vid2vid refinement for Wan output (V2V: Wan 480p → FramePack 544x704, optional HunyuanVideo LoRA)
     engine_selector.py # Auto engine selection: shot type + LoRA availability + blacklist → wan/ltx/framepack
     scene_crud.py     # Scene/shot CRUD, episode-aware generation, continuity frames API, manual engine override
     scene_review.py   # Shot review + engine blacklist management
@@ -752,6 +753,91 @@ graph LR
     end
 ```
 
+## Video Engine Pipeline (Wan → FramePack V2V Refinement)
+
+Multi-character shots use Wan T2V for composition, then optionally refine through FramePack vid2vid for improved anatomy/detail before post-processing.
+
+```mermaid
+graph TD
+    subgraph "Engine Selection (engine_selector.py)"
+        SHOT[Shot metadata] --> ES{select_engine}
+        ES -->|establishing / no chars| WAN_E[wan]
+        ES -->|multi-character| WAN_MC[wan]
+        ES -->|solo + LoRA| LTX[ltx]
+        ES -->|solo + source image| FP[framepack I2V]
+        ES -->|no source image| WAN_NS[wan]
+    end
+
+    subgraph "Wan T2V Generation"
+        WAN_E & WAN_MC & WAN_NS --> WAN_GEN[Wan 2.1 T2V 1.3B GGUF<br/>480x720 @ 16fps<br/>~4.5 min/clip]
+        WAN_GEN --> WAN_OUT[Raw Wan MP4<br/>480x720 16fps]
+    end
+
+    subgraph "FramePack V2V Refinement (framepack_refine.py)"
+        WAN_OUT --> LOAD_VID[VHS_LoadVideoPath<br/>resize to 544x704 @ 30fps]
+        LOAD_VID --> VAE_ENC_ALL[VAEEncodeTiled<br/>all frames → LATENT]
+        LOAD_VID --> FRAME0[ImageFromBatch<br/>extract frame 0]
+        FRAME0 --> VAE_ENC_F0[VAEEncode<br/>frame 0 → start_latent]
+        FRAME0 --> CLIP_VIS[CLIPVisionEncode<br/>frame 0 → image_embeds]
+
+        LORA_CHECK{Character LoRA<br/>exists?}
+        LORA_CHECK -->|Yes| LORA_SEL[FramePackLoraSelect<br/>HunyuanVideo LoRA]
+        LORA_CHECK -->|No| MODEL_LOAD
+        LORA_SEL --> MODEL_LOAD[LoadFramePackModel<br/>fp8 HunyuanVideo DiT]
+
+        MODEL_LOAD --> SAMPLER[FramePackSampler<br/>denoise_strength=0.4<br/>preserves 60% Wan layout<br/>~10-13 min]
+        VAE_ENC_ALL -->|initial_samples| SAMPLER
+        VAE_ENC_F0 -->|start_latent| SAMPLER
+        CLIP_VIS -->|image_embeds| SAMPLER
+
+        SAMPLER --> DECODE[VAEDecodeTiled<br/>refined frames]
+        DECODE --> V2V_OUT[Refined MP4<br/>544x704 @ 30fps]
+    end
+
+    subgraph "Post-Processing (video_postprocess.py)"
+        V2V_OUT --> RIFE[RIFE 4.7<br/>frame interpolation<br/>30fps → 32fps]
+        RIFE --> ESRGAN[RealESRGAN x4 anime<br/>upscale → downscale to 2x]
+        ESRGAN --> COLOR[Color Grade<br/>contrast + saturation 1.15]
+        COLOR --> FINAL[Final MP4<br/>960x1440 @ 32fps]
+    end
+
+    subgraph "Fallback"
+        WAN_OUT -->|V2V fails or OOMs| RIFE_RAW[Post-process raw Wan<br/>480→960 upscale]
+        RIFE_RAW --> FINAL_RAW[Final MP4<br/>960x1440 @ 32fps<br/>lower detail]
+    end
+
+    style WAN_GEN fill:#f96,stroke:#c60
+    style SAMPLER fill:#69f,stroke:#36c
+    style FINAL fill:#6c6,stroke:#393
+    style FINAL_RAW fill:#cc6,stroke:#993
+```
+
+### LoRA Naming Convention
+
+Character HunyuanVideo LoRAs in `/opt/ComfyUI/models/loras/`:
+- Primary: `{slug}_framepack_lora.safetensors`
+- Fallback: `{slug}_framepack.safetensors`
+
+Auto-detected by `builder.py` during V2V refinement. Training via musubi-tuner at `/opt/musubi-tuner/`.
+
+### Timing Impact
+
+| Step | Without V2V | With V2V |
+|------|-------------|----------|
+| Wan generation | ~4.5 min | ~4.5 min |
+| FramePack V2V | — | ~10-13 min |
+| Post-processing | ~2 min | ~2 min |
+| **Total per Wan shot** | **~6.5 min** | **~19 min** |
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `packages/scene_generation/framepack_refine.py` | V2V workflow builder + async orchestrator |
+| `packages/scene_generation/builder.py` | Inserts V2V step after Wan completion, before post-processing |
+| `packages/scene_generation/engine_selector.py` | Unchanged — Wan still handles multi-char; V2V is a post-generation step |
+| `packages/scene_generation/framepack.py` | Original FramePack I2V (solo shots from source images) |
+
 ## Key Design Decisions
 
 - **Modular packages**: 7 domain packages under `packages/` (+ core), each with own router. Entry point `src/app.py` mounts all routers.
@@ -764,7 +850,8 @@ graph LR
 - **Character cache**: `_get_char_project_map()` cached 60 seconds to reduce DB queries
 - **Ollama KEEP_ALIVE=5m**: Models auto-unload after 5 minutes to free GPU memory for ComfyUI generation
 - **FramePack memory**: `gpu_memory_preservation=6.0` required for RTX 3060 (3.5 causes OOM)
-- **FramePack + LoRA incompatibility**: FramePack uses HunyuanVideo architecture, NOT Stable Diffusion — SD-based character LoRAs cannot be injected into video generation
+- **FramePack + SD LoRA incompatibility**: FramePack uses HunyuanVideo architecture, NOT Stable Diffusion — SD-based character LoRAs cannot be injected into video generation
+- **Wan → FramePack V2V refinement**: Multi-character Wan T2V output (480x720) is refined through FramePack vid2vid (544x704) at denoise_strength=0.4, preserving 60% of Wan's composition/motion while sharpening anatomy/detail. Character HunyuanVideo LoRAs (trained via musubi-tuner) optionally injected during refinement via `FramePackLoraSelect`. Graceful fallback: if V2V fails or OOMs, raw Wan output proceeds to post-processing. Adds ~13 min per Wan shot
 - **Progressive quality gates**: Shot generation retries up to 3x with loosening thresholds (0.6→0.45→0.3), +5 steps per retry, new seed each attempt, keeps best result
 - **Crossfade transitions**: Shots joined via ffmpeg `xfade` filter (dissolve/fade/fadeblack/wipeleft, 0.3s default overlap) — requires re-encoding but produces seamless results. Falls back to hard-cut if xfade fails
 - **Audio ducking**: ffmpeg sidechaincompress replaces flat amix — music volume (30%) automatically dips to ~5% when dialogue present, threshold=0.02, ratio=6:1, attack=200ms, release=1000ms

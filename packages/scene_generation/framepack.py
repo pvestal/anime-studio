@@ -94,6 +94,7 @@ def build_framepack_workflow(
     negative_text: str = "low quality, blurry, distorted, watermark",
     gpu_memory_preservation: float = 6.0,
     guidance_scale: float = 6.0,
+    output_prefix: str | None = None,
 ) -> tuple[dict, str, str]:
     """Build FramePack I2V ComfyUI workflow.
 
@@ -269,7 +270,7 @@ def build_framepack_workflow(
 
     # Node 12: VHS_VideoCombine
     ts = int(_time.time())
-    prefix = f"framepack_{ts}"
+    prefix = output_prefix or f"framepack_{ts}"
     output_node = str(nid)
     workflow[output_node] = {
         "class_type": "VHS_VideoCombine",

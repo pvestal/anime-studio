@@ -142,6 +142,8 @@ def _clean_llm_response(text: str, context_type: str) -> str:
                 'the generated', 'this includes', 'prompt text:',
                 'the prompt', 'i suggest', 'i recommend',
                 'sure,', 'certainly,', 'of course,',
+                'to improve', 'to create', 'let me', 'i\'ll',
+                'we can', 'below is', 'the following',
             ]):
                 continue
             skip_preamble = False
@@ -164,6 +166,36 @@ def _clean_llm_response(text: str, context_type: str) -> str:
             else:
                 break
         text = '\n'.join(result_lines).strip()
+
+    # For design_prompt: aggressive cleanup — strip markdown headers, multi-paragraph essays,
+    # and reduce to a single line of comma-separated tags
+    if context_type == 'design_prompt':
+        # Remove markdown headers (### ..., ** ... **)
+        text = re.sub(r'^#{1,4}\s+.*$', '', text, flags=re.MULTILINE)
+        text = re.sub(r'\*\*[^*]+\*\*', '', text)
+        text = re.sub(r'---+', '', text)
+        # Remove lines that are clearly not SD tags (sentences with periods, narrative text)
+        tag_lines = []
+        for line in text.split('\n'):
+            line = line.strip().rstrip('.')
+            if not line:
+                continue
+            # Skip lines that look like prose sentences (long, with multiple periods or starting with articles)
+            lower = line.lower()
+            if any(lower.startswith(p) for p in [
+                'to improve', 'to create', 'the world', 'the series',
+                'roxy is', 'she is', 'he is', 'they are', 'this character',
+                'this prompt', 'this design', 'by incorporating',
+                'her past', 'his past', 'despite',
+            ]):
+                continue
+            # Keep lines that look like comma-separated tags
+            tag_lines.append(line)
+        if tag_lines:
+            # Join all remaining content into one line, collapse whitespace
+            text = ', '.join(t.strip().rstrip(',') for t in tag_lines if t.strip())
+            text = re.sub(r',\s*,', ',', text)  # remove empty commas
+            text = re.sub(r'\s+', ' ', text).strip()
 
     # Strip surrounding quotes if the entire text is quoted
     if len(text) > 2 and text[0] == '"' and text[-1] == '"':
@@ -235,16 +267,23 @@ def _build_narrate_prompt(body: NarrateRequest) -> str:
         )
     elif ct == "design_prompt":
         parts = [
-            f"Improve the character design prompt for '{body.character_name or 'unnamed'}'",
-            f"from '{body.project_name or 'unnamed'}' ({body.project_genre or 'unspecified genre'})",
-            f"Checkpoint: {body.checkpoint_model or 'unknown'}",
+            f"Write a Stable Diffusion prompt for the character '{body.character_name or 'unnamed'}'",
+            f"from the anime project '{body.project_name or 'unnamed'}' ({body.project_genre or 'unspecified genre'})",
         ]
+        if body.checkpoint_model:
+            parts.append(f"Model: {body.checkpoint_model}")
         if body.project_premise:
             parts.append(f"Project premise: {body.project_premise}")
         prompt = ". ".join(parts) + "."
         if cv:
-            prompt += f" Current: '{cv}'."
-        prompt += " Return a detailed character description for image generation."
+            prompt += f" Current prompt: '{cv}'."
+        prompt += (
+            "\n\nRETURN ONLY a single line of comma-separated visual tags suitable for Stable Diffusion. "
+            "Include: gender, hair color/style, eye color, body type, clothing, accessories, pose, expression. "
+            "Do NOT include markdown, headers, explanations, personality, world-building, or backstory. "
+            "Example format: 1girl, short pink hair, green eyes, black leather jacket, white crop top, "
+            "black pants, knee-high boots, fierce expression, full body"
+        )
         return prompt
     elif ct == "prompt_override":
         return (

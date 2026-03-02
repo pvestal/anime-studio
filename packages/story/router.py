@@ -90,6 +90,8 @@ async def get_checkpoints():
             "default_cfg": profile.get("default_cfg"),
             "default_steps": profile.get("default_steps"),
             "default_sampler": profile.get("default_sampler", ""),
+            "quality_prefix": profile.get("quality_prefix", ""),
+            "quality_negative": profile.get("quality_negative", ""),
         })
     return {"checkpoints": results}
 

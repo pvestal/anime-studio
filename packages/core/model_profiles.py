@@ -155,6 +155,50 @@ MODEL_PROFILES: dict[str, dict] = {
         "default_cfg": 7.0,
         "default_steps": 28,
     },
+    "nova_animal": {
+        "architecture": "sdxl",
+        "prompt_format": "booru_tags",
+        "quality_prefix": "masterpiece, best quality, furry, anthro, detailed fur",
+        "quality_negative": (
+            "smooth skin, human, 2d, cartoon, low quality, worst quality, "
+            "blurry, deformed, extra limbs, bad anatomy, bad hands, "
+            "watermark, text, signature"
+        ),
+        "strip_style_tags": [],
+        "solo_suffix": "solo",
+        "background_suffix": "simple background",
+        "ip_adapter_model": None,
+        "vision_style_hint": "detailed furry/anthro illustration with realistic fur textures",
+        "style_label": "furry/anthro (Nova Animal XL)",
+        "default_cfg": 5.0,
+        "default_steps": 30,
+        "default_sampler": "euler_ancestral",
+        "default_scheduler": "normal",
+    },
+    # NOTE: cyberrealisticXL MUST come before cyberrealistic — first substring match wins
+    "cyberrealisticXL": {
+        "architecture": "sdxl",
+        "prompt_format": "prose",
+        "quality_prefix": (
+            "masterpiece, best quality, photorealistic, detailed skin, "
+            "detailed face, nsfw, explicit, uncensored"
+        ),
+        "quality_negative": (
+            "worst quality, low quality, blurry, bad anatomy, watermark, "
+            "censored, mosaic, bar censor, anime, cartoon, deformed genitalia, "
+            "extra limbs, text, signature"
+        ),
+        "strip_style_tags": [],
+        "solo_suffix": "solo, 1person",
+        "background_suffix": "simple background",
+        "ip_adapter_model": None,  # No SDXL IP-Adapter installed yet
+        "vision_style_hint": "photorealistic portrait with natural lighting",
+        "style_label": "photorealistic NSFW (CyberRealistic XL)",
+        "default_cfg": 6.0,
+        "default_steps": 25,
+        "default_sampler": "dpmpp_2m",
+        "default_scheduler": "karras",
+    },
     "cyberrealistic": {
         "architecture": "sd15",
         "prompt_format": "prose",
@@ -171,6 +215,52 @@ MODEL_PROFILES: dict[str, dict] = {
         "style_label": "photorealistic (Cyberrealistic)",
         "default_cfg": 7.0,
         "default_steps": 25,
+    },
+    "basil_mix": {
+        "architecture": "sd15",
+        "prompt_format": "prose",
+        "quality_prefix": (
+            "masterpiece, best quality, photorealistic, detailed skin, "
+            "nsfw, explicit, uncensored"
+        ),
+        "quality_negative": (
+            "worst quality, low quality, blurry, bad anatomy, watermark, "
+            "censored, mosaic, bar censor, anime, cartoon, deformed, "
+            "extra limbs"
+        ),
+        "strip_style_tags": [],
+        "solo_suffix": "solo, 1person, single character",
+        "background_suffix": "simple background",
+        "ip_adapter_model": "ip-adapter-plus_sd15.safetensors",
+        "vision_style_hint": "photorealistic explicit portrait",
+        "style_label": "photorealistic NSFW (Basil Mix)",
+        "default_cfg": 7.0,
+        "default_steps": 30,
+        "default_sampler": "euler_ancestral",
+        "default_scheduler": "normal",
+    },
+    "lazymixRealAmateur": {
+        "architecture": "sd15",
+        "prompt_format": "prose",
+        "quality_prefix": (
+            "masterpiece, best quality, photorealistic, detailed skin, "
+            "nsfw, explicit, uncensored"
+        ),
+        "quality_negative": (
+            "worst quality, low quality, blurry, bad anatomy, watermark, "
+            "censored, mosaic, bar censor, anime, cartoon, deformed, "
+            "extra limbs"
+        ),
+        "strip_style_tags": [],
+        "solo_suffix": "solo, 1person, single character",
+        "background_suffix": "simple background",
+        "ip_adapter_model": "ip-adapter-plus_sd15.safetensors",
+        "vision_style_hint": "photorealistic explicit portrait",
+        "style_label": "photorealistic NSFW (LazyMix Real Amateur)",
+        "default_cfg": 7.0,
+        "default_steps": 30,
+        "default_sampler": "euler_ancestral",
+        "default_scheduler": "normal",
     },
     "realcartoonPixar": {
         "architecture": "sd15",
@@ -306,7 +396,7 @@ def _strip_style_tags(text: str, tags_to_strip: list[str]) -> str:
 
 
 def _appearance_to_tags(appearance_data: dict) -> str:
-    """Convert appearance_data key_colors and key_features to tag format.
+    """Convert appearance_data key_colors, key_features, body, and intimate to tag format.
 
     E.g., {"hair": "silver"} -> "silver_hair"
           ["pointed ears", "scar on forehead"] -> "pointed_ears, scar_on_forehead"
@@ -330,7 +420,11 @@ def _appearance_to_tags(appearance_data: dict) -> str:
 
 
 def _appearance_to_prose(appearance_data: dict) -> str:
-    """Convert appearance_data key_colors and key_features to natural language."""
+    """Convert appearance_data key_colors and key_features to natural language.
+
+    Body and intimate details belong in design_prompt directly (within CLIP's
+    77-token window) rather than appended here where they get ignored.
+    """
     parts = []
 
     key_colors = appearance_data.get("key_colors", {})

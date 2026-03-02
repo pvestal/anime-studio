@@ -41,8 +41,15 @@ def build_comfyui_workflow(
     character_slug: str = "output",
     project_name: str | None = None,
     pose: str | None = None,
+    multi_character: bool = False,
 ) -> dict:
-    """Build a ComfyUI workflow dict for image or video generation."""
+    """Build a ComfyUI workflow dict for image or video generation.
+
+    Args:
+        multi_character: If True, skips IP-Adapter injection. IP-Adapter anchors
+            to a single character's reference and actively kills the second person
+            in multi-character scenes (tested 2026-02-28 across weights 0.2-0.7).
+    """
     import random as _random
     if seed is None:
         seed = _random.randint(1, 2**31)
@@ -120,13 +127,17 @@ def build_comfyui_workflow(
         workflow["7"]["inputs"]["clip"] = ["10", 1]
         logger.info(f"LoRA injected: {lora_path.name} for {character_slug}")
 
-    # Inject IP-Adapter if reference images exist and the model profile has an adapter
+    # Inject IP-Adapter if reference images exist and the model profile has an adapter.
+    # SKIP for multi-character shots — IPA anchors to one character and kills the second
+    # person entirely (tested 2026-02-28: even weight 0.2 produces solo output).
     profile = get_model_profile(checkpoint_model)
     ref_dir = BASE_PATH / character_slug / "reference_images"
     ip_adapter_name = profile.get("ip_adapter_model")
     ipadapter_model = Path(f"/opt/ComfyUI/models/ipadapter/{ip_adapter_name}") if ip_adapter_name else None
     clip_vision_model = Path("/opt/ComfyUI/models/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors")
-    if ipadapter_model and ipadapter_model.exists() and ref_dir.exists() and clip_vision_model.exists():
+    if multi_character:
+        logger.info(f"Multi-character shot: skipping IP-Adapter (would kill second character)")
+    elif ipadapter_model and ipadapter_model.exists() and ref_dir.exists() and clip_vision_model.exists():
         ref_images = sorted(ref_dir.glob("*.png")) + sorted(ref_dir.glob("*.jpg"))
         if ref_images:
             import random as _rand

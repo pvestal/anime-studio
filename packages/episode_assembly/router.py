@@ -15,10 +15,102 @@ from packages.core.models import (
 )
 from .builder import assemble_episode, get_video_duration, extract_thumbnail, EPISODE_OUTPUT_DIR
 from .publish import publish_episode
+from packages.scene_generation.scene_audio import _auto_generate_scene_music, overlay_audio
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Mood keywords for deriving episode mood from story_arc text
+_MOOD_KEYWORDS = {
+    "action": ["fight", "battle", "chase", "attack", "war", "combat", "escape"],
+    "tense": ["danger", "threat", "suspense", "dark", "trapped", "risk", "betrayal"],
+    "romantic": ["love", "romance", "kiss", "heart", "together", "embrace"],
+    "melancholy": ["sad", "loss", "grief", "death", "farewell", "alone", "tears"],
+    "comedic": ["funny", "comedy", "joke", "prank", "silly", "laugh", "humor"],
+    "powerful": ["power", "epic", "hero", "triumph", "victory", "glory"],
+    "peaceful": ["calm", "peace", "rest", "quiet", "morning", "nature"],
+}
+
+
+def _derive_mood(story_arc: str | None) -> str:
+    """Derive a mood keyword from episode story_arc text for music generation."""
+    if not story_arc:
+        return "ambient"
+    text_lower = story_arc.lower()
+    scores = {}
+    for mood, keywords in _MOOD_KEYWORDS.items():
+        scores[mood] = sum(1 for kw in keywords if kw in text_lower)
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 0 else "ambient"
+
+
+async def _apply_episode_music(
+    conn, episode_id: uuid.UUID, episode_path: str, story_arc: str | None,
+) -> str:
+    """Optionally generate and overlay background music on an assembled episode.
+
+    Only applied when zero scenes in the episode have their own music (avoids double-layering).
+    Returns the (possibly updated) episode video path.
+    """
+    # Check if any scene already has music
+    has_scene_music = await conn.fetchval("""
+        SELECT COUNT(*) FROM episode_scenes es
+        JOIN scenes s ON es.scene_id = s.id
+        WHERE es.episode_id = $1
+          AND (s.generated_music_path IS NOT NULL
+               OR s.audio_preview_path IS NOT NULL
+               OR s.audio_preview_url IS NOT NULL)
+    """, episode_id)
+
+    if has_scene_music and has_scene_music > 0:
+        logger.info(f"Episode {episode_id}: {has_scene_music} scenes have music, skipping episode-level music")
+        return episode_path
+
+    mood = _derive_mood(story_arc)
+    logger.info(f"Episode {episode_id}: generating background music (mood={mood})")
+
+    # Get episode duration for music length
+    from .builder import get_video_duration as _get_dur
+    duration = await _get_dur(episode_path) or 60.0
+
+    try:
+        music_path = await _auto_generate_scene_music(
+            scene_id=str(episode_id),  # reuses scene music gen with episode UUID
+            mood=mood,
+            duration=min(duration, 180.0),  # cap at 3 minutes
+        )
+    except Exception as e:
+        logger.warning(f"Episode music generation failed (non-fatal): {e}")
+        music_path = None
+
+    if not music_path:
+        return episode_path
+
+    # Overlay with fade-in/out
+    output = episode_path.rsplit(".", 1)[0] + "_music.mp4"
+    try:
+        await overlay_audio(
+            video_path=episode_path,
+            audio_path=music_path,
+            output_path=output,
+            fade_in=2.0,
+            fade_out=3.0,
+            start_offset=0,
+        )
+        import os
+        os.replace(output, episode_path)
+    except Exception as e:
+        logger.warning(f"Episode music overlay failed (non-fatal): {e}")
+        return episode_path
+
+    # Persist to DB
+    await conn.execute(
+        "UPDATE episodes SET episode_music_path = $2, episode_mood = $3 WHERE id = $1",
+        episode_id, music_path, mood,
+    )
+    logger.info(f"Episode {episode_id}: background music applied (mood={mood})")
+    return episode_path
 
 
 @router.get("/episodes")
@@ -290,6 +382,13 @@ async def assemble_episode_endpoint(episode_id: str):
 
         # Assemble
         episode_path = await assemble_episode(episode_id, video_paths, transitions)
+
+        # Optionally add episode-level background music
+        ep_row = await conn.fetchrow("SELECT story_arc FROM episodes WHERE id = $1", eid)
+        episode_path = await _apply_episode_music(
+            conn, eid, episode_path, ep_row["story_arc"] if ep_row else None,
+        )
+
         duration = await get_video_duration(episode_path)
 
         # Generate thumbnail

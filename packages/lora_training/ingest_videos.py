@@ -268,7 +268,8 @@ async def ingest_youtube_project(req: YouTubeProjectIngestRequest):
                 "matched_so_far": dict(per_char),
             }
             matched, description = await _classify_image(
-                frame, allowed_slugs=project_slugs
+                frame, allowed_slugs=project_slugs,
+                project_name=req.project_name,
             )
             if not matched:
                 saved = await asyncio.to_thread(
@@ -354,7 +355,8 @@ async def ingest_local_video(req: LocalVideoIngestRequest):
                 "matched_so_far": dict(per_char),
             }
             matched, description = await _classify_image(
-                frame, allowed_slugs=project_slugs
+                frame, allowed_slugs=project_slugs,
+                project_name=req.project_name,
             )
             if not matched:
                 saved = await asyncio.to_thread(
@@ -533,7 +535,8 @@ async def _extract_movie_task(
             }
 
             matched, description = await _classify_image(
-                frame, allowed_slugs=project_slugs
+                frame, allowed_slugs=project_slugs,
+                project_name=req.project_name,
             )
             if not matched:
                 saved = await asyncio.to_thread(

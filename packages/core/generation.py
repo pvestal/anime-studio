@@ -69,22 +69,37 @@ POSE_VARIATIONS = [
 ]
 
 
-def build_character_negatives(appearance_data) -> str:
+def build_character_negatives(appearance_data, design_prompt: str = "") -> str:
     """Build per-character negative prompt terms from appearance_data.
 
     For non-human characters, adds species-correcting negatives.
+    For male characters, adds female anatomy negatives (and vice versa).
     For all characters, converts common_errors into negative terms.
     """
-    if not appearance_data:
+    if not appearance_data and not design_prompt:
         return ""
 
     if isinstance(appearance_data, str):
         try:
             appearance_data = json.loads(appearance_data)
         except (json.JSONDecodeError, TypeError):
-            return ""
+            appearance_data = {}
+
+    appearance_data = appearance_data or {}
 
     negatives = []
+
+    # Gender-aware anatomy negatives based on design_prompt
+    prompt_lower = (design_prompt or "").lower()
+    is_male = any(t in prompt_lower for t in ("1boy", " man,", " man ", "male", " boy,", " boy "))
+    is_female = any(t in prompt_lower for t in ("1girl", " woman,", " woman ", "female", " girl,", " girl "))
+    if is_male and not is_female:
+        negatives.extend(["breasts", "vagina", "female body", "feminine",
+                          "wide hips", "narrow waist", "long hair", "girl"])
+    elif is_female and not is_male:
+        negatives.extend(["penis", "testicles", "male body", "masculine",
+                          "flat chest", "boy"])
+
     species = appearance_data.get("species", "")
 
     if "NOT human" in species:
@@ -255,7 +270,7 @@ async def generate_batch(
             base_negative = f"{base_negative}, {feedback_neg}"
             logger.info(f"generate_batch: added feedback negatives for {character_slug}")
 
-    char_neg = build_character_negatives(db_info.get("appearance_data"))
+    char_neg = build_character_negatives(db_info.get("appearance_data"), design_prompt)
     if char_neg:
         base_negative = f"{base_negative}, {char_neg}"
 
@@ -410,6 +425,128 @@ async def generate_batch(
         )
 
     return results
+
+
+# --- Scene Shot Image Generation ---
+# Encodes findings from TDD explicit scene testing (2026-02-28):
+# - Multi-character: txt2img ONLY, no IP-Adapter (kills second character at any weight)
+# - Solo: txt2img + IP-Adapter (face-crop reference, 0.5-0.7 weight)
+# - Action-first prompt ordering (SD1.5 77-token CLIP limit)
+# - CyberXL needs explicit gender terms ("heterosexual couple", "visible male genitalia")
+
+MULTI_CHAR_NEGATIVE_SD15 = (
+    "solo, alone, only one person, "
+    "censorship, mosaic, blurry genitals, clothes, underwear, "
+    "ugly, deformed, extra limbs, worst quality, low quality, blurry, "
+    "watermark, text, anime, cartoon"
+)
+
+MULTI_CHAR_NEGATIVE_SDXL = (
+    "three people, threesome, group, crowd, "
+    "solo, alone, lesbian, yuri, 2girls, "
+    "censored, mosaic, clothes, worst quality, low quality, deformed"
+)
+
+
+async def generate_scene_shot_image(
+    shot_prompt: str,
+    characters_present: list[str],
+    checkpoint_model: str,
+    seed: int | None = None,
+    filename_prefix: str = "scene_shot",
+    negative_override: str | None = None,
+) -> dict:
+    """Generate a still image for a scene shot using the correct workflow.
+
+    Automatically selects between txt2img (multi-character) and txt2img+IPA
+    (solo character) based on characters_present count.
+
+    Args:
+        shot_prompt: The generation prompt for this shot.
+        characters_present: List of character slugs in the shot.
+        checkpoint_model: Checkpoint filename to use.
+        seed: Optional seed. Random if None.
+        filename_prefix: ComfyUI output filename prefix.
+        negative_override: Optional negative prompt override.
+
+    Returns:
+        Dict with prompt_id, seed, status, and images list.
+    """
+    import random as _rng
+
+    if seed is None:
+        seed = _rng.randint(1, 2**31)
+
+    profile = get_model_profile(checkpoint_model)
+    is_multi = len(characters_present) > 1
+    is_sdxl = profile["architecture"] == "sdxl"
+
+    # Resolution from profile
+    if is_sdxl:
+        width, height = 832, 1216
+    else:
+        width, height = 512, 768
+
+    # Select negative prompt
+    if negative_override:
+        negative = negative_override
+    elif is_multi and is_sdxl:
+        negative = MULTI_CHAR_NEGATIVE_SDXL
+    elif is_multi:
+        negative = MULTI_CHAR_NEGATIVE_SD15
+    else:
+        negative = profile.get("quality_negative", "worst quality, low quality")
+
+    # Build prompt with quality prefix
+    quality_prefix = profile.get("quality_prefix", "masterpiece, best quality")
+    full_prompt = f"{quality_prefix}, {shot_prompt}"
+
+    # Build workflow — multi_character flag skips IP-Adapter
+    workflow = build_comfyui_workflow(
+        design_prompt=full_prompt,
+        checkpoint_model=checkpoint_model,
+        cfg_scale=profile.get("default_cfg", 7.0),
+        steps=profile.get("default_steps", 30),
+        sampler=profile.get("default_sampler", "euler_ancestral"),
+        scheduler=profile.get("default_scheduler", "normal"),
+        width=width,
+        height=height,
+        negative_prompt=negative,
+        generation_type="image",
+        seed=seed,
+        character_slug=characters_present[0] if characters_present else "scene",
+        pose=None,
+        multi_character=is_multi,
+    )
+
+    # Override filename prefix
+    for node in workflow.values():
+        if node.get("class_type") == "SaveImage":
+            node["inputs"]["filename_prefix"] = filename_prefix
+
+    async with _comfyui_slot:
+        try:
+            prompt_id = submit_comfyui_workflow(workflow)
+        except Exception as e:
+            logger.error(f"Scene shot submission failed: {e}")
+            return {"status": "error", "error": str(e)}
+
+    # Poll for completion
+    for _ in range(120):  # 2 min timeout
+        await asyncio.sleep(1)
+        progress = get_comfyui_progress(prompt_id)
+        if progress["status"] == "completed":
+            return {
+                "prompt_id": prompt_id,
+                "seed": seed,
+                "status": "completed",
+                "images": progress.get("images", []),
+                "multi_character": is_multi,
+            }
+        if progress["status"] == "error":
+            return {"status": "error", "error": progress.get("error", "unknown")}
+
+    return {"status": "timeout", "prompt_id": prompt_id}
 
 
 async def _poll_until_complete(

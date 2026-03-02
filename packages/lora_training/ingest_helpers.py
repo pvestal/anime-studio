@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import re
 import shutil
 from datetime import datetime
@@ -128,7 +129,34 @@ def _save_unclassified_frame(
 
 
 def _classify_image_sync(image_path: Path, **kwargs) -> tuple[list[str], str]:
-    """Classify an image (blocking). Called via asyncio.to_thread()."""
+    """Classify an image (blocking). Called via asyncio.to_thread().
+
+    Tries CLIP-based classification first (fast, content-agnostic, works with NSFW).
+    Falls back to vision model if CLIP has no reference embeddings for the project.
+    """
+    use_clip = kwargs.pop("use_clip", True)
+    project_name = kwargs.get("project_name")
+    allowed_slugs = kwargs.get("allowed_slugs")
+
+    if use_clip and project_name:
+        try:
+            from packages.visual_pipeline.clip_classifier import (
+                build_reference_embeddings, _embed_image, classify_frame_clip,
+            )
+            refs = build_reference_embeddings(project_name, allowed_slugs)
+            if refs:
+                embedding = _embed_image(image_path)
+                result = classify_frame_clip(embedding, refs)
+                matched_slugs = result.get("matched_slugs", [])
+                if not matched_slugs and result.get("matched_slug"):
+                    matched_slugs = [result["matched_slug"]]
+                desc = f"CLIP match (score={result['similarity']:.3f})"
+                if matched_slugs:
+                    return matched_slugs, desc
+                # CLIP found nothing — fall through to vision model
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"CLIP classification failed for {image_path.name}: {e}")
+
     from packages.visual_pipeline.classification import classify_image
     return classify_image(image_path, **kwargs)
 

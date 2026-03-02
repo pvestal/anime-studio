@@ -93,14 +93,43 @@ PROJECT_PHASES = [
 
 # ── Enable / Disable ───────────────────────────────────────────────────
 
-def enable(on: bool = True):
+async def enable(on: bool = True):
     global _enabled
     _enabled = on
     logger.info(f"Orchestrator {'enabled' if on else 'disabled'}")
+    # Persist to DB so state survives restarts
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO system_config (key, value, description, category, updated_at)
+                VALUES ('orchestrator_enabled', $1, 'Orchestrator on/off state (persisted)', 'orchestrator', NOW())
+                ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()
+            """, str(on).lower())
+    except Exception as e:
+        logger.warning(f"Failed to persist orchestrator state: {e}")
 
 
 def is_enabled() -> bool:
     return _enabled
+
+
+async def _load_enabled_state():
+    """Load persisted orchestrator enabled state from DB on startup."""
+    global _enabled
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            val = await conn.fetchval(
+                "SELECT value FROM system_config WHERE key = 'orchestrator_enabled'"
+            )
+            if val is not None:
+                _enabled = val.lower() == 'true'
+                logger.info(f"Orchestrator state loaded from DB: enabled={_enabled}")
+            else:
+                logger.info("No persisted orchestrator state found, defaulting to disabled")
+    except Exception as e:
+        logger.warning(f"Failed to load orchestrator state from DB: {e}")
 
 
 def set_training_target(target: int):
@@ -317,6 +346,8 @@ async def start_tick_loop():
     global _tick_task, _graph_sync_task
     if _tick_task is not None and not _tick_task.done():
         return
+    # Load persisted enabled state before starting the loop
+    await _load_enabled_state()
     _tick_task = asyncio.create_task(_tick_loop())
     _graph_sync_task = asyncio.create_task(_graph_sync_loop())
     logger.info(

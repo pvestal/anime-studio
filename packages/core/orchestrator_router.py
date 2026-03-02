@@ -41,7 +41,7 @@ async def get_status():
 @router.post("/orchestrator/toggle")
 async def toggle(req: ToggleRequest):
     """Enable or disable the orchestrator."""
-    orchestrator.enable(req.enabled)
+    await orchestrator.enable(req.enabled)
     return {"enabled": orchestrator.is_enabled()}
 
 
